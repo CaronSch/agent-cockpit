@@ -5,10 +5,13 @@
  * Routes (all same-origin, authenticated by the `ac_token` cookie; see `guard.js`):
  *
  *   GET    /api/config                 → DaemonConfig
+ *   GET    /api/history?q=words        → { sessions: PastSession[] } (unordered; every word must match)
  *   GET    /api/sessions               → { sessions: SessionMeta[] }
  *   POST   /api/sessions               { cwd, resume? } → 201 { session: SessionMeta }
  *   DELETE /api/sessions/:id           → 204 (closes omp's stdin, kills it if it lingers)
- *   POST   /api/sessions/:id/rpc       omp command without `id` → the omp response frame
+ *   POST   /api/sessions/:id/rpc       omp command without `id` → the omp response frame, or
+ *                                      202 { pending: true, id } when omp has not answered within
+ *                                      the hold time; the response then arrives on the stream
  *   POST   /api/sessions/:id/ui        omp `extension_ui_response` → 204
  *   GET    /api/stream                 Server-Sent Events, one StreamEvent per message
  *
@@ -20,17 +23,36 @@
 /** @typedef {'starting' | 'ready' | 'exited' | 'failed'} SessionStatus */
 
 /**
- * One omp process the daemon launched.
+ * One omp process the daemon launched. `sessionFile` is the journal it writes, learned from
+ * omp's `get_state` answers (the resumed file until then); it changes on /new or /fork.
  * @typedef {{
  *   id: string,
  *   cwd: string,
  *   resume: string | null,
+ *   sessionFile: string | null,
  *   status: SessionStatus,
  *   pid: number | null,
  *   exitCode: number | null,
  *   error: string | null,
  *   startedAt: number,
  * }} SessionMeta
+ */
+
+/**
+ * A past omp conversation, summarised from its journal. `firstPrompt`/`lastPrompt` are
+ * one-line previews; times are epoch milliseconds.
+ * @typedef {{
+ *   file: string,
+ *   id: string,
+ *   title: string | null,
+ *   cwd: string | null,
+ *   createdAt: number | null,
+ *   modifiedAt: number,
+ *   size: number,
+ *   prompts: number,
+ *   firstPrompt: string | null,
+ *   lastPrompt: string | null,
+ * }} PastSession
  */
 
 /**

@@ -15,7 +15,11 @@ import { renderDialog } from '../omp/dialogs-view.js';
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { SlashCommand } from '../omp/transcript.js' */
 
-/** @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null }} OmpParams */
+/**
+ * `resume` is a journal to resume as soon as the window is placed (set by whoever created
+ * it, e.g. the Sessions window); it is cleared once the session is running.
+ * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, resume: string | null }} OmpParams
+ */
 /** @typedef {{ label: string, detail?: string, current?: boolean, pick: () => void }} MenuEntry */
 
 const MAX_SUGGESTIONS = 8;
@@ -45,7 +49,12 @@ function createPane(body, ctx, daemon) {
   body.append(root);
 
   /** @returns {OmpParams} */
-  const params = () => ({ session: str(ctx.params.session), cwd: str(ctx.params.cwd), sessionFile: str(ctx.params.sessionFile) });
+  const params = () => ({
+    session: str(ctx.params.session),
+    cwd: str(ctx.params.cwd),
+    sessionFile: str(ctx.params.sessionFile),
+    resume: str(ctx.params.resume),
+  });
 
   /** @type {string | null} */
   let mode = null;
@@ -97,7 +106,7 @@ function createPane(body, ctx, daemon) {
       mode = null; // the status text changes with the status: always redraw it
       return show('status', () => statusScreen(status));
     }
-    if (!p.session) return show('setup', setupScreen);
+    if (!p.session) return p.resume ? show(`resuming:${p.resume}`, resumingScreen) : show('setup', setupScreen);
     if (!view) {
       if (!daemon.meta(p.session)) return show('ended', endedScreen);
       mode = null;
@@ -183,6 +192,46 @@ function createPane(body, ctx, daemon) {
     const box = el('div', 'omp-center');
     box.append(el('p', '', 'This session ended when the daemon stopped.'));
     box.append(sessionActions(null, (text) => box.append(el('p', 'omp-error', text))));
+    return [box];
+  }
+
+  /** Resumes `params.resume` right away; on failure offers to retry or start fresh. */
+  function resumingScreen() {
+    const { resume: file, cwd } = params();
+    const box = el('div', 'omp-center');
+    const status = el('p', 'omp-muted', 'Resuming session…');
+    box.append(status);
+    if (!file) return [box];
+    const actions = el('div', 'omp-row');
+    actions.hidden = true;
+    const attempt = () => {
+      status.className = 'omp-muted';
+      status.textContent = 'Resuming session…';
+      actions.hidden = true;
+      daemon
+        .createSession({ cwd: cwd ?? '~', resume: file })
+        .then((meta) => {
+          ctx.setParams({ session: meta.id, cwd: meta.cwd, sessionFile: file, resume: null });
+          schedule();
+        })
+        .catch((err) => {
+          status.className = 'omp-error';
+          status.textContent = `Could not resume: ${message(err)}`;
+          actions.hidden = false;
+        });
+    };
+    const retry = el('button', 'btn btn-accent', 'Try again');
+    retry.type = 'button';
+    retry.addEventListener('click', attempt);
+    const fresh = el('button', 'btn', 'New session');
+    fresh.type = 'button';
+    fresh.addEventListener('click', () => {
+      ctx.setParams({ resume: null });
+      schedule();
+    });
+    actions.append(retry, fresh);
+    box.append(actions);
+    attempt();
     return [box];
   }
 

@@ -6,7 +6,7 @@
  * all along. When the daemon restarts, its sessions are gone: buffers are cleared and
  * `onReset` listeners fire before any event from the new daemon is delivered.
  */
-/** @import { DaemonConfig, HelloEvent, RpcResponse, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
+/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
 
 /** @typedef {'connecting' | 'open' | 'down' | 'unauthorized'} ConnectionStatus */
 
@@ -27,6 +27,9 @@ export class DaemonError extends Error {
  *   onReset(fn: () => void): () => void,
  *   subscribe(session: string, fn: (event: SessionEvent) => void): () => void,
  *   meta(session: string): SessionMeta | null,
+ *   sessions(): SessionMeta[],
+ *   onSessions(fn: () => void): () => void,
+ *   history(query?: string): Promise<PastSession[]>,
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string }): Promise<SessionMeta>,
  *   closeSession(session: string): Promise<void>,
@@ -63,6 +66,11 @@ export function createDaemonClient(env = {}) {
   const statusListeners = new Set();
   /** @type {Set<() => void>} */
   const resetListeners = new Set();
+  /** @type {Set<() => void>} */
+  const sessionListeners = new Set();
+  const sessionsChanged = () => {
+    for (const fn of sessionListeners) fn();
+  };
 
   /** @param {ConnectionStatus} next */
   function setStatus(next) {
@@ -81,12 +89,16 @@ export function createDaemonClient(env = {}) {
     bootId = hello.bootId;
     for (const meta of hello.sessions) metas.set(meta.id, meta);
     setStatus('open');
+    sessionsChanged();
   }
 
   /** @param {StreamEvent} event */
   function onEvent(event) {
     if (event.kind === 'hello') return onHello(event);
-    if (event.kind === 'session') metas.set(event.session, event.meta);
+    if (event.kind === 'session') {
+      metas.set(event.session, event.meta);
+      sessionsChanged();
+    }
     let buffer = buffers.get(event.session);
     if (!buffer) buffers.set(event.session, (buffer = []));
     buffer.push(event);
@@ -183,6 +195,15 @@ export function createDaemonClient(env = {}) {
     },
     subscribe,
     meta: (session) => metas.get(session) ?? null,
+    sessions: () => [...metas.values()],
+    onSessions(fn) {
+      sessionListeners.add(fn);
+      return () => sessionListeners.delete(fn);
+    },
+    async history(query = '') {
+      const body = await request(`/api/history${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+      return body.sessions;
+    },
     config: () => request('/api/config'),
     async createSession({ cwd, resume }) {
       const body = await request('/api/sessions', { method: 'POST', body: JSON.stringify({ cwd, resume }) });

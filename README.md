@@ -6,7 +6,8 @@ modular window you drag, drop, split and resize in a VS Code-style grid with
 magnetic snapping.
 
 Status: early. A local daemon runs [omp](https://github.com/can1357/oh-my-pi)
-sessions and the **omp** pane chats with them; other windows are still to come.
+sessions; the **omp** pane chats with them and the **Sessions** window lists past
+ones to resume. Other windows are still to come.
 Direction and invariants live in [`CLAUDE.md`](CLAUDE.md); deferred risks in
 [`RISKS.md`](RISKS.md).
 
@@ -27,7 +28,10 @@ npm run test:coverage
 The URL `npm start` prints carries an access token. Open it once; the browser
 keeps it as a cookie. The daemon listens on loopback only and refuses requests
 from other sites. Pick **＋ Widget → omp**, choose a directory, and start
-chatting.
+chatting. To continue an earlier conversation, add **＋ Widget → Sessions**,
+search or sort, and drag a session onto the grid (or press **Resume**). The list
+comes from omp's session files (`~/.omp/agent/sessions`, or
+`$AGENT_COCKPIT_OMP_SESSIONS`).
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push to `main`
 and every pull request.
@@ -81,6 +85,7 @@ export default {
   glyph: '◆',
   description: 'Shown in the palette',
   // ctx.params: this window's saved settings; ctx.setParams(patch) persists changes.
+  // ctx.addWidget(type, params) / ctx.dragWidget(type, params, pointerdown) open another window.
   mount(body, ctx) {
     body.textContent = `hello ${ctx.params.name ?? 'world'}`;
     return { destroy() {} };
@@ -101,12 +106,13 @@ src/
 ├── state/         atom, persistence
 ├── daemon/        browser client for the daemon (one shared event stream)
 ├── omp/           omp pane internals: transcript reducer, markdown, views
-├── widgets/       registry, pane, omp
+├── sessions/      Sessions window ordering (pure)
+├── widgets/       registry, pane, omp, sessions
 ├── ui/            palette, dom helpers
 ├── app.js         wiring
 └── main.js        bootstrap
-daemon/            local daemon: HTTP server, loopback guard, omp processes, event log
-styles/            tokens.css, app.css, omp.css
+daemon/            local daemon: HTTP server, loopback guard, omp processes, event log, session history
+styles/            tokens.css, app.css, omp.css, sessions.css
 tests/             node:test suites; fixtures/fake-omp.js stands in for omp
 e2e/               Playwright suites against the real daemon
 ```

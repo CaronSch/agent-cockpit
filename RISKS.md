@@ -47,6 +47,21 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   the real omp, diff its frame and message types against the fake, update the
   fake and this version number.
 
+- **The Sessions window reads omp's private journal format.** `daemon/history.js`
+  parses `~/.omp/agent/sessions/<project>/*.jsonl` directly (the `title` and
+  `session` records, user messages and their `attribution`); omp has no rpc for
+  listing past sessions. A format change shows up as sessions with no title,
+  no directory, or missing from the list. *Response:* compare a fresh journal
+  with `tests/history.test.js`'s fixtures and update both.
+
+## When the session history reaches thousands of journals
+
+- **Listing past sessions gets slow.** The first listing after a daemon start
+  reads every journal in full (28 journals, 66 MB: about 160 ms); later ones
+  re-read only files whose size or mtime changed. *Threshold detail:* the first
+  Sessions listing takes over a second. *Response:* read only each file's head
+  and a bounded tail, or persist the summaries across restarts.
+
 ## When building the browser pane or chasing shortcut parity
 
 - **A browser tab cannot fully match cmux.** Most external sites refuse to be

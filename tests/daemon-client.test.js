@@ -25,7 +25,7 @@ class FakeSource {
 }
 
 /** @param {string} id @param {SessionMeta['status']} [status] @returns {SessionMeta} */
-const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, status, pid: 1, exitCode: null, error: null, startedAt: 0 });
+const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, sessionFile: null, status, pid: 1, exitCode: null, error: null, startedAt: 0 });
 
 /** @param {string} session @param {number} seq @returns {SessionEvent} */
 const frame = (session, seq) => ({ kind: 'frame', frame: { type: 'agent_start' }, seq, at: 0, session });

@@ -324,7 +324,7 @@ describe('bash and resume', () => {
   /** @param {string | null} resume @returns {SessionEvent} */
   const session = (resume) => ({
     kind: 'session',
-    meta: { id: 's1', cwd: '/w', resume, status: 'ready', pid: 1, exitCode: null, error: null, startedAt: 0 },
+    meta: { id: 's1', cwd: '/w', resume, sessionFile: resume, status: 'ready', pid: 1, exitCode: null, error: null, startedAt: 0 },
     seq: ++seq,
     at: 0,
     session: 's1',

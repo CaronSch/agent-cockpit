@@ -10,12 +10,14 @@ import { createFrameDecoder } from './frame-decoder.js';
 
 /**
  * Sent by the daemon before a session counts as ready, so every widget sees the same
- * protocol: lossless v2 framing, delta-only message updates, and `ask` dialogs enabled.
+ * protocol (lossless v2 framing, delta-only message updates, `ask` dialogs enabled) and the
+ * daemon knows which journal the session writes before anything else asks.
  */
 export const SETUP_COMMANDS = Object.freeze([
   { type: 'negotiate_protocol', protocolVersion: 2 },
   { type: 'set_event_filter', events: null, messageUpdates: 'delta' },
   { type: 'set_ask_dialog', enabled: true },
+  { type: 'get_state' },
 ]);
 
 const CLOSE_GRACE_MS = 5000;
@@ -43,7 +45,7 @@ export class SessionNotRunning extends Error {}
  */
 export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
   /** @type {SessionMeta} */
-  let meta = { id, cwd, resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt: now() };
+  let meta = { id, cwd, resume, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt: now() };
   /** @type {Map<string, { resolve: (r: RpcResponse) => void, reject: (e: Error) => void }>} */
   const pending = new Map();
   const decoder = createFrameDecoder();
@@ -93,6 +95,10 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
     const { frame } = decoded;
     emit({ kind: 'frame', frame });
     if (frame.type === 'ready' && meta.status === 'starting') void setup();
+    if (frame.type === 'response' && frame.command === 'get_state' && frame.success) {
+      const file = frame.data?.sessionFile;
+      if (typeof file === 'string' && file !== meta.sessionFile) update({ sessionFile: file });
+    }
     if (frame.type === 'response' && typeof frame.id === 'string') {
       const waiter = pending.get(frame.id);
       pending.delete(frame.id);

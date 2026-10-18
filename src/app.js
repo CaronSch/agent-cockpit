@@ -106,6 +106,13 @@ export function createApp(root) {
         return findLeaf(layoutAtom.get(), leaf.id)?.params ?? {};
       },
       setParams: (/** @type {LeafParams} */ patch) => api.commitTree(setLeafParams(layoutAtom.get(), leaf.id, patch)),
+      addWidget: (/** @type {string} */ type, /** @type {LeafParams} */ params) => addWidget(type, params),
+      dragWidget(/** @type {string} */ type, /** @type {LeafParams} */ params, /** @type {PointerEvent} */ event, options = {}) {
+        drag.start({ kind: 'new', leaf: { ...newLeaf(type), params } }, event, {
+          label: options.label ?? WIDGETS[type]?.title ?? type,
+          onEnd: options.onEnd,
+        });
+      },
     };
 
     let instance = { destroy() {} };
@@ -193,9 +200,9 @@ export function createApp(root) {
     draw(layoutAtom.get(), false);
   }).observe(deckEl);
 
-  /** @param {string} type */
-  function addWidget(type) {
-    const leaf = newLeaf(type);
+  /** @param {string} type @param {LeafParams} [params] */
+  function addWidget(type, params) {
+    const leaf = params ? { ...newLeaf(type), params } : newLeaf(type);
     const tree = layoutAtom.get();
     const target = largestLeaf(layout.leaves);
     const next =

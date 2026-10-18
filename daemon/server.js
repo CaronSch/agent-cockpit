@@ -12,6 +12,7 @@ import { SessionNotRunning } from './omp-session.js';
 /** @import { AddressInfo } from 'node:net' */
 /** @import { DaemonConfig, SessionEvent } from './wire.js' */
 /** @import { Hub } from './hub.js' */
+/** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
 
 const STATIC_DIRS = ['src', 'styles'];
 const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
@@ -110,9 +111,9 @@ function lastSeenSeq(header, bootId) {
 export const RPC_HOLD_MS = 2000;
 
 /**
- * @param {{ hub: Hub, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
+ * @param {{ hub: Hub, history: History, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
  */
-export function createDaemonServer({ hub, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
+export function createDaemonServer({ hub, history, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, 'index.html');
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
@@ -139,6 +140,9 @@ export function createDaemonServer({ hub, token, root, config, rpcHoldMs = RPC_H
     const method = req.method ?? 'GET';
     if (pathname === '/api/stream' && method === 'GET') return stream(req, res);
     if (pathname === '/api/config' && method === 'GET') return sendJson(res, 200, config);
+    if (pathname === '/api/history' && method === 'GET') {
+      return sendJson(res, 200, { sessions: await history.list(url.searchParams.get('q') ?? '') });
+    }
     if (pathname === '/api/sessions' && method === 'GET') return sendJson(res, 200, { sessions: hub.list() });
     if (pathname === '/api/sessions' && method === 'POST') {
       const body = await readJson(req);

@@ -1,10 +1,11 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { SETUP_COMMANDS } from '../daemon/omp-session.js';
@@ -113,6 +114,7 @@ before(async () => {
   hub = createHub({ ompPath: FAKE_OMP });
   server = createDaemonServer({
     hub,
+    history: createHistory({ root: join(cwd, 'no-sessions-yet') }),
     token: TOKEN,
     root: ROOT,
     config: { defaultCwd: cwd, home: cwd, ompVersion: 'omp/fake' },
@@ -273,6 +275,18 @@ describe('sessions', () => {
     const meta = await waitForStatus(id, 'exited');
     assert.equal(meta.pid, null);
     assert.equal((await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'get_state' } })).status, 409);
+  });
+
+  test('each session reports the journal it writes, so a window can tell a past session is open', async () => {
+    const journal = join(cwd, 'earlier.jsonl');
+    await writeFile(journal, '');
+    const resumed = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
+    assert.equal(resumed.json.session.sessionFile, journal, 'known from the start for a resumed session');
+
+    const fresh = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    assert.equal(fresh.json.session.sessionFile, null);
+    const ready = await waitForStatus(fresh.json.session.id, 'ready');
+    assert.equal(ready.sessionFile, '/tmp/fake-omp-session.jsonl', 'learned from omp’s get_state before ready');
   });
 
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {

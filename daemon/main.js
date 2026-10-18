@@ -6,13 +6,15 @@
  *   node daemon/main.js [--port 4777] [--omp <path to omp>]
  *
  * Environment: AGENT_COCKPIT_PORT, AGENT_COCKPIT_OMP, AGENT_COCKPIT_STATE_DIR (default
- * ~/.agent-cockpit; holds the access token).
+ * ~/.agent-cockpit; holds the access token), AGENT_COCKPIT_OMP_SESSIONS (omp's session
+ * journals; default `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
  */
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
+import { createHistory } from './history.js';
 import { createHub } from './hub.js';
 import { createDaemonServer } from './server.js';
 import { loadToken } from './token.js';
@@ -36,12 +38,15 @@ const ompOption = values.omp ?? process.env.AGENT_COCKPIT_OMP ?? 'omp';
 // A path (not a bare command name) must not depend on each session's cwd.
 const ompPath = ompOption.includes('/') ? resolve(ompOption) : ompOption;
 const stateDir = process.env.AGENT_COCKPIT_STATE_DIR ?? join(homedir(), '.agent-cockpit');
+const ompSessions =
+  process.env.AGENT_COCKPIT_OMP_SESSIONS ?? join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.omp', 'agent'), 'sessions');
 
 const token = await loadToken(stateDir);
 const version = await ompVersion(ompPath);
 const hub = createHub({ ompPath });
 const server = createDaemonServer({
   hub,
+  history: createHistory({ root: ompSessions }),
   token,
   root: ROOT,
   // npm sets INIT_CWD to where `npm start` was typed: the likeliest project to work on.
