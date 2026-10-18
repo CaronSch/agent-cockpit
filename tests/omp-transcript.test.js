@@ -1,0 +1,345 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { addNote, applyEvent, askAnswers, createTranscript, removeDialog } from '../src/omp/transcript.js';
+/** @import { SessionEvent } from '../daemon/wire.js' */
+/** @import { Transcript } from '../src/omp/transcript.js' */
+
+// Sanitized fixtures shaped like frames recorded from omp 18.10 in `--mode rpc-ui` with
+// `set_event_filter { messageUpdates: 'delta' }`.
+
+let seq = 0;
+/** @param {Record<string, any>} frame @returns {SessionEvent} */
+const frame = (frame) => ({ kind: 'frame', frame, seq: ++seq, at: 0, session: 's1' });
+/** @param {Record<string, any>} command @returns {SessionEvent} */
+const sent = (command) => ({ kind: 'sent', command, seq: ++seq, at: 0, session: 's1' });
+
+/** @param {SessionEvent[]} events */
+function run(events) {
+  const state = createTranscript();
+  for (const event of events) applyEvent(state, event);
+  return state;
+}
+
+/** @param {Transcript} state */
+const kinds = (state) => state.items.map((i) => i.kind);
+
+const usage = (total = 0.25) => ({ input: 4, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 8, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } });
+
+/** @param {any[]} content @param {Record<string, any>} [extra] */
+const assistant = (content, extra = {}) => ({ role: 'assistant', content, api: 'messages', provider: 'acme', model: 'model-1', usage: usage(), stopReason: 'stop', timestamp: 1, ...extra });
+
+/** @param {Record<string, any>} event @param {string} id */
+const update = (event, id) => frame({ type: 'message_update', assistantMessageEvent: event, message: { role: 'assistant' }, messageId: id });
+
+/** @param {Transcript} state @param {string} key */
+function assistantItem(state, key) {
+  const item = state.items.find((i) => i.key === key);
+  assert.ok(item && item.kind === 'assistant', `no assistant item ${key}`);
+  return item;
+}
+
+describe('assistant streaming', () => {
+  test('a pre-filled message_start followed by deltas shows the text once', () => {
+    const state = run([
+      frame({ type: 'message_start', message: assistant([{ type: 'text', text: 'pong' }]), messageId: 'm1' }),
+      update({ type: 'text_start', contentIndex: 0 }, 'm1'),
+      update({ type: 'text_delta', contentIndex: 0, delta: 'po' }, 'm1'),
+      update({ type: 'text_delta', contentIndex: 0, delta: 'ng' }, 'm1'),
+    ]);
+    assert.deepEqual(assistantItem(state, 'msg:m1').blocks, [{ kind: 'text', text: 'pong' }]);
+    assert.deepEqual(kinds(state), ['assistant']);
+  });
+
+  test('thinking and text blocks assemble at their content index', () => {
+    const state = run([
+      frame({ type: 'message_start', message: assistant([]), messageId: 'm1' }),
+      update({ type: 'thinking_start', contentIndex: 0 }, 'm1'),
+      update({ type: 'thinking_delta', contentIndex: 0, delta: 'hmm' }, 'm1'),
+      update({ type: 'thinking_end', contentIndex: 0, content: 'hmm.' }, 'm1'),
+      update({ type: 'text_start', contentIndex: 1 }, 'm1'),
+      update({ type: 'text_delta', contentIndex: 1, delta: 'Hi' }, 'm1'),
+    ]);
+    assert.deepEqual(assistantItem(state, 'msg:m1').blocks, [
+      { kind: 'thinking', text: 'hmm.', redacted: false },
+      { kind: 'text', text: 'Hi' },
+    ]);
+  });
+
+  test('message_end replaces content that drifted during streaming', () => {
+    const state = run([
+      frame({ type: 'message_start', message: assistant([]), messageId: 'm1' }),
+      update({ type: 'text_start', contentIndex: 0 }, 'm1'),
+      update({ type: 'text_delta', contentIndex: 0, delta: 'Hel' }, 'm1'),
+      update({ type: 'text_delta', contentIndex: 0, delta: 'Hel' }, 'm1'), // duplicated delta
+      frame({ type: 'message_end', message: assistant([{ type: 'text', text: 'Hello' }]), messageId: 'm1' }),
+    ]);
+    const item = assistantItem(state, 'msg:m1');
+    assert.deepEqual(item.blocks, [{ kind: 'text', text: 'Hello' }]);
+    assert.equal(item.ended, true);
+    assert.equal(item.stopReason, 'stop');
+  });
+
+  test('cost sums assistant usage once per message, at message_end', () => {
+    const m = assistant([{ type: 'text', text: 'a' }], { usage: usage(0.5) });
+    const state = run([
+      frame({ type: 'message_start', message: m, messageId: 'm1' }),
+      frame({ type: 'message_end', message: m, messageId: 'm1' }),
+      frame({ type: 'message_end', message: assistant([], { usage: usage(0.25) }), messageId: 'm2' }),
+    ]);
+    assert.equal(state.cost, 0.75);
+  });
+
+  test('a provider error is kept on the message', () => {
+    const state = run([
+      frame({ type: 'message_end', message: assistant([], { stopReason: 'error', errorMessage: 'overloaded' }), messageId: 'm1' }),
+    ]);
+    assert.equal(assistantItem(state, 'msg:m1').errorMessage, 'overloaded');
+  });
+});
+
+describe('tool cards', () => {
+  const call = { type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'echo hi' }, intent: 'Running echo' };
+  const lifecycle = () => [
+    frame({ type: 'message_start', message: assistant([call], { stopReason: 'toolUse' }), messageId: 'm1' }),
+    update({ type: 'toolcall_start', contentIndex: 0 }, 'm1'),
+    update({ type: 'toolcall_delta', contentIndex: 0, delta: '{"command": "ech' }, 'm1'),
+    update({ type: 'toolcall_end', contentIndex: 0, toolCall: call }, 'm1'),
+    frame({ type: 'message_end', message: assistant([call], { stopReason: 'toolUse' }), messageId: 'm1' }),
+    frame({ type: 'tool_execution_start', toolCallId: 'call_1', toolName: 'bash', args: { command: 'echo hi' }, intent: 'Running echo' }),
+    frame({ type: 'tool_execution_update', toolCallId: 'call_1', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'h' }], details: {} } }),
+  ];
+
+  test('live output shows while the tool runs', () => {
+    const state = run(lifecycle());
+    const tool = state.tools.get('call_1');
+    assert.equal(tool?.status, 'running');
+    assert.equal(tool?.output, 'h');
+    assert.equal(tool?.intent, 'Running echo');
+  });
+
+  test('the toolResult message folds into its card instead of rendering twice', () => {
+    const state = run([
+      ...lifecycle(),
+      frame({ type: 'tool_execution_end', toolCallId: 'call_1', toolName: 'bash', result: { content: [{ type: 'text', text: 'hi\n' }], details: {} }, isError: false }),
+      frame({ type: 'message_start', message: { role: 'toolResult', toolCallId: 'call_1', toolName: 'bash', content: [{ type: 'text', text: 'hi\n' }], isError: false, timestamp: 2 }, messageId: 'm2' }),
+      frame({ type: 'message_end', message: { role: 'toolResult', toolCallId: 'call_1', toolName: 'bash', content: [{ type: 'text', text: 'hi\n' }], isError: false, timestamp: 2 }, messageId: 'm2' }),
+    ]);
+    assert.deepEqual(kinds(state), ['assistant']);
+    const tool = state.tools.get('call_1');
+    assert.equal(tool?.status, 'ok');
+    assert.equal(tool?.result, 'hi\n');
+    const block = assistantItem(state, 'msg:m1').blocks[0];
+    assert.equal(block.kind === 'toolCall' && block.id, 'call_1');
+  });
+
+  test('a failing tool marks its card as an error', () => {
+    const state = run([
+      ...lifecycle(),
+      frame({ type: 'tool_execution_end', toolCallId: 'call_1', toolName: 'bash', result: { content: [{ type: 'text', text: 'boom' }] }, isError: true }),
+    ]);
+    assert.equal(state.tools.get('call_1')?.status, 'error');
+  });
+
+  test('a tool run with no assistant message gets a card of its own', () => {
+    const state = run([frame({ type: 'tool_execution_start', toolCallId: 'orphan', toolName: 'read', args: {} })]);
+    assert.deepEqual(kinds(state), ['tool']);
+  });
+});
+
+describe('frames the pane does not know', () => {
+  test('an unknown frame type becomes an unrecognised item with its raw JSON', () => {
+    const state = run([frame({ type: 'telepathy_update', mood: 'calm' })]);
+    assert.equal(state.items.length, 1);
+    const item = state.items[0];
+    assert.equal(item.kind, 'unrecognised');
+    assert.ok(item.kind === 'unrecognised' && item.label === 'telepathy_update' && item.raw.includes('"mood": "calm"'));
+  });
+
+  test('an unknown message role, stream event and UI method are surfaced too', () => {
+    const state = run([
+      frame({ type: 'message_end', message: { role: 'oracle', content: 'x', timestamp: 5 }, messageId: 'm9' }),
+      update({ type: 'hologram_delta', contentIndex: 0 }, 'm10'),
+      frame({ type: 'extension_ui_request', id: 'u1', method: 'teleport' }),
+    ]);
+    const labels = state.items.filter((i) => i.kind === 'unrecognised').map((i) => i.kind === 'unrecognised' && i.label);
+    assert.deepEqual(labels, ['message role oracle', 'message_update hologram_delta', 'ui teleport']);
+  });
+
+  test('garbled stdout is kept, never dropped', () => {
+    const state = createTranscript();
+    applyEvent(state, { kind: 'garbled', line: '{not json', error: 'Unexpected token', seq: 1, at: 0, session: 's1' });
+    const item = state.items[0];
+    assert.ok(item.kind === 'unrecognised' && item.raw.includes('{not json') && item.raw.includes('Unexpected token'));
+  });
+
+  test('known bookkeeping frames add nothing to the transcript', () => {
+    const state = run([
+      frame({ type: 'ready', protocolVersion: 1 }),
+      frame({ type: 'turn_start' }),
+      frame({ type: 'session_settled' }),
+      frame({ type: 'advisor_cost_changed' }),
+      frame({ type: 'extension_ui_request', id: 'w', method: 'setWidget', widgetKey: 'k' }),
+    ]);
+    assert.deepEqual(kinds(state), []);
+  });
+});
+
+describe('notes', () => {
+  test('notices, extension errors and stderr show as notes; stderr lines in a row share one', () => {
+    const state = run([
+      frame({ type: 'notice', level: 'warning', message: 'low disk', source: 'fs' }),
+      frame({ type: 'extension_error', extensionPath: 'ext.ts', event: 'tool_call', error: 'bad' }),
+      { kind: 'stderr', line: 'Decompression error: ZlibError', seq: 1, at: 0, session: 's1' },
+      { kind: 'stderr', line: 'second', seq: 2, at: 0, session: 's1' },
+    ]);
+    assert.deepEqual(kinds(state), ['note', 'note', 'note']);
+    const stderr = state.items[2];
+    assert.ok(stderr.kind === 'note' && stderr.detail === 'Decompression error: ZlibError\nsecond');
+  });
+
+  test('a custom message without a messageId pairs its start and end', () => {
+    const m = { role: 'custom', customType: 'mount-notice', content: 'tools changed', display: false, timestamp: 7 };
+    const state = run([frame({ type: 'message_start', message: m }), frame({ type: 'message_end', message: m })]);
+    assert.deepEqual(kinds(state), ['note']);
+  });
+
+  test('a failed command response and its prompt_result show one error', () => {
+    const state = run([
+      frame({ type: 'response', id: 'ac_4', command: 'prompt', success: false, error: 'no model' }),
+      frame({ type: 'prompt_result', id: 'ac_4', agentInvoked: false, status: 'error', error: { message: 'no model', retryable: false }, sessionSettled: true }),
+    ]);
+    assert.equal(state.items.filter((i) => i.kind === 'note' && i.level === 'error').length, 1);
+    assert.equal(state.lastError, 'no model');
+  });
+
+  test('the pane can add its own notes', () => {
+    const state = createTranscript();
+    addNote(state, 'error', 'daemon', 'unreachable');
+    assert.ok(state.items[0].kind === 'note' && state.items[0].text === 'unreachable');
+  });
+});
+
+describe('dialogs', () => {
+  const confirm = { type: 'extension_ui_request', id: 'u1', method: 'confirm', title: 'Run?', message: 'rm -rf build' };
+
+  test('a dialog disappears on cancel', () => {
+    const state = run([frame(confirm), frame({ type: 'extension_ui_request', id: 'u2', method: 'cancel', targetId: 'u1' })]);
+    assert.deepEqual(state.dialogs, []);
+  });
+
+  test('a dialog disappears once answered, and a repeated request does not duplicate it', () => {
+    const state = run([frame(confirm), frame(confirm)]);
+    assert.equal(state.dialogs.length, 1);
+    applyEvent(state, sent({ type: 'extension_ui_response', id: 'u1', confirmed: true }));
+    assert.deepEqual(state.dialogs, []);
+    const local = run([frame(confirm)]);
+    removeDialog(local, 'u1');
+    assert.deepEqual(local.dialogs, []);
+  });
+
+  test('ask answers have the exact rpc.md shape', () => {
+    const questions = [
+      { id: 'db', question: 'Which database?', options: [{ label: 'Postgres' }, { label: 'SQLite' }], recommended: 1 },
+      { id: 'features', question: 'Which features?', options: [{ label: 'Auth' }, { label: 'Billing' }, { label: 'Search' }], multi: true },
+      { id: 'name', question: 'Name?', options: [{ label: 'a' }] },
+    ];
+    const answers = askAnswers(questions, {
+      db: { selected: ['SQLite'], custom: '  DuckDB ' }, // single-select: free text wins over an option
+      features: { selected: ['Auth', 'Search', 'Auth', 'Bogus'], custom: '' },
+    });
+    assert.deepEqual(answers, [
+      { id: 'db', selectedOptions: [], customInput: 'DuckDB' },
+      { id: 'features', selectedOptions: ['Auth', 'Search'] },
+      { id: 'name', selectedOptions: [] },
+    ]);
+  });
+});
+
+describe('derived state', () => {
+  test('streaming follows agent_start and a yielded agent_end', () => {
+    const state = run([frame({ type: 'agent_start' })]);
+    assert.equal(state.streaming, true);
+    applyEvent(state, frame({ type: 'agent_end', messages: [], yielded: false }));
+    assert.equal(state.streaming, true);
+    applyEvent(state, frame({ type: 'agent_end', messages: [], yielded: true }));
+    assert.equal(state.streaming, false);
+  });
+
+  test('queue, commands, status strip, editor text and login URL', () => {
+    const state = run([
+      frame({ type: 'queue_update', steering: ['use the parser'], followUp: [] }),
+      frame({ type: 'available_commands_update', commands: [{ name: 'model', aliases: ['models'], description: 'Pick', source: 'builtin', input: { hint: '<id>' } }] }),
+      frame({ type: 'extension_ui_request', id: 'a', method: 'setStatus', statusKey: 'git', statusText: 'main' }),
+      frame({ type: 'extension_ui_request', id: 'b', method: 'setWidget', widgetKey: 'w', widgetLines: ['one'] }),
+      frame({ type: 'extension_ui_request', id: 'c', method: 'set_editor_text', text: 'draft' }),
+      frame({ type: 'extension_ui_request', id: 'd', method: 'open_url', url: 'https://example.com/auth', instructions: 'Sign in' }),
+    ]);
+    assert.deepEqual(state.queue, { steering: ['use the parser'], followUp: [] });
+    assert.deepEqual(state.commands, [{ name: 'model', aliases: ['models'], description: 'Pick', hint: '<id>' }]);
+    assert.deepEqual(state.statuses, { git: 'main' });
+    assert.deepEqual(state.widgets, { w: ['one'] });
+    assert.deepEqual(state.editorText, { seq: 1, text: 'draft' });
+    assert.equal(state.openUrl?.url, 'https://example.com/auth');
+    applyEvent(state, frame({ type: 'extension_ui_request', id: 'e', method: 'setWidget', widgetKey: 'w' }));
+    assert.deepEqual(state.widgets, {});
+  });
+
+  test('get_state responses fill the toolbar info', () => {
+    const state = run([
+      frame({
+        type: 'response',
+        id: 'ac_5',
+        command: 'get_state',
+        success: true,
+        data: { model: { provider: 'acme', id: 'model-1', name: 'Model One' }, thinkingLevel: 'medium', contextUsage: { tokens: 10, contextWindow: 1000, percent: 1.5 }, sessionFile: '/s/a.jsonl' },
+      }),
+    ]);
+    assert.deepEqual(state.session, {
+      model: { provider: 'acme', id: 'model-1', name: 'Model One' },
+      thinkingLevel: 'medium',
+      contextPercent: 1.5,
+      sessionFile: '/s/a.jsonl',
+      sessionName: null,
+    });
+  });
+});
+
+describe('bash and resume', () => {
+  test('a `!cmd` run renders from the sent command and its response', () => {
+    const state = run([
+      sent({ type: 'bash', command: 'ls', id: 'ac_7' }),
+      frame({ type: 'response', id: 'ac_7', command: 'bash', success: true, data: { output: 'a\nb\n', exitCode: 0, cancelled: false, truncated: false } }),
+    ]);
+    const item = state.items[0];
+    assert.ok(item.kind === 'bash');
+    assert.equal(item.status, 'ok');
+    assert.equal(item.output, 'a\nb\n');
+  });
+
+  const history = [
+    { role: 'user', content: [{ type: 'text', text: 'old question' }], timestamp: 1 },
+    assistant([{ type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'a' } }]),
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'read', content: [{ type: 'text', text: 'file' }], isError: false, timestamp: 2 },
+  ];
+  /** @param {string | null} resume @returns {SessionEvent} */
+  const session = (resume) => ({
+    kind: 'session',
+    meta: { id: 's1', cwd: '/w', resume, status: 'ready', pid: 1, exitCode: null, error: null, startedAt: 0 },
+    seq: ++seq,
+    at: 0,
+    session: 's1',
+  });
+  const messagesReply = (/** @type {string} */ id) => frame({ type: 'response', id, command: 'get_messages', success: true, data: { messages: history } });
+
+  test('a resumed session is seeded from get_messages ahead of live notes, once', () => {
+    const state = run([session('/s/old.jsonl'), frame({ type: 'notice', level: 'info', message: 'hello' }), messagesReply('ac_3'), messagesReply('ac_9')]);
+    assert.deepEqual(kinds(state), ['user', 'assistant', 'note']);
+    assert.equal(state.tools.get('c1')?.status, 'ok');
+    assert.equal(state.seeded, true);
+  });
+
+  test('get_messages in a session that streamed its own history seeds nothing', () => {
+    const state = run([session(null), frame({ type: 'message_end', message: history[0], messageId: 'm1' }), messagesReply('ac_3')]);
+    assert.deepEqual(kinds(state), ['user']);
+  });
+});

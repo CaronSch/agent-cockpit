@@ -2,7 +2,7 @@
  * Cockpit controller: owns the layout atom and wires rendering, interaction
  * and widgets together.
  */
-import { applyDrop, branch, insertBeside, listLeaves, moveLeaf, removeLeaf } from './layout/grid-model.js';
+import { applyDrop, branch, findLeaf, insertBeside, listLeaves, moveLeaf, removeLeaf, setLeafParams } from './layout/grid-model.js';
 import { computeLayout } from './layout/compute-layout.js';
 import { findNeighbor, DIRECTION_KEYS } from './layout/neighbors.js';
 import { newLeaf } from './layout/new-leaf.js';
@@ -15,7 +15,8 @@ import { createDragController } from './interaction/drag-controller.js';
 import { createPalette } from './ui/palette.js';
 import { el } from './ui/dom.js';
 import { WIDGETS } from './widgets/registry.js';
-/** @import { Leaf, Tree } from './layout/grid-model.js' */
+/** @import { Leaf, LeafParams, Tree } from './layout/grid-model.js' */
+/** @import { WidgetContext } from './widgets/registry.js' */
 /** @import { Rect } from './layout/compute-layout.js' */
 /** @import { Palette } from './ui/palette.js' */
 /** @import { GridApi } from './interaction/drag-controller.js' */
@@ -98,12 +99,21 @@ export function createApp(root) {
     const body = el('div', 'widget-body');
     frameEl.append(head, body);
 
+    /** @type {WidgetContext} */
+    const ctx = {
+      // Read through the atom, not the mount-time leaf: params change after mount.
+      get params() {
+        return findLeaf(layoutAtom.get(), leaf.id)?.params ?? {};
+      },
+      setParams: (/** @type {LeafParams} */ patch) => api.commitTree(setLeafParams(layoutAtom.get(), leaf.id, patch)),
+    };
+
     let instance = { destroy() {} };
     if (!def) {
       body.append(el('p', 'widget-empty', 'This widget type is not installed.'));
     } else {
       try {
-        instance = def.mount(body) ?? instance;
+        instance = def.mount(body, ctx) ?? instance;
       } catch (err) {
         console.error(`[app] widget "${leaf.widget}" failed to mount`, err);
         body.replaceChildren(el('p', 'widget-empty widget-error', 'This widget failed to load.'));
@@ -165,7 +175,17 @@ export function createApp(root) {
 
   layoutAtom.subscribe((/** @type {Tree} */ tree) => {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => saveLayout(tree), SAVE_DELAY_MS);
+    saveTimer = setTimeout(() => {
+      saveTimer = undefined;
+      saveLayout(tree);
+    }, SAVE_DELAY_MS);
+  });
+  // A reload or close inside the debounce window would otherwise lose the last change.
+  window.addEventListener('pagehide', () => {
+    if (saveTimer === undefined) return;
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    saveLayout(layoutAtom.get());
   });
 
   new ResizeObserver(([entry]) => {

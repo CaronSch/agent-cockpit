@@ -7,7 +7,12 @@
 
 /** @typedef {'row' | 'col'} Axis */
 /** @typedef {'left' | 'right' | 'up' | 'down' | 'center'} Direction */
-/** @typedef {{ kind: 'leaf', id: string, widget: string }} Leaf */
+/**
+ * Settings a widget owns for one window, e.g. which agent session it shows. Flat and
+ * JSON-safe so the layout stays one serialisable value.
+ * @typedef {Record<string, string | number | boolean | null>} LeafParams
+ */
+/** @typedef {{ kind: 'leaf', id: string, widget: string, params?: LeafParams }} Leaf */
 /** @typedef {{ kind: 'branch', axis: Axis, children: GridNode[], sizes: number[] }} Branch */
 /** @typedef {Leaf | Branch} GridNode */
 /** A whole layout; `null` is the empty grid. @typedef {GridNode | null} Tree */
@@ -188,6 +193,15 @@ export function swapLeaves(tree, aId, bId) {
   return mapLeaves(tree, (l) => (l.id === aId ? b : l.id === bId ? a : l));
 }
 
+/**
+ * Merges `patch` into one leaf's params. Unknown ids leave the tree unchanged.
+ * @param {Tree} tree @param {string} id @param {LeafParams} patch @returns {Tree}
+ */
+export function setLeafParams(tree, id, patch) {
+  if (!tree || !findLeaf(tree, id)) return tree;
+  return mapLeaves(tree, (l) => (l.id === id ? { ...l, params: { ...l.params, ...patch } } : l));
+}
+
 /** @param {Tree} tree @param {string} id @param {string} targetId @param {Direction} dir @returns {Tree} */
 export function moveLeaf(tree, id, targetId, dir) {
   if (id === targetId) return tree;
@@ -245,6 +259,7 @@ export function isValidTree(data) {
     if (!n || typeof n !== 'object' || depth > MAX_DEPTH) return false;
     if (n.kind === 'leaf') {
       if (typeof n.id !== 'string' || typeof n.widget !== 'string' || seen.has(n.id)) return false;
+      if ('params' in n && !isValidParams(n.params)) return false;
       seen.add(n.id);
       return true;
     }
@@ -256,4 +271,12 @@ export function isValidTree(data) {
   };
 
   return check(data, 0);
+}
+
+/** @param {any} params @returns {boolean} */
+function isValidParams(params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return false;
+  return Object.values(params).every(
+    (v) => v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v)),
+  );
 }

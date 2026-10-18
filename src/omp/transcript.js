@@ -1,0 +1,874 @@
+/**
+ * Transcript reducer for one omp session: folds the daemon's SessionEvents into display
+ * items plus derived session state, with no DOM.
+ *
+ * `applyEvent` mutates the state it is given (the stream is high-frequency; copying the
+ * whole transcript per delta would be wasteful) and bumps `version`, and each changed
+ * item's `rev`, so a view can redraw only what changed. Replaying the same events into a
+ * fresh `createTranscript()` always yields the same state.
+ *
+ * Invariant: no frame is silently dropped. Every frame type, message role, assistant
+ * stream event, content block and UI method is either handled, listed in a
+ * `KNOWN_UNRENDERED` set with the reason, or surfaced as an `unrecognised` item.
+ */
+/** @import { SessionEvent, SessionMeta } from '../../daemon/wire.js' */
+
+/**
+ * One block of an assistant message, in content order.
+ * @typedef {(
+ *   | { kind: 'text', text: string }
+ *   | { kind: 'thinking', text: string, redacted: boolean }
+ *   | { kind: 'toolCall', id: string | null, name: string, args: unknown, argsText: string, intent: string | null }
+ *   | { kind: 'other', type: string, raw: unknown }
+ * )} Block
+ */
+
+/**
+ * A tool call's execution, shown as one card. Keyed by tool call id in `state.tools`.
+ * @typedef {{
+ *   id: string, name: string, args: unknown, intent: string | null,
+ *   status: 'pending' | 'running' | 'ok' | 'error',
+ *   output: string, result: string | null,
+ * }} ToolRun
+ */
+
+/** @typedef {'info' | 'warning' | 'error' | 'muted'} NoteLevel */
+
+/**
+ * @typedef {{ key: string, rev: number }} ItemBase
+ * @typedef {ItemBase & { kind: 'user', text: string, images: number, byAgent: boolean }} UserItem
+ * @typedef {ItemBase & {
+ *   kind: 'assistant', blocks: Block[], stopReason: string | null, errorMessage: string | null,
+ *   model: string | null, ended: boolean,
+ * }} AssistantItem
+ * @typedef {ItemBase & { kind: 'tool', toolCallId: string }} ToolItem
+ * @typedef {ItemBase & {
+ *   kind: 'bash', language: 'bash' | 'python', command: string, requestId: string | null,
+ *   status: 'running' | 'ok' | 'error' | 'cancelled', output: string, exitCode: number | null,
+ *   truncated: boolean, error: string | null, fromMessage: boolean,
+ * }} BashItem
+ * @typedef {ItemBase & { kind: 'note', level: NoteLevel, source: string, text: string, detail: string | null, hidden: boolean }} NoteItem
+ * @typedef {ItemBase & { kind: 'unrecognised', label: string, raw: string }} UnrecognisedItem
+ * @typedef {UserItem | AssistantItem | ToolItem | BashItem | NoteItem | UnrecognisedItem} Item
+ */
+
+/**
+ * A pending dialog: an omp `extension_ui_request` awaiting an `extension_ui_response`.
+ * Fields are as omp sent them (see omp's rpc docs, "Extension UI Sub-Protocol").
+ * @typedef {{ id: string, method: 'select' | 'confirm' | 'input' | 'editor' | 'ask' } & Record<string, any>} Dialog
+ */
+
+/** @typedef {{ name: string, aliases: string[], description: string, hint: string }} SlashCommand */
+
+/**
+ * The parts of omp's `get_state` the pane shows.
+ * @typedef {{
+ *   model: { provider: string, id: string, name: string } | null,
+ *   thinkingLevel: string | null,
+ *   contextPercent: number | null,
+ *   sessionFile: string | null,
+ *   sessionName: string | null,
+ * }} SessionInfo
+ */
+
+/**
+ * @typedef {{
+ *   version: number,
+ *   items: Item[],
+ *   tools: Map<string, ToolRun>,
+ *   meta: SessionMeta | null,
+ *   session: SessionInfo,
+ *   dialogs: Dialog[],
+ *   streaming: boolean,
+ *   queue: { steering: string[], followUp: string[] },
+ *   commands: SlashCommand[],
+ *   statuses: Record<string, string>,
+ *   widgets: Record<string, string[]>,
+ *   title: string | null,
+ *   lastError: string | null,
+ *   cost: number,
+ *   editorText: { seq: number, text: string } | null,
+ *   openUrl: { url: string, launchUrl: string | null, instructions: string | null } | null,
+ *   refreshSeq: number,
+ *   seeded: boolean,
+ *   index: Map<string, Item>,
+ *   toolOwner: Map<string, string>,
+ *   failedRequests: Set<string>,
+ *   counted: Set<string>,
+ *   nextKey: number,
+ * }} Transcript
+ */
+
+/**
+ * Frame types the pane knows and deliberately does not render.
+ * @type {ReadonlySet<string>}
+ */
+const KNOWN_UNRENDERED = new Set([
+  'ready', // startup handshake; the daemon's session status covers it
+  'turn_start', // turn boundaries: messages already carry the content
+  'turn_end', // repeats the assistant message and tool results already shown
+  'session_settled', // quiescence; `agent_end` with `yielded` drives the streaming indicator
+  'advisor_cost_changed', // no payload; advisor cost is not part of this pane
+  'advisor_yielded', // no payload
+  'config_warnings_changed', // no payload; warnings are not exposed over rpc
+  'cache_warming_start', // background prompt-cache refreshes, not conversation
+  'cache_warming_end',
+  'todo_auto_clear', // no payload
+]);
+
+/** Assistant stream events with nothing to apply: `message_end` carries the result. */
+const KNOWN_STREAM_NOOPS = new Set(['start', 'done', 'error']);
+
+/** Frame types after which the pane should re-read `get_state`. */
+const REFRESH_TRIGGERS = new Set(['agent_end', 'model_changed', 'thinking_level_changed', 'config_update']);
+
+/** Successful responses that change what `get_state` reports. */
+const REFRESH_COMMANDS = new Set(['set_model', 'cycle_model', 'set_thinking_level', 'cycle_thinking_level', 'login', 'new_session', 'switch_session', 'fork', 'branch', 'compact']);
+
+/** @returns {Transcript} */
+export function createTranscript() {
+  return {
+    version: 0,
+    items: [],
+    tools: new Map(),
+    meta: null,
+    session: { model: null, thinkingLevel: null, contextPercent: null, sessionFile: null, sessionName: null },
+    dialogs: [],
+    streaming: false,
+    queue: { steering: [], followUp: [] },
+    commands: [],
+    statuses: {},
+    widgets: {},
+    title: null,
+    lastError: null,
+    cost: 0,
+    editorText: null,
+    openUrl: null,
+    refreshSeq: 0,
+    seeded: false,
+    index: new Map(),
+    toolOwner: new Map(),
+    failedRequests: new Set(),
+    counted: new Set(),
+    nextKey: 0,
+  };
+}
+
+/**
+ * Applies one daemon event to the transcript.
+ * @param {Transcript} state @param {SessionEvent} event @returns {Transcript}
+ */
+export function applyEvent(state, event) {
+  state.version++;
+  switch (event.kind) {
+    case 'session':
+      state.meta = event.meta;
+      if (event.meta.status === 'exited' || event.meta.status === 'failed') {
+        // The process is gone: nothing is streaming and no dialog can be answered.
+        state.streaming = false;
+        state.dialogs = [];
+        state.openUrl = null;
+        state.queue = { steering: [], followUp: [] };
+      }
+      return state;
+    case 'frame':
+      applyFrame(state, event.frame);
+      return state;
+    case 'sent':
+      applySent(state, event.command);
+      return state;
+    case 'stderr':
+      addStderr(state, event.line);
+      return state;
+    case 'garbled':
+      push(state, { kind: 'unrecognised', label: 'garbled stdout', raw: `${event.error}\n\n${event.line}` });
+      return state;
+    default:
+      push(state, { kind: 'unrecognised', label: `event ${String(/** @type {any} */ (event).kind)}`, raw: json(event) });
+      return state;
+  }
+}
+
+/**
+ * Adds a note the pane itself produced (a transport failure, say).
+ * @param {Transcript} state @param {NoteLevel} level @param {string} source @param {string} text
+ */
+export function addNote(state, level, source, text) {
+  state.version++;
+  note(state, level, source, text);
+}
+
+/**
+ * Hides a dialog the user just answered, before omp's echo of the answer arrives.
+ * @param {Transcript} state @param {string} id
+ */
+export function removeDialog(state, id) {
+  const before = state.dialogs.length;
+  state.dialogs = state.dialogs.filter((d) => d.id !== id);
+  if (state.dialogs.length !== before) state.version++;
+}
+
+/**
+ * Builds the `answers` of an `ask` response exactly as omp's rpc docs require: one entry
+ * per question in request order, exact option labels without duplicates, a single-select
+ * holding at most one option and never both an option and free text, free text trimmed
+ * and omitted when empty.
+ * @param {ReadonlyArray<{ id: string, multi?: boolean, options: ReadonlyArray<{ label: string }> }>} questions
+ * @param {Readonly<Record<string, { selected: readonly string[], custom: string }>>} picks
+ * @returns {Array<{ id: string, selectedOptions: string[], customInput?: string }>}
+ */
+export function askAnswers(questions, picks) {
+  return questions.map((q) => {
+    const pick = picks[q.id] ?? { selected: [], custom: '' };
+    const labels = new Set(q.options.map((o) => o.label));
+    let selected = [...new Set(pick.selected)].filter((l) => labels.has(l));
+    const custom = pick.custom.trim();
+    if (!q.multi) selected = custom ? [] : selected.slice(0, 1);
+    return custom ? { id: q.id, selectedOptions: selected, customInput: custom } : { id: q.id, selectedOptions: selected };
+  });
+}
+
+// ── Frames ──────────────────────────────────────────────
+
+/** @param {Transcript} state @param {Record<string, any>} frame */
+function applyFrame(state, frame) {
+  const type = typeof frame?.type === 'string' ? frame.type : '';
+  if (KNOWN_UNRENDERED.has(type)) return;
+  if (REFRESH_TRIGGERS.has(type)) state.refreshSeq++;
+  switch (type) {
+    case 'response':
+      return applyResponse(state, frame);
+    case 'agent_start':
+      state.streaming = true;
+      return;
+    case 'agent_end': {
+      // Older runtimes omit `yielded`: treat those as yielded only when terminal.
+      const yielded = typeof frame.yielded === 'boolean' ? frame.yielded : frame.isTerminal !== false;
+      // `messages` repeats what message_end frames already delivered (and may be compacted).
+      if (yielded) state.streaming = false;
+      return;
+    }
+    case 'message_start':
+    case 'message_end':
+      return applyMessage(state, frame.message, messageKey(frame), type === 'message_end');
+    case 'message_update':
+      return applyUpdate(state, frame);
+    case 'tool_execution_start': {
+      const run = ensureTool(state, frame.toolCallId, frame.toolName);
+      if (!run) return unrecognised(state, type, frame);
+      if (frame.args !== undefined) run.args = frame.args;
+      if (typeof frame.intent === 'string') run.intent = frame.intent;
+      if (run.status === 'pending') run.status = 'running';
+      return touchTool(state, run.id);
+    }
+    case 'tool_execution_update': {
+      const run = ensureTool(state, frame.toolCallId, frame.toolName);
+      if (!run) return unrecognised(state, type, frame);
+      run.output = contentText(frame.partialResult?.content);
+      return touchTool(state, run.id);
+    }
+    case 'tool_stream_update': {
+      const run = ensureTool(state, frame.toolCallId, frame.toolName);
+      if (!run) return unrecognised(state, type, frame);
+      // `update` is tool-specific; only a content-shaped update has text worth showing.
+      if (Array.isArray(frame.update?.content)) {
+        run.output = contentText(frame.update.content);
+        touchTool(state, run.id);
+      }
+      return;
+    }
+    case 'tool_execution_end': {
+      const run = ensureTool(state, frame.toolCallId, frame.toolName);
+      if (!run) return unrecognised(state, type, frame);
+      run.result = contentText(frame.result?.content);
+      run.status = frame.isError ? 'error' : 'ok';
+      return touchTool(state, run.id);
+    }
+    case 'auto_compaction_start':
+      return note(state, 'muted', 'compaction', `Compacting context (${frame.reason ?? 'auto'}, ${frame.action ?? 'compact'})…`);
+    case 'auto_compaction_end': {
+      if (frame.skipped) return note(state, 'muted', 'compaction', 'Compaction skipped');
+      if (frame.aborted) return note(state, 'warning', 'compaction', 'Compaction aborted');
+      if (frame.errorMessage) return note(state, 'error', 'compaction', `Compaction failed: ${frame.errorMessage}`);
+      const summary = frame.result?.shortSummary ?? frame.result?.summary ?? null;
+      return note(state, 'muted', 'compaction', 'Context compacted', typeof summary === 'string' ? summary : null);
+    }
+    case 'auto_retry_start': {
+      const wait = typeof frame.delayMs === 'number' ? ` in ${Math.round(frame.delayMs / 1000)}s` : '';
+      return note(state, 'warning', 'retry', `Retrying (${frame.attempt}/${frame.maxAttempts})${wait}: ${frame.errorMessage ?? ''}`.trim());
+    }
+    case 'auto_retry_end':
+      return frame.success
+        ? note(state, 'muted', 'retry', `Retry ${frame.attempt} succeeded`)
+        : note(state, 'error', 'retry', `Retries exhausted: ${frame.finalError ?? 'unknown error'}`);
+    case 'retry_fallback_applied':
+      return note(state, 'warning', 'retry', `Falling back from ${frame.from} to ${frame.to}${frame.reason ? ` (${frame.reason})` : ''}`);
+    case 'retry_fallback_succeeded':
+      return note(state, 'muted', 'retry', `Fallback model ${frame.model} answered`);
+    case 'model_changed':
+      return; // no payload; the refresh trigger above re-reads get_state
+    case 'thinking_level_changed':
+      if (typeof frame.thinkingLevel === 'string') state.session.thinkingLevel = frame.thinkingLevel;
+      return;
+    case 'config_update':
+      if (frame.model && typeof frame.model === 'object') state.session.model = modelInfo(frame.model);
+      if (typeof frame.thinkingLevel === 'string') state.session.thinkingLevel = frame.thinkingLevel;
+      return;
+    case 'ttsr_triggered': {
+      const rules = Array.isArray(frame.rules) ? frame.rules.map((r) => r?.name ?? r?.id ?? '?').join(', ') : '';
+      return note(state, 'muted', 'rules', `Rule triggered: ${rules}`, json(frame.rules));
+    }
+    case 'todo_reminder': {
+      const open = Array.isArray(frame.todos) ? frame.todos.length : 0;
+      return note(state, 'muted', 'todo', `Todo reminder (${frame.attempt}/${frame.maxAttempts}): ${open} open`);
+    }
+    case 'irc_message':
+      return note(state, 'info', `irc ${frame.message?.customType ?? ''}`.trim(), messageText(frame.message?.content));
+    case 'notice':
+      return note(state, levelOf(frame.level), frame.source ?? 'notice', String(frame.message ?? ''));
+    case 'goal_updated':
+      return frame.goal
+        ? note(state, 'muted', 'goal', `Goal ${frame.goal.status}: ${frame.goal.objective}`)
+        : note(state, 'muted', 'goal', 'Goal cleared');
+    case 'queue_update':
+      state.queue = { steering: strings(frame.steering), followUp: strings(frame.followUp) };
+      return;
+    case 'prompt_result':
+      return applyPromptResult(state, frame);
+    case 'extension_error':
+      return note(state, 'error', 'extension', `${frame.extensionPath} (${frame.event}): ${frame.error}`);
+    case 'available_commands_update':
+      state.commands = Array.isArray(frame.commands) ? frame.commands.map(slashCommand) : [];
+      return;
+    case 'command_output':
+      return note(state, 'info', 'command', '', String(frame.text ?? ''));
+    case 'session_info_update':
+      if (typeof frame.title === 'string') state.title = frame.title;
+      return;
+    case 'rpc_frame_error':
+      return note(state, 'error', 'transport', `Dropped ${frame.originalType ?? 'a frame'}: ${frame.error}`);
+    case 'extension_ui_request':
+      return applyUiRequest(state, frame);
+    default:
+      return unrecognised(state, type || 'frame without type', frame);
+  }
+}
+
+/** @param {Transcript} state @param {Record<string, any>} frame */
+function applyResponse(state, frame) {
+  const command = String(frame.command ?? 'command');
+  const id = typeof frame.id === 'string' ? frame.id : null;
+  if (!frame.success) {
+    if (id) state.failedRequests.add(id);
+    if (command === 'bash' && finishBash(state, id, null, String(frame.error ?? 'failed'))) return;
+    if (command === 'login') state.openUrl = null;
+    return note(state, 'error', command, `${command} failed: ${frame.error ?? 'unknown error'}`);
+  }
+  if (REFRESH_COMMANDS.has(command)) state.refreshSeq++;
+  switch (command) {
+    case 'get_state':
+      if (frame.data && typeof frame.data === 'object') applyState(state, frame.data);
+      return;
+    case 'get_messages':
+      if (canSeed(state) && Array.isArray(frame.data?.messages)) seed(state, frame.data.messages);
+      return;
+    case 'bash':
+      finishBash(state, id, frame.data ?? {}, null);
+      return;
+    case 'login':
+      state.openUrl = null;
+      return note(state, 'info', 'login', `Logged in${frame.data?.providerId ? ` to ${frame.data.providerId}` : ''}`);
+    default:
+      // Other successful replies are consumed by whoever sent the command.
+      return;
+  }
+}
+
+/** @param {Transcript} state @param {Record<string, any>} data */
+function applyState(state, data) {
+  state.session = {
+    model: data.model && typeof data.model === 'object' ? modelInfo(data.model) : null,
+    thinkingLevel: typeof data.thinkingLevel === 'string' ? data.thinkingLevel : null,
+    contextPercent: typeof data.contextUsage?.percent === 'number' ? data.contextUsage.percent : null,
+    sessionFile: typeof data.sessionFile === 'string' ? data.sessionFile : null,
+    sessionName: typeof data.sessionName === 'string' ? data.sessionName : null,
+  };
+}
+
+/** @param {Transcript} state @param {Record<string, any>} frame */
+function applyPromptResult(state, frame) {
+  const id = typeof frame.id === 'string' ? frame.id : null;
+  if (frame.status === 'error') {
+    const message = String(frame.error?.message ?? 'prompt failed');
+    state.lastError = message;
+    // A prompt that failed before reaching the agent already got an error response.
+    if (id && state.failedRequests.has(id)) return;
+    const where = [frame.error?.provider, frame.error?.model].filter(Boolean).join('/');
+    return note(state, 'error', 'prompt', where ? `${message} (${where})` : message);
+  }
+  if (frame.status === 'aborted') return note(state, 'muted', 'prompt', 'Aborted');
+  state.lastError = null;
+}
+
+/** @param {Transcript} state @param {Record<string, any>} frame */
+function applyUiRequest(state, frame) {
+  const id = typeof frame.id === 'string' ? frame.id : '';
+  switch (frame.method) {
+    case 'select':
+    case 'confirm':
+    case 'input':
+    case 'editor':
+    case 'ask':
+      if (!state.dialogs.some((d) => d.id === id)) state.dialogs = [...state.dialogs, /** @type {Dialog} */ (frame)];
+      return;
+    case 'cancel':
+      state.dialogs = state.dialogs.filter((d) => d.id !== frame.targetId);
+      return;
+    case 'notify':
+      return note(state, levelOf(frame.notifyType), 'notify', String(frame.message ?? ''));
+    case 'setStatus': {
+      const statuses = { ...state.statuses };
+      if (typeof frame.statusText === 'string' && frame.statusText) statuses[frame.statusKey] = frame.statusText;
+      else delete statuses[frame.statusKey];
+      state.statuses = statuses;
+      return;
+    }
+    case 'setWidget': {
+      // omp sends `setWidget` without lines every turn to clear it.
+      const widgets = { ...state.widgets };
+      if (Array.isArray(frame.widgetLines) && frame.widgetLines.length) widgets[frame.widgetKey] = strings(frame.widgetLines);
+      else delete widgets[frame.widgetKey];
+      state.widgets = widgets;
+      return;
+    }
+    case 'setTitle':
+      state.title = typeof frame.title === 'string' ? frame.title : null;
+      return;
+    case 'set_editor_text':
+      state.editorText = { seq: (state.editorText?.seq ?? 0) + 1, text: String(frame.text ?? '') };
+      return;
+    case 'open_url':
+      state.openUrl = {
+        url: String(frame.url ?? ''),
+        launchUrl: typeof frame.launchUrl === 'string' ? frame.launchUrl : null,
+        instructions: typeof frame.instructions === 'string' ? frame.instructions : null,
+      };
+      return;
+    default:
+      return unrecognised(state, `ui ${frame.method ?? '?'}`, frame);
+  }
+}
+
+// ── Commands the daemon wrote to omp ────────────────────
+
+/** @param {Transcript} state @param {Record<string, any>} command */
+function applySent(state, command) {
+  if (command?.type === 'bash') {
+    push(state, {
+      kind: 'bash',
+      language: 'bash',
+      command: String(command.command ?? ''),
+      requestId: typeof command.id === 'string' ? command.id : null,
+      status: 'running',
+      output: '',
+      exitCode: null,
+      truncated: false,
+      error: null,
+      fromMessage: false,
+    });
+  } else if (command?.type === 'extension_ui_response' && typeof command.id === 'string') {
+    state.dialogs = state.dialogs.filter((d) => d.id !== command.id);
+  }
+  // Every other command shows up through omp's own frames (messages, responses).
+}
+
+/**
+ * @param {Transcript} state @param {string | null} id
+ * @param {Record<string, any> | null} result @param {string | null} error
+ * @returns {boolean} whether a running bash item took the reply
+ */
+function finishBash(state, id, result, error) {
+  const item = /** @type {BashItem | undefined} */ (
+    state.items.find((i) => i.kind === 'bash' && i.status === 'running' && (id === null || i.requestId === id))
+  );
+  if (!item) return false;
+  if (error !== null) {
+    item.status = 'error';
+    item.error = error;
+  } else if (result) {
+    item.output = String(result.output ?? '');
+    item.exitCode = typeof result.exitCode === 'number' ? result.exitCode : null;
+    item.truncated = Boolean(result.truncated);
+    item.status = result.cancelled ? 'cancelled' : item.exitCode === null || item.exitCode === 0 ? 'ok' : 'error';
+  }
+  touch(state, item);
+  return true;
+}
+
+// ── Messages ────────────────────────────────────────────
+
+/** @param {Record<string, any>} frame @returns {string | null} */
+function messageKey(frame) {
+  if (typeof frame.messageId === 'string') return `msg:${frame.messageId}`;
+  const m = frame.message;
+  // `custom` messages may come without a messageId: their timestamp pairs start and end.
+  if (m && typeof m.timestamp === 'number') return `msg:${m.role}@${m.timestamp}@${m.customType ?? ''}`;
+  return null;
+}
+
+/**
+ * @param {Transcript} state @param {any} message @param {string | null} key @param {boolean} final
+ */
+function applyMessage(state, message, key, final) {
+  const role = message?.role;
+  // Without a key, start and end cannot be paired: show the message once, at its end.
+  if (key === null && !final) return;
+  switch (role) {
+    case 'assistant': {
+      const item = upsert(state, key, () => ({ kind: 'assistant', blocks: [], stopReason: null, errorMessage: null, model: null, ended: false }));
+      if (item.kind !== 'assistant') return unrecognised(state, 'assistant (id clash)', message);
+      item.blocks = Array.isArray(message.content) ? message.content.map(toBlock) : [];
+      item.model = typeof message.model === 'string' ? message.model : null;
+      if (final) {
+        item.ended = true;
+        item.stopReason = typeof message.stopReason === 'string' ? message.stopReason : null;
+        item.errorMessage = typeof message.errorMessage === 'string' ? message.errorMessage : null;
+        if (!state.counted.has(item.key)) {
+          state.counted.add(item.key);
+          const total = message.usage?.cost?.total;
+          if (typeof total === 'number' && Number.isFinite(total)) state.cost += total;
+        }
+      }
+      registerToolCalls(state, item);
+      return touch(state, item);
+    }
+    case 'user': {
+      const item = upsert(state, key, () => ({ kind: 'user', text: '', images: 0, byAgent: false }));
+      if (item.kind !== 'user') return unrecognised(state, 'user (id clash)', message);
+      item.text = messageText(message.content);
+      item.images = Array.isArray(message.content) ? message.content.filter((/** @type {any} */ c) => c?.type === 'image').length : 0;
+      item.byAgent = message.attribution === 'agent' || message.synthetic === true;
+      return touch(state, item);
+    }
+    case 'toolResult': {
+      // Folded into its tool card: never a transcript entry of its own.
+      const run = ensureTool(state, message.toolCallId, message.toolName);
+      if (!run) return unrecognised(state, 'toolResult without toolCallId', message);
+      run.result = contentText(message.content);
+      run.status = message.isError ? 'error' : 'ok';
+      return touchTool(state, run.id);
+    }
+    case 'bashExecution':
+    case 'pythonExecution': {
+      const language = role === 'bashExecution' ? 'bash' : 'python';
+      const command = String(role === 'bashExecution' ? message.command ?? '' : message.code ?? '');
+      // A `!cmd` run already has an item from the daemon's `sent` bash; fill that one.
+      const existing = /** @type {BashItem | undefined} */ (
+        state.items.find((i) => i.kind === 'bash' && !i.fromMessage && i.language === language && i.command === command)
+      );
+      const item = existing ?? upsert(state, key, () => ({ kind: 'bash', language, command, requestId: null, status: 'running', output: '', exitCode: null, truncated: false, error: null, fromMessage: true }));
+      if (item.kind !== 'bash') return unrecognised(state, `${role} (id clash)`, message);
+      item.fromMessage = true;
+      if (existing && key) state.index.set(key, existing); // pairs this message's end with the item
+      if (final || existing === undefined) {
+        item.output = String(message.output ?? '');
+        item.exitCode = typeof message.exitCode === 'number' ? message.exitCode : null;
+        item.truncated = Boolean(message.truncated);
+        item.status = message.cancelled ? 'cancelled' : item.exitCode === null || item.exitCode === 0 ? 'ok' : 'error';
+      }
+      return touch(state, item);
+    }
+    case 'custom':
+    case 'hookMessage':
+      return upsertNote(state, key, 'muted', String(message.customType ?? role), '', messageText(message.content), message.display === false);
+    case 'developer':
+      return upsertNote(state, key, 'muted', 'developer', '', messageText(message.content), false);
+    case 'branchSummary':
+      return upsertNote(state, key, 'muted', 'branch', 'Branch summary', String(message.summary ?? ''), false);
+    case 'compactionSummary':
+      return upsertNote(state, key, 'muted', 'compaction', String(message.shortSummary ?? 'Compaction summary'), String(message.summary ?? ''), false);
+    case 'fileMention': {
+      const files = Array.isArray(message.files) ? message.files.map((/** @type {any} */ f) => String(f?.path ?? '?')) : [];
+      return upsertNote(state, key, 'muted', 'files', `Attached ${files.join(', ')}`, null, false);
+    }
+    default: {
+      const label = `message role ${role ?? '?'}`;
+      if (key && state.index.has(key)) {
+        const item = /** @type {UnrecognisedItem} */ (state.index.get(key));
+        item.raw = json(message);
+        return touch(state, item);
+      }
+      return void push(state, { kind: 'unrecognised', label, raw: json(message) }, key);
+    }
+  }
+}
+
+/** @param {Transcript} state @param {Record<string, any>} frame */
+function applyUpdate(state, frame) {
+  const event = frame.assistantMessageEvent;
+  const sub = typeof event?.type === 'string' ? event.type : '';
+  if (KNOWN_STREAM_NOOPS.has(sub)) return;
+  const key = messageKey(frame) ?? `msg:stream-${state.nextKey}`;
+  const item = upsert(state, key, () => ({ kind: 'assistant', blocks: [], stopReason: null, errorMessage: null, model: null, ended: false }));
+  if (item.kind !== 'assistant') return unrecognised(state, `message_update ${sub}`, frame);
+  const at = Number.isInteger(event.contentIndex) && event.contentIndex >= 0 ? event.contentIndex : item.blocks.length;
+  while (item.blocks.length < at) item.blocks.push({ kind: 'text', text: '' });
+  const current = item.blocks[at];
+  switch (sub) {
+    // A pre-filled message_start may already hold this block: *_start resets it.
+    case 'text_start':
+      item.blocks[at] = { kind: 'text', text: '' };
+      break;
+    case 'text_delta':
+      item.blocks[at] = { kind: 'text', text: (current?.kind === 'text' ? current.text : '') + String(event.delta ?? '') };
+      break;
+    case 'text_end':
+      item.blocks[at] = { kind: 'text', text: String(event.content ?? '') };
+      break;
+    case 'thinking_start':
+      item.blocks[at] = { kind: 'thinking', text: '', redacted: false };
+      break;
+    case 'thinking_delta':
+      item.blocks[at] = { kind: 'thinking', text: (current?.kind === 'thinking' ? current.text : '') + String(event.delta ?? ''), redacted: false };
+      break;
+    case 'thinking_end':
+      item.blocks[at] = { kind: 'thinking', text: String(event.content ?? ''), redacted: false };
+      break;
+    case 'toolcall_start': {
+      const prev = current?.kind === 'toolCall' ? current : null;
+      item.blocks[at] = { kind: 'toolCall', id: prev?.id ?? null, name: prev?.name ?? '', args: null, argsText: '', intent: prev?.intent ?? null };
+      break;
+    }
+    case 'toolcall_delta': {
+      const prev = current?.kind === 'toolCall' ? current : { kind: /** @type {const} */ ('toolCall'), id: null, name: '', args: null, argsText: '', intent: null };
+      item.blocks[at] = { ...prev, argsText: prev.argsText + String(event.delta ?? '') };
+      break;
+    }
+    case 'toolcall_end':
+      item.blocks[at] = toBlock(event.toolCall);
+      registerToolCalls(state, item);
+      break;
+    case 'image_end':
+      item.blocks[at] = { kind: 'other', type: 'image', raw: event.content };
+      break;
+    default:
+      return unrecognised(state, `message_update ${sub || '?'}`, frame);
+  }
+  touch(state, item);
+}
+
+/**
+ * Only a resumed process (which streams none of its earlier history) is seeded, once, and
+ * only before any conversation has streamed: otherwise the history would show twice.
+ * @param {Transcript} state
+ */
+function canSeed(state) {
+  return !state.seeded && Boolean(state.meta?.resume) && !state.items.some((i) => i.kind === 'user' || i.kind === 'assistant');
+}
+
+/**
+ * Seeds a resumed session with its earlier history (from `get_messages`), ahead of the
+ * notes the new process has already produced.
+ * @param {Transcript} state @param {any[]} messages
+ */
+function seed(state, messages) {
+  state.seeded = true;
+  const live = state.items;
+  state.items = [];
+  messages.forEach((message, i) => applyMessage(state, message, `seed:${i}`, true));
+  state.items.push(...live);
+}
+
+// ── Tools ───────────────────────────────────────────────
+
+/**
+ * @param {Transcript} state @param {unknown} id @param {unknown} name
+ * @returns {ToolRun | null}
+ */
+function ensureTool(state, id, name) {
+  if (typeof id !== 'string' || !id) return null;
+  let run = state.tools.get(id);
+  if (!run) {
+    run = { id, name: typeof name === 'string' ? name : '', args: null, intent: null, status: 'pending', output: '', result: null };
+    state.tools.set(id, run);
+  } else if (!run.name && typeof name === 'string') {
+    run.name = name;
+  }
+  if (!state.toolOwner.has(id)) {
+    // No assistant message mentions this call (yet): give it a card of its own.
+    const item = push(state, { kind: 'tool', toolCallId: id });
+    state.toolOwner.set(id, item.key);
+  }
+  return run;
+}
+
+/** @param {Transcript} state @param {AssistantItem} item */
+function registerToolCalls(state, item) {
+  for (const block of item.blocks) {
+    if (block.kind !== 'toolCall' || !block.id) continue;
+    let run = state.tools.get(block.id);
+    if (!run) {
+      run = { id: block.id, name: block.name, args: block.args, intent: block.intent, status: 'pending', output: '', result: null };
+      state.tools.set(block.id, run);
+    } else {
+      if (block.name) run.name = block.name;
+      if (block.args !== null && run.args === null) run.args = block.args;
+      if (block.intent && !run.intent) run.intent = block.intent;
+    }
+    const owner = state.toolOwner.get(block.id);
+    if (owner !== item.key) {
+      // The call was seen before its assistant message: retire the standalone card.
+      if (owner) removeItem(state, owner);
+      state.toolOwner.set(block.id, item.key);
+    }
+  }
+}
+
+/** @param {Transcript} state @param {string} id */
+function touchTool(state, id) {
+  const owner = state.toolOwner.get(id);
+  const item = owner ? state.index.get(owner) : undefined;
+  if (item) touch(state, item);
+}
+
+// ── Helpers ─────────────────────────────────────────────
+
+/** @param {any} c @returns {Block} */
+function toBlock(c) {
+  switch (c?.type) {
+    case 'text':
+      return { kind: 'text', text: String(c.text ?? '') };
+    case 'thinking':
+      return { kind: 'thinking', text: String(c.thinking ?? ''), redacted: false };
+    case 'redactedThinking':
+      return { kind: 'thinking', text: '', redacted: true };
+    case 'toolCall':
+      return {
+        kind: 'toolCall',
+        id: typeof c.id === 'string' ? c.id : null,
+        name: String(c.name ?? ''),
+        args: c.arguments ?? null,
+        argsText: '',
+        intent: typeof c.intent === 'string' ? c.intent : null,
+      };
+    default:
+      // image, fallback, anthropicServerTool and anything newer: shown collapsed, raw.
+      return { kind: 'other', type: String(c?.type ?? 'unknown'), raw: c };
+  }
+}
+
+/** @param {Record<string, any>} m */
+function modelInfo(m) {
+  return { provider: String(m.provider ?? ''), id: String(m.id ?? ''), name: String(m.name ?? m.id ?? '') };
+}
+
+/** @param {any} c @returns {SlashCommand} */
+function slashCommand(c) {
+  return {
+    name: String(c?.name ?? ''),
+    aliases: strings(c?.aliases),
+    description: typeof c?.description === 'string' ? c.description : '',
+    hint: typeof c?.input?.hint === 'string' ? c.input.hint : '',
+  };
+}
+
+/** Text of a message `content` (a string or content blocks). @param {unknown} content */
+function messageText(content) {
+  if (typeof content === 'string') return content;
+  return contentText(content);
+}
+
+/** @param {unknown} content @returns {string} */
+function contentText(content) {
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((c) => (c?.type === 'text' ? String(c.text ?? '') : c?.type === 'image' ? '[image]' : `[${c?.type ?? '?'}]`))
+    .join('');
+}
+
+/** @param {unknown} value @returns {string[]} */
+function strings(value) {
+  return Array.isArray(value) ? value.filter((v) => typeof v === 'string') : [];
+}
+
+/** @param {unknown} level @returns {NoteLevel} */
+function levelOf(level) {
+  return level === 'warning' || level === 'error' ? level : 'info';
+}
+
+/** @param {unknown} value */
+function json(value) {
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * @param {Transcript} state @param {DistributiveOmit<Item, 'key' | 'rev'>} body @param {string | null} [key]
+ * @returns {Item}
+ */
+function push(state, body, key = null) {
+  const item = /** @type {Item} */ ({ ...body, key: key ?? `n:${state.nextKey++}`, rev: 0 });
+  state.items.push(item);
+  state.index.set(item.key, item);
+  return item;
+}
+
+/**
+ * @param {Transcript} state @param {string | null} key @param {() => DistributiveOmit<Item, 'key' | 'rev'>} make
+ * @returns {Item}
+ */
+function upsert(state, key, make) {
+  const found = key ? state.index.get(key) : undefined;
+  return found ?? push(state, make(), key);
+}
+
+/** @param {Transcript} state @param {string} key */
+function removeItem(state, key) {
+  state.index.delete(key);
+  state.items = state.items.filter((i) => i.key !== key);
+}
+
+/** @param {Transcript} state @param {Item} item */
+function touch(state, item) {
+  item.rev++;
+}
+
+/**
+ * @param {Transcript} state @param {NoteLevel} level @param {string} source @param {string} text
+ * @param {string | null} [detail]
+ */
+function note(state, level, source, text, detail = null) {
+  push(state, { kind: 'note', level, source, text, detail, hidden: false });
+}
+
+/**
+ * @param {Transcript} state @param {string | null} key @param {NoteLevel} level @param {string} source
+ * @param {string} text @param {string | null} detail @param {boolean} hidden
+ */
+function upsertNote(state, key, level, source, text, detail, hidden) {
+  const item = upsert(state, key, () => ({ kind: 'note', level, source, text, detail, hidden }));
+  if (item.kind !== 'note') return;
+  Object.assign(item, { level, source, text, detail, hidden });
+  touch(state, item);
+}
+
+/** stderr lines in a row share one note. @param {Transcript} state @param {string} line */
+function addStderr(state, line) {
+  const last = state.items.at(-1);
+  if (last?.kind === 'note' && last.source === 'stderr') {
+    last.detail = `${last.detail ?? last.text}\n${line}`;
+    last.text = `stderr (${last.detail.split('\n').length} lines)`;
+    return touch(state, last);
+  }
+  push(state, { kind: 'note', level: 'muted', source: 'stderr', text: line, detail: null, hidden: false });
+}
+
+/** @param {Transcript} state @param {string} label @param {unknown} frame */
+function unrecognised(state, label, frame) {
+  push(state, { kind: 'unrecognised', label, raw: json(frame) });
+}
+
+/** @template T @template {PropertyKey} K @typedef {T extends unknown ? Omit<T, K> : never} DistributiveOmit */

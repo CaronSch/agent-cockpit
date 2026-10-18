@@ -1,0 +1,772 @@
+/* omp pane: toolbar, transcript, dialogs and composer of one omp agent session. */
+
+.widget-body:has(> .omp) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.omp {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-sm);
+}
+
+.omp [hidden] {
+  display: none !important;
+}
+
+.omp-muted {
+  margin: 0;
+  color: var(--color-text-faint);
+}
+
+.omp-error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.omp-label {
+  color: var(--color-text-dim);
+  font: 600 var(--text-2xs) / 1.4 var(--font-mono);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.omp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.omp-field {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  color: var(--color-text);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.omp-field:focus-visible,
+.omp-draft:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.omp-pre {
+  margin: 0;
+  max-height: 24em;
+  overflow: auto;
+  padding: var(--space-2);
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  font: var(--text-xs) / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── Setup / status screens ─────────────────────────── */
+.omp-center,
+.omp-setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: auto;
+  padding: var(--space-4);
+  max-width: 36rem;
+  width: 100%;
+}
+
+.omp-center p {
+  margin: 0;
+}
+
+.omp-setup-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.omp-setup .omp-field {
+  flex: 1;
+}
+
+/* ── Session layout ─────────────────────────────────── */
+.omp-session {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.omp-toolbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-line);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+}
+
+.omp-cwd {
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.omp-spacer {
+  flex: 1;
+}
+
+.omp-tool-btn {
+  padding: 2px 6px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.omp-tool-btn:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+}
+
+.omp-tool-btn:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
+}
+
+.omp-tool-btn[aria-expanded='true'] {
+  border-color: var(--color-accent);
+}
+
+.omp-activity {
+  color: var(--color-text-faint);
+}
+
+.omp-activity::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--color-line-strong);
+  vertical-align: 1px;
+}
+
+.omp-activity.is-streaming {
+  color: var(--color-accent);
+}
+
+.omp-activity.is-streaming::before {
+  background: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-glow);
+  animation: omp-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes omp-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omp-activity.is-streaming::before {
+    animation: none;
+  }
+}
+
+.omp-meter {
+  color: var(--color-text-dim);
+}
+
+.omp-meter:empty {
+  display: none;
+}
+
+.omp-badge-error {
+  padding: 0 5px;
+  border-radius: var(--radius-s);
+  background: var(--color-danger);
+  color: var(--color-deck);
+  cursor: help;
+}
+
+.omp-menu {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: min(22rem, 90%);
+  max-height: 60%;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-lift);
+}
+
+.omp-menu-list {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.omp-menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.omp-menu-item:hover,
+.omp-menu-item:focus-visible {
+  background: var(--color-surface);
+}
+
+.omp-menu-item.is-current {
+  color: var(--color-accent);
+}
+
+.omp-strip,
+.omp-login,
+.omp-banner {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--color-line);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+}
+
+.omp-strip {
+  color: var(--color-text-dim);
+}
+
+.omp-strip-title {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.omp-strip-widget {
+  margin: 0;
+  flex-basis: 100%;
+  white-space: pre-wrap;
+}
+
+.omp-login {
+  background: var(--color-accent-glow);
+}
+
+.omp-login a,
+.omp-md a {
+  color: var(--color-accent);
+  overflow-wrap: anywhere;
+}
+
+.omp-login .omp-muted {
+  flex-basis: 100%;
+  color: var(--color-text-dim);
+}
+
+.omp-banner.is-ended {
+  background: var(--color-deck);
+}
+
+/* ── Transcript ─────────────────────────────────────── */
+.omp-transcript {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+/* Items keep their natural height; the transcript scrolls instead. Without this, items
+   that scroll themselves (overflow: auto, e.g. <pre>) are squeezed to nothing. */
+.omp-transcript > * {
+  flex-shrink: 0;
+}
+
+.omp-msg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.omp-user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+}
+
+.omp-user.is-agent {
+  align-self: stretch;
+  max-width: none;
+  background: transparent;
+  border: 1px dashed var(--color-line);
+}
+
+.omp-role {
+  color: var(--color-text-faint);
+  font: 600 var(--text-2xs) / 1 var(--font-mono);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.omp-md {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.omp-md > :first-child {
+  margin-top: 0;
+}
+
+.omp-md > :last-child {
+  margin-bottom: 0;
+}
+
+.omp-md p,
+.omp-md ul,
+.omp-md ol,
+.omp-md blockquote,
+.omp-md pre {
+  margin: 0 0 var(--space-2);
+}
+
+.omp-md ul,
+.omp-md ol {
+  padding-left: 1.4em;
+}
+
+.omp-md blockquote {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-line-strong);
+  color: var(--color-text-dim);
+}
+
+.omp-md li > p:last-child,
+.omp-md li > ul:last-child,
+.omp-md li > ol:last-child {
+  margin-bottom: 0;
+}
+
+.omp-md hr {
+  border: 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.md-heading {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-base);
+}
+
+.md-code,
+.md-table {
+  overflow: auto;
+  padding: var(--space-2);
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  font: var(--text-xs) / 1.45 var(--font-mono);
+}
+
+.md-code[data-lang]::before {
+  content: attr(data-lang);
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+}
+
+.md-inline-code {
+  padding: 0 3px;
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  font: 0.92em var(--font-mono);
+}
+
+.omp details > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.omp details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.omp details > summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 1em;
+  color: var(--color-text-faint);
+  transition: transform var(--duration-fast);
+}
+
+.omp details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.omp details[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.omp-thinking > summary,
+.omp-unrecognised > summary {
+  color: var(--color-text-faint);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+}
+
+.omp-thinking-text {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-line);
+  color: var(--color-text-dim);
+  white-space: pre-wrap;
+}
+
+.omp-unrecognised > summary {
+  color: var(--color-accent);
+}
+
+.omp-tool,
+.omp-bash {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: var(--color-surface);
+  font: var(--text-xs) / 1.45 var(--font-mono);
+}
+
+.omp-tool > summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.omp-tool-name {
+  font-weight: 600;
+}
+
+.omp-tool-summary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.omp-status {
+  color: var(--color-text-faint);
+}
+
+.is-running > summary .omp-status,
+.omp-bash.is-running .omp-status {
+  color: var(--color-accent);
+}
+
+.is-ok > summary .omp-status,
+.omp-bash.is-ok .omp-status {
+  color: oklch(75% 0.12 150);
+}
+
+.omp-tool.is-error,
+.omp-bash.is-error {
+  border-color: oklch(69% 0.19 27 / 0.5);
+}
+
+.is-error > summary .omp-status,
+.omp-bash.is-error .omp-status {
+  color: var(--color-danger);
+}
+
+.omp-bash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.omp-bash-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.omp-bash-cmd {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.omp-note {
+  color: var(--color-text-faint);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.omp-note.is-info {
+  color: var(--color-text-dim);
+}
+
+.omp-note.is-warning {
+  color: var(--color-accent);
+}
+
+.omp-note.is-error {
+  color: var(--color-danger);
+}
+
+.omp-note.is-hidden > summary {
+  opacity: 0.7;
+}
+
+/* ── Dialogs, queue, suggestions, composer ──────────── */
+.omp-dialogs {
+  flex: none;
+  max-height: 55%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-top: 1px solid var(--color-line);
+}
+
+.omp-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+}
+
+.omp-dialog-title {
+  font-weight: 600;
+}
+
+.omp-dialog-message {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.omp-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.omp-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.omp-option {
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  font-weight: 400;
+}
+
+.omp-option-label {
+  font-weight: 600;
+}
+
+.omp-option-desc {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+.omp-question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+}
+
+.omp-question legend {
+  padding: 0 var(--space-1);
+  font-weight: 600;
+}
+
+.omp-question-header {
+  margin-right: var(--space-2);
+  color: var(--color-accent);
+  font: 600 var(--text-2xs) / 1 var(--font-mono);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.omp-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.omp-choice input {
+  margin-top: 3px;
+  accent-color: var(--color-accent);
+}
+
+.omp-choice-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.omp-recommended {
+  align-self: flex-start;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: var(--color-accent-glow);
+  color: var(--color-accent);
+  font: var(--text-2xs) / 1.5 var(--font-mono);
+}
+
+.omp-preview {
+  max-height: 10em;
+  margin-top: var(--space-1);
+}
+
+.omp-queue {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) 0;
+}
+
+.omp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 1px 2px 1px 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  font: var(--text-xs) / 1.4 var(--font-mono);
+}
+
+.omp-chip-kind {
+  color: var(--color-accent);
+}
+
+.omp-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.omp-chip-remove {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-faint);
+  cursor: pointer;
+}
+
+.omp-chip-remove:hover {
+  color: var(--color-danger);
+}
+
+.omp-suggest {
+  flex: none;
+  max-height: 14em;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  margin: 0 var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-surface-raised);
+}
+
+.omp-suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.omp-suggestion.is-selected,
+.omp-suggestion:hover {
+  background: var(--color-surface);
+}
+
+.omp-suggestion-name {
+  color: var(--color-accent);
+}
+
+.omp-suggestion-hint {
+  color: var(--color-text-dim);
+}
+
+.omp-suggestion-desc {
+  flex-basis: 100%;
+  color: var(--color-text-faint);
+}
+
+.omp-composer {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.omp-draft {
+  flex: 1;
+  min-height: 2.6em;
+  max-height: 12em;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  color: var(--color-text);
+  font: var(--text-sm) / 1.45 var(--font-ui);
+}
+
+.omp-draft:disabled {
+  opacity: 0.6;
+}

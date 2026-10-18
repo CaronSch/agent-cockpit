@@ -23,16 +23,29 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   daemon. The daemon itself never runs as root. Read views say when the helper
   is off.
 - **The telemetry store grows without bound.** Prompts, responses and file
-  events add up quickly. *Threshold detail:* the store passes 1 GB, or the UI
-  slows on load. *Response:* retention by age and size, set by the user.
+  events add up quickly. The first such store already exists: the daemon keeps
+  every event since it started in memory and each page load replays all of it.
+  *Threshold detail:* the daemon passes 1 GB resident, or a page takes visibly
+  long to load its history. *Response:* retention by age and size, set by the
+  user; replay only what open windows need.
 
 ## When the daemon restarts start costing work
 
-- **A daemon restart kills running agents.** omp runs as a child of the daemon,
-  so restarting the daemon during development kills running sessions.
-  *Response:* relaunch with `omp --restore <session.jsonl>`, which resumes the
-  interrupted turn and its subagents; supervise outside the daemon only if that
-  is not enough.
+- **A daemon restart interrupts running agents.** omp runs as a child of the
+  daemon, so a restart ends every session. An omp pane can resume the
+  conversation (`omp --resume`), but a turn that was running is lost.
+  *Response:* relaunch with `omp --restore <session.jsonl>`, which also resumes
+  the interrupted turn and its subagents; supervise outside the daemon only if
+  that is not enough.
+
+## When omp is upgraded past 18.10.3
+
+- **The fake omp drifts from the real one.** `tests/fixtures/fake-omp.js`
+  copies frame shapes recorded from omp 18.10.3; tests stay green while a newer
+  omp sends something else. *Threshold detail:* `omp --version` (also printed
+  at daemon start) is newer than 18.10.3. *Response:* re-record a session with
+  the real omp, diff its frame and message types against the fake, update the
+  fake and this version number.
 
 ## When building the browser pane or chasing shortcut parity
 
