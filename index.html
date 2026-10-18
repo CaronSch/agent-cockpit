@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cockpit</title>
+    <meta name="theme-color" content="#131317" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='3' y='3' width='10' height='10' rx='2' fill='%23f2b441'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap"
+    />
+    <link rel="stylesheet" href="styles/tokens.css" />
+    <link rel="stylesheet" href="styles/app.css" />
+    <script type="module" src="src/main.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Cockpit</span>
+        </div>
+        <nav class="topbar-actions" aria-label="Layout">
+          <button type="button" class="btn btn-accent" id="palette-toggle" aria-expanded="false" aria-controls="palette">
+            <span aria-hidden="true">＋</span> Widget
+          </button>
+        </nav>
+        <aside id="palette" class="palette" hidden aria-label="Widget palette">
+          <p class="palette-hint">Drag onto the grid — or press Enter to add</p>
+          <ul class="palette-list" role="list"></ul>
+        </aside>
+      </header>
+
+      <main class="deck">
+        <section class="grid" id="grid" aria-label="Widget grid">
+          <p class="grid-empty" hidden>Drop a widget anywhere to start your cockpit</p>
+          <div class="drop-indicator" aria-hidden="true">
+            <div class="drop-edge"></div>
+            <div class="drop-fill"></div>
+            <span class="drop-label"></span>
+          </div>
+          <div class="snap-guide" aria-hidden="true"></div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,60 @@
+/* Design tokens — "instrument panel": graphite surfaces, amber phosphor for
+   interaction, red reserved for errors. */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --color-bg: oklch(16.5% 0.006 270);
+  --color-deck: oklch(14% 0.006 270);
+  --color-surface: oklch(20.5% 0.008 270);
+  --color-surface-raised: oklch(24.5% 0.01 270);
+  --color-line: oklch(30% 0.01 270);
+  --color-line-strong: oklch(38% 0.012 270);
+
+  /* Text */
+  --color-text: oklch(94% 0.006 85);
+  --color-text-dim: oklch(70% 0.012 270);
+  --color-text-faint: oklch(54% 0.012 270);
+
+  /* Semantic */
+  --color-accent: oklch(81% 0.155 72);
+  --color-accent-ink: oklch(22% 0.04 72);
+  --color-accent-glow: oklch(81% 0.155 72 / 0.18);
+  --color-danger: oklch(69% 0.19 27);
+
+  /* Type */
+  --font-ui: 'IBM Plex Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.25rem;
+  --tracking-caps: 0.12em;
+
+  /* Space & shape */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --grid-gap: 6px;
+  --radius-s: 3px;
+  --radius-m: 6px;
+  --topbar-h: 48px;
+
+  /* Motion */
+  --duration-snap: 90ms;
+  --duration-fast: 150ms;
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.25, 1);
+
+  /* Depth */
+  --shadow-lift: 0 18px 40px -12px oklch(0% 0 0 / 0.6), 0 2px 6px oklch(0% 0 0 / 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-snap: 0ms;
+    --duration-fast: 0ms;
+  }
+}
