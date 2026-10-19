@@ -5,13 +5,15 @@ import { revOf } from '../daemon/scratchpad.js';
 /** @import { Scratchpad } from '../daemon/wire.js' */
 /** @import { DaemonClient, ConnectionStatus } from '../src/daemon/client.js' */
 
+const PAD = 'p';
+
 /**
  * The daemon's scratchpad as the store sees it: real version checks, a stream to push other
  * pages' saves through, and saves that can be held to land later.
  */
 function fakeDaemon(initial = '') {
   const server = { text: initial, up: true, hold: false };
-  /** @type {Set<(pad: Scratchpad) => void>} */
+  /** @type {Set<(id: string, pad: Scratchpad) => void>} */
   const padListeners = new Set();
   /** @type {Set<(s: ConnectionStatus) => void>} */
   const statusListeners = new Set();
@@ -20,23 +22,31 @@ function fakeDaemon(initial = '') {
   /** @type {Array<{ text: string, base: string }>} */
   const saves = [];
   const current = () => ({ text: server.text, rev: revOf(server.text) });
-  /** Another page saves: the daemon writes, then tells every page. @param {string} text */
+  /** Another page saves pad `p`: the daemon writes, then tells every page. @param {string} text */
   const otherPageSaves = (text) => {
     server.text = text;
-    for (const fn of padListeners) fn(current());
+    for (const fn of padListeners) fn(PAD, current());
   };
+  /** Someone saves a different pad. @param {string} text */
+  const otherPadSaves = (text) => {
+    for (const fn of padListeners) fn('another', { text, rev: revOf(text) });
+  };
+  /** @param {string} id */
+  const only = (id) => assert.equal(id, PAD, 'the store only ever touches its own pad');
 
   const daemon = /** @type {DaemonClient} */ (
     /** @type {unknown} */ ({
       status: () => 'open',
       onStatus: (/** @type {(s: ConnectionStatus) => void} */ fn) => (statusListeners.add(fn), () => statusListeners.delete(fn)),
-      onScratchpad: (/** @type {(pad: Scratchpad) => void} */ fn) => (padListeners.add(fn), () => padListeners.delete(fn)),
-      scratchpad: async () => {
+      onScratchpad: (/** @type {(id: string, pad: Scratchpad) => void} */ fn) => (padListeners.add(fn), () => padListeners.delete(fn)),
+      scratchpad: async (/** @type {string} */ id) => {
+        only(id);
         if (!server.up) throw new Error('daemon unreachable');
         return current();
       },
-      saveScratchpad: (/** @type {string} */ text, /** @type {string} */ base) =>
+      saveScratchpad: (/** @type {string} */ id, /** @type {string} */ text, /** @type {string} */ base) =>
         new Promise((resolve, reject) => {
+          only(id);
           if (!server.up) return reject(new Error('daemon unreachable'));
           saves.push({ text, base });
           if (base !== current().rev) return resolve({ ok: false, current: current() });
@@ -54,7 +64,7 @@ function fakeDaemon(initial = '') {
   const reconnect = () => {
     for (const fn of statusListeners) fn('open');
   };
-  return { daemon, server, saves, held, otherPageSaves, reconnect };
+  return { daemon, server, saves, held, otherPageSaves, otherPadSaves, reconnect };
 }
 
 function manualTimers() {
@@ -82,7 +92,7 @@ const settle = () => new Promise((r) => setImmediate(r));
 async function setup(initial) {
   const fake = fakeDaemon(initial);
   const clock = manualTimers();
-  const store = createScratchpadStore({ daemon: fake.daemon, timers: clock.timers });
+  const store = createScratchpadStore({ daemon: fake.daemon, id: PAD, timers: clock.timers });
   await settle();
   return { ...fake, ...clock, store };
 }
@@ -102,6 +112,14 @@ describe('scratchpad store', () => {
     assert.deepEqual(saves, [{ text: 'old notes', base: revOf('old') }]);
     assert.equal(server.text, 'old notes');
     assert.equal(store.state().phase, 'saved');
+  });
+
+  test('a save to another pad leaves this one alone', async () => {
+    const { store, otherPadSaves } = await setup('mine');
+    store.edit('mine, unsaved');
+    otherPadSaves('something else entirely');
+    assert.equal(store.state().text, 'mine, unsaved');
+    assert.equal(store.state().phase, 'saving', 'not a conflict');
   });
 
   test('another page’s save shows up here when nothing is unsaved', async () => {

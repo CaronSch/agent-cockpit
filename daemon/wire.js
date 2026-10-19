@@ -13,16 +13,21 @@
  *                                      202 { pending: true, id } when omp has not answered within
  *                                      the hold time; the response then arrives on the stream
  *   POST   /api/sessions/:id/ui        omp `extension_ui_response` → 204
- *   GET    /api/scratchpad             → Scratchpad
- *   PUT    /api/scratchpad             { text, base } → { rev }, or 409 { error, current: Scratchpad }
- *                                      when the scratchpad is no longer at version `base`
+ *   GET    /api/scratchpads            → { pads: ScratchpadSummary[] } (most recently changed first)
+ *   GET    /api/scratchpads/:id        → Scratchpad (empty text for a pad never written)
+ *   PUT    /api/scratchpads/:id        { text, base } → { rev }, or 409 { error, current: Scratchpad }
+ *                                      when the pad is no longer at version `base`
+ *   DELETE /api/scratchpads/:id        → 204 (the pad and its files)
+ *   POST   /api/scratchpads/:id/assets raw file body, `x-file-name` header (URI-encoded)
+ *                                      → 201 { path } for the pad's Markdown, e.g. `<id>.assets/<name>`
+ *   GET    /api/scratchpads/:id/assets/:name → the file (images inline, anything else as a download)
  *   GET    /api/stream                 Server-Sent Events, one StreamEvent per message
  *
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
  * `<bootId>:<seq>`, so a reconnect resumes after the last event it saw; the first message
  * on every connection is a `hello` carrying the current boot id and session list.
  * `scratchpad` events carry no id and are not replayed: a reconnecting page reads
- * GET /api/scratchpad instead.
+ * GET /api/scratchpads/:id instead.
  */
 
 /** @typedef {'starting' | 'ready' | 'exited' | 'failed'} SessionStatus */
@@ -77,12 +82,13 @@
 
 /** @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[] }} HelloEvent */
 
-/** The shared scratchpad's text; `rev` names this exact text (a hash of it). @typedef {{ text: string, rev: string }} Scratchpad */
-/** Sent to every page after a scratchpad write. @typedef {{ kind: 'scratchpad' } & Scratchpad} ScratchpadEvent */
+/** A scratchpad's text; `rev` names this exact text (a hash of it). @typedef {{ text: string, rev: string }} Scratchpad */
+/** @typedef {{ id: string, title: string, modifiedAt: number, size: number }} ScratchpadSummary */
+/** Sent to every page after a pad changes (a deleted pad arrives empty). @typedef {{ kind: 'scratchpad', id: string } & Scratchpad} ScratchpadEvent */
 
 /** @typedef {HelloEvent | ScratchpadEvent | SessionEvent} StreamEvent */
 
-/** @typedef {{ defaultCwd: string, home: string, ompVersion: string | null, scratchpadFile: string }} DaemonConfig */
+/** @typedef {{ defaultCwd: string, home: string, ompVersion: string | null, scratchpadDir: string }} DaemonConfig */
 
 /**
  * omp's reply to one command (see omp's rpc docs). `success: false` is a normal answer,

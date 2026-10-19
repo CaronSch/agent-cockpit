@@ -3,7 +3,7 @@
  * activated with click / Enter. Like TapeSurf's popup, the palette fades out
  * while a drag is active so it never hides a drop target.
  */
-import { newLeaf } from '../layout/new-leaf.js';
+import { newWidgetLeaf } from '../widgets/registry.js';
 /** @import { WidgetDef } from '../widgets/registry.js' */
 /** @import { DragController } from '../interaction/drag-controller.js' */
 /** @typedef {{ open(): void, close(): void, setDragging(dragging: boolean): void }} Palette */
@@ -60,7 +60,7 @@ export function createPalette({ toggleButton, panel, widgets, drag, onAdd }) {
     if (!button) return;
     const def = widgets[/** @type {string} */ (button.dataset.type)];
     if (!def) return;
-    drag.start({ kind: 'new', leaf: newLeaf(def.type) }, event, {
+    drag.start({ kind: 'new', leaf: newWidgetLeaf(def.type) }, event, {
       label: def.title,
       onEnd: ({ activated }) => {
         suppressClick = activated;

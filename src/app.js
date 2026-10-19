@@ -5,7 +5,6 @@
 import { applyDrop, branch, findLeaf, insertBeside, listLeaves, moveLeaf, removeLeaf, setLeafParams } from './layout/grid-model.js';
 import { computeLayout } from './layout/compute-layout.js';
 import { findNeighbor, DIRECTION_KEYS } from './layout/neighbors.js';
-import { newLeaf } from './layout/new-leaf.js';
 import { createAtom } from './state/atom.js';
 import { loadLayout, saveLayout } from './state/persistence.js';
 import { createGridRenderer } from './render/grid-renderer.js';
@@ -14,7 +13,7 @@ import { attachSashController } from './interaction/sash-controller.js';
 import { createDragController } from './interaction/drag-controller.js';
 import { createPalette } from './ui/palette.js';
 import { el } from './ui/dom.js';
-import { WIDGETS } from './widgets/registry.js';
+import { WIDGETS, newWidgetLeaf } from './widgets/registry.js';
 /** @import { Leaf, LeafParams, Tree } from './layout/grid-model.js' */
 /** @import { WidgetContext } from './widgets/registry.js' */
 /** @import { Rect } from './layout/compute-layout.js' */
@@ -108,7 +107,7 @@ export function createApp(root) {
       setParams: (/** @type {LeafParams} */ patch) => api.commitTree(setLeafParams(layoutAtom.get(), leaf.id, patch)),
       addWidget: (/** @type {string} */ type, /** @type {LeafParams} */ params) => addWidget(type, params),
       dragWidget(/** @type {string} */ type, /** @type {LeafParams} */ params, /** @type {PointerEvent} */ event, options = {}) {
-        drag.start({ kind: 'new', leaf: { ...newLeaf(type), params } }, event, {
+        drag.start({ kind: 'new', leaf: newWidgetLeaf(type, params) }, event, {
           label: options.label ?? WIDGETS[type]?.title ?? type,
           onEnd: options.onEnd,
         });
@@ -202,7 +201,7 @@ export function createApp(root) {
 
   /** @param {string} type @param {LeafParams} [params] */
   function addWidget(type, params) {
-    const leaf = params ? { ...newLeaf(type), params } : newLeaf(type);
+    const leaf = newWidgetLeaf(type, params);
     const tree = layoutAtom.get();
     const target = largestLeaf(layout.leaves);
     const next =

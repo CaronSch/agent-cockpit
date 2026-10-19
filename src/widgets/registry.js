@@ -1,3 +1,4 @@
+import { newLeaf } from '../layout/new-leaf.js';
 import pane from './pane.js';
 import omp from './omp.js';
 import sessions from './sessions.js';
@@ -5,7 +6,9 @@ import scratchpad from './scratchpad.js';
 
 /**
  * Widgets the palette can add, keyed by type.
- * Contract: { type, title, glyph, description, mount(body, ctx) → { destroy() } }.
+ * Contract: { type, title, glyph, description, newParams?(), mount(body, ctx) → { destroy() } }.
+ * `newParams()` gives a window its starting settings when one is created (e.g. a fresh
+ * scratchpad id); windows restored from a saved layout keep theirs.
  * `ctx.params` is this window's saved settings (read it when needed: it changes after
  * mount); `ctx.setParams(patch)` merges into them and persists them with the layout.
  * `ctx.addWidget(type, params)` opens another window beside the largest one;
@@ -24,6 +27,7 @@ import scratchpad from './scratchpad.js';
  */
 /**
  * @typedef {{ type: string, title: string, glyph: string, description: string,
+ *   newParams?: () => LeafParams,
  *   mount(body: HTMLElement, ctx: WidgetContext): { destroy(): void } }} WidgetDef
  */
 
@@ -32,3 +36,12 @@ const DEFS = [pane, omp, sessions, scratchpad];
 
 /** @type {Readonly<Record<string, WidgetDef>>} */
 export const WIDGETS = Object.freeze(Object.fromEntries(DEFS.map((def) => [def.type, def])));
+
+/**
+ * A new window of `type`: with `params` if given, else the widget's own starting settings.
+ * @param {string} type @param {LeafParams} [params]
+ */
+export function newWidgetLeaf(type, params) {
+  const start = params ?? WIDGETS[type]?.newParams?.();
+  return start ? { ...newLeaf(type), params: start } : newLeaf(type);
+}

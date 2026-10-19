@@ -3,17 +3,19 @@
  * (routes in `wire.js`), all behind the loopback guard.
  */
 import { createServer } from 'node:http';
+import { createReadStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { SessionNotRunning } from './omp-session.js';
+import { PAD_ID } from './scratchpad.js';
 /** @import { IncomingMessage, ServerResponse } from 'node:http' */
 /** @import { AddressInfo } from 'node:net' */
 /** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
 /** @import { Hub } from './hub.js' */
 /** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
-/** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpad>} ScratchpadStore */
+/** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
 
 const STATIC_DIRS = ['src', 'styles'];
 const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
@@ -26,6 +28,7 @@ const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
   '.woff2': 'font/woff2',
 });
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const HEARTBEAT_MS = 15_000;
 const COOKIE_MAX_AGE_S = 365 * 24 * 60 * 60;
 const BASE_HEADERS = {
@@ -33,6 +36,16 @@ const BASE_HEADERS = {
   'referrer-policy': 'no-referrer',
   'content-security-policy': "frame-ancestors 'none'",
   'x-content-type-options': 'nosniff',
+};
+/**
+ * Uploaded files are served from the workbench's own origin, so they must never run: no
+ * sniffing, a sandbox for anything opened as a page, and only raster images shown inline.
+ * Their names are unique, so they can be cached for good.
+ */
+const ASSET_HEADERS = {
+  ...BASE_HEADERS,
+  'cache-control': 'private, max-age=31536000, immutable',
+  'content-security-policy': "sandbox; default-src 'none'; img-src 'self'; frame-ancestors 'none'",
 };
 
 class HttpError extends Error {
@@ -55,18 +68,25 @@ function sendText(res, status, text) {
   res.end(text);
 }
 
-/** @param {IncomingMessage} req @returns {Promise<any>} parsed untrusted JSON */
-async function readJson(req) {
+/** @param {IncomingMessage} req @param {number} limit @returns {Promise<Buffer>} */
+async function readBody(req, limit) {
+  if (Number(req.headers['content-length'] ?? 0) > limit) throw new HttpError(413, 'request body too large');
   /** @type {Buffer[]} */
   const parts = [];
   let size = 0;
   for await (const part of req) {
     size += part.length;
-    if (size > MAX_BODY_BYTES) throw new HttpError(413, 'request body too large');
+    if (size > limit) throw new HttpError(413, 'request body too large');
     parts.push(part);
   }
+  return Buffer.concat(parts);
+}
+
+/** @param {IncomingMessage} req @returns {Promise<any>} parsed untrusted JSON */
+async function readJson(req) {
+  const body = await readBody(req, MAX_BODY_BYTES);
   try {
-    return JSON.parse(Buffer.concat(parts).toString('utf8') || 'null');
+    return JSON.parse(body.toString('utf8') || 'null');
   } catch {
     throw new HttpError(400, 'request body is not JSON');
   }
@@ -112,9 +132,9 @@ function lastSeenSeq(header, bootId) {
 export const RPC_HOLD_MS = 2000;
 
 /**
- * @param {{ hub: Hub, history: History, scratchpad: ScratchpadStore, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
+ * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
  */
-export function createDaemonServer({ hub, history, scratchpad, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
+export function createDaemonServer({ hub, history, scratchpads, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, 'index.html');
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
@@ -129,8 +149,8 @@ export function createDaemonServer({ hub, history, scratchpad, token, root, conf
     for (const event of hub.since(lastSeenSeq(req.headers['last-event-id'], hub.bootId))) send(event);
     const unsubscribe = hub.subscribe(send);
     // No id: scratchpad events are not part of the replayable log (see wire.js).
-    const offScratchpad = scratchpad.subscribe((/** @type {Scratchpad} */ pad) =>
-      res.write(`data: ${JSON.stringify({ kind: 'scratchpad', ...pad })}\n\n`),
+    const offScratchpad = scratchpads.subscribe((/** @type {string} */ id, /** @type {Scratchpad} */ pad) =>
+      res.write(`data: ${JSON.stringify({ kind: 'scratchpad', id, ...pad })}\n\n`),
     );
     const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS);
     req.on('close', () => {
@@ -138,6 +158,52 @@ export function createDaemonServer({ hub, history, scratchpad, token, root, conf
       unsubscribe();
       offScratchpad();
     });
+  }
+
+  /**
+   * The `/api/scratchpads` routes (see wire.js).
+   * @param {IncomingMessage} req @param {ServerResponse} res @param {string} method @param {string[]} path
+   */
+  async function scratchpadRoute(req, res, method, [rawId, sub, rawName]) {
+    if (rawId === undefined) {
+      if (method === 'GET') return sendJson(res, 200, { pads: await scratchpads.list() });
+      throw new HttpError(405, 'method not allowed');
+    }
+    const id = decodeURIComponent(rawId);
+    if (!PAD_ID.test(id)) throw new HttpError(404, 'no such scratchpad');
+    if (sub === undefined) {
+      if (method === 'GET') return sendJson(res, 200, await scratchpads.read(id));
+      if (method === 'DELETE') {
+        await scratchpads.remove(id);
+        return void res.writeHead(204, BASE_HEADERS).end();
+      }
+      if (method !== 'PUT') throw new HttpError(405, 'method not allowed');
+      const body = await readJson(req);
+      if (typeof body?.text !== 'string' || typeof body?.base !== 'string') {
+        throw new HttpError(400, 'expected { text: string, base: string }');
+      }
+      const result = await scratchpads.write(id, body.text, body.base);
+      if (!result.ok) return sendJson(res, 409, { error: 'the scratchpad changed since this edit began', current: result.current });
+      return sendJson(res, 200, { rev: result.rev });
+    }
+    if (sub !== 'assets') throw new HttpError(404, 'no such route');
+    if (rawName === undefined) {
+      if (method !== 'POST') throw new HttpError(405, 'method not allowed');
+      const name = decodeURIComponent(String(req.headers['x-file-name'] ?? 'file'));
+      const bytes = await readBody(req, MAX_UPLOAD_BYTES);
+      return sendJson(res, 201, { path: await scratchpads.saveAsset(id, name, bytes) });
+    }
+    if (method !== 'GET') throw new HttpError(405, 'method not allowed');
+    const asset = scratchpads.asset(id, decodeURIComponent(rawName));
+    const info = asset && (await stat(asset.path).catch(() => null));
+    if (!asset || !info?.isFile()) throw new HttpError(404, 'no such file');
+    res.writeHead(200, {
+      ...ASSET_HEADERS,
+      'content-type': asset.type,
+      'content-length': info.size,
+      ...(asset.inline ? {} : { 'content-disposition': 'attachment' }),
+    });
+    createReadStream(asset.path).pipe(res);
   }
 
   /** @param {IncomingMessage} req @param {ServerResponse} res @param {URL} url */
@@ -149,16 +215,8 @@ export function createDaemonServer({ hub, history, scratchpad, token, root, conf
     if (pathname === '/api/history' && method === 'GET') {
       return sendJson(res, 200, { sessions: await history.list(url.searchParams.get('q') ?? '') });
     }
-    if (pathname === '/api/scratchpad' && method === 'GET') return sendJson(res, 200, await scratchpad.read());
-    if (pathname === '/api/scratchpad' && method === 'PUT') {
-      const body = await readJson(req);
-      if (typeof body?.text !== 'string' || typeof body?.base !== 'string') {
-        throw new HttpError(400, 'expected { text: string, base: string }');
-      }
-      const result = await scratchpad.write(body.text, body.base);
-      if (!result.ok) return sendJson(res, 409, { error: 'the scratchpad changed since this edit began', current: result.current });
-      return sendJson(res, 200, { rev: result.rev });
-    }
+    const pads = /^\/api\/scratchpads(?:\/([^/]+)(?:\/([^/]+)(?:\/([^/]+))?)?)?$/.exec(pathname);
+    if (pads) return scratchpadRoute(req, res, method, pads.slice(1));
     if (pathname === '/api/sessions' && method === 'GET') return sendJson(res, 200, { sessions: hub.list() });
     if (pathname === '/api/sessions' && method === 'POST') {
       const body = await readJson(req);
