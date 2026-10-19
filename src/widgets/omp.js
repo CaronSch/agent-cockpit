@@ -11,6 +11,8 @@ import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/tran
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
+import { isCommand } from '../omp/message.js';
+import { attachSelectionComments } from '../omp/selection-comment.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { RpcResponse, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -346,6 +348,14 @@ function createPane(body, ctx, daemon) {
     suggest.setAttribute('role', 'listbox');
     const composer = createComposer({ pane: node });
     const { draft, sendBtn } = composer;
+    const quoteComments = attachSelectionComments({
+      host: node,
+      transcript,
+      onComment: (quote, comment) => {
+        composer.addComment(quote, comment);
+        draft.focus();
+      },
+    });
     node.append(toolbar, menu, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
 
     const meta = () => state.meta ?? daemon.meta(session);
@@ -387,19 +397,22 @@ function createPane(body, ctx, daemon) {
     }
 
     function send() {
-      const text = draft.value.trim();
-      if (!text || !ready()) return;
-      composer.setText('');
+      if (!ready()) return;
+      // `/command` and `!shell` go as typed; comments wait for the next real prompt.
+      const command = isCommand(draft.value);
+      const taken = composer.take({ withComments: !command });
+      const text = taken.message;
+      if (!text) return;
       hideSuggestions();
       /** @type {Record<string, unknown>} */
-      const command = text.startsWith('!')
+      const request = text.startsWith('!')
         ? { type: 'bash', command: text.slice(1).trim() }
         : state.streaming
           ? { type: 'prompt', message: text, streamingBehavior: 'steer' }
           : { type: 'prompt', message: text };
-      void rpc(command).then((res) => {
-        // Give the text back if omp refused it and the user has not typed anything since.
-        if ((!res || !res.success) && !draft.value) composer.setText(text);
+      void rpc(request).then((res) => {
+        // Give it all back if omp refused it and nothing new has been written since.
+        if (!res || !res.success) taken.restore();
       });
     }
 
@@ -841,6 +854,7 @@ function createPane(body, ctx, daemon) {
         closeMenu();
         resizes.disconnect();
         composer.destroy();
+        quoteComments.destroy();
       },
     };
   }

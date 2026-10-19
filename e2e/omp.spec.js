@@ -120,6 +120,41 @@ test('the message box grows with the prompt, up to half the pane, and shrinks ag
   await expect.poll(async () => (await box()).height).toBe(empty.height);
 });
 
+test('a comment on selected reply text goes with the next prompt, quoting what it is about', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('strong')).toHaveText('hello');
+
+  // Text outside the transcript (here the toolbar) is not something to comment on.
+  await pane.locator('.omp-cwd').dblclick();
+  await page.waitForTimeout(100);
+  await expect(pane.locator('.omp-quote-btn')).toHaveCount(0);
+
+  await reply.locator('strong').dblclick(); // selects the word, as a reader would
+  await pane.getByRole('button', { name: 'Comment' }).click();
+  const box = pane.getByRole('textbox', { name: 'Comment on the selected text' });
+  await expect(pane.locator('.omp-quote-pop .omp-quote-preview')).toHaveText('hello');
+  await box.fill('why this word?');
+  await box.press('Enter');
+  const card = pane.locator('.omp-card.is-comment');
+  await expect(card).toContainText('“hello”');
+  await expect(card).toContainText('why this word?');
+  await expect(pane.locator('.omp-quote-pop')).toBeHidden();
+
+  // A shell line goes as typed and leaves the comment waiting.
+  await send(pane, '!echo hi');
+  await expect(pane.locator('.omp-bash').last()).toBeVisible();
+  await expect(card).toBeVisible();
+
+  const sent = page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'prompt');
+  await send(pane, 'and the next step?');
+  expect((await sent).postDataJSON().message).toBe('> hello\n\nwhy this word?\n\nand the next step?');
+  await expect(card).toHaveCount(0);
+  await expect(pane.locator('textarea')).toHaveValue('');
+});
+
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
