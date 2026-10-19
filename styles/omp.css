@@ -389,13 +389,42 @@
   font-size: var(--text-base);
 }
 
-.md-code,
-.md-table {
+.md-code {
   overflow: auto;
   padding: var(--space-2);
   border-radius: var(--radius-s);
   background: var(--color-deck);
   font: var(--text-xs) / 1.45 var(--font-mono);
+}
+
+.md-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.md-table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.md-table th,
+.md-table td {
+  padding: 5px 10px;
+  border: 1px solid var(--color-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.md-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--color-surface-raised) 45%, transparent);
 }
 
 .md-code[data-lang]::before {

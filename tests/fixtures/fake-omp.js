@@ -8,6 +8,7 @@
  * - contains "ask": an `ask` dialog; the reply names the chosen option
  * - contains "mystery": emits a frame type no client knows
  * - contains "garble": writes a stdout line that is not JSON
+ * - contains "table": replies with a markdown table
  * With `--resume <file>`, `get_messages` returns a short earlier conversation.
  */
 import { createInterface } from 'node:readline';
@@ -104,6 +105,8 @@ async function runPrompt(id, text) {
     const answer = await askDialog();
     const picked = answer.cancelled ? 'nothing (cancelled)' : (answer.answers?.[0]?.selectedOptions?.[0] ?? answer.answers?.[0]?.customInput);
     streamAssistant(`You picked **${picked}**.`);
+  } else if (/table/.test(text)) {
+    streamAssistant('Here it is:\n| When | What happens | Code |\n|---|---|---|\n| Now | Stuff happened | `tracked.rs:67` |');
   } else {
     streamAssistant(`You said: **${text}**\n\n- one\n- two`);
   }

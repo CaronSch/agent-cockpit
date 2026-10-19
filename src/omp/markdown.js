@@ -3,7 +3,8 @@
  *
  * Supported: paragraphs (newlines kept as line breaks), ATX headings, fenced code with a
  * language, inline code, bold/italic, bullet and numbered lists, block quotes, horizontal
- * rules, links and autolinks. Tables stay preformatted. Raw HTML is plain text. Only
+ * rules, links and autolinks, and GFM tables (column alignment, inline formatting in cells;
+ * a table may start right under a paragraph line). Raw HTML is plain text. Only
  * http, https and mailto targets become links; anything else stays text. An unterminated
  * fence (text still streaming) runs to the end of the input.
  */
@@ -26,10 +27,12 @@
  *   | { type: 'code', lang: string, text: string }
  *   | { type: 'list', ordered: boolean, start: number, items: Block[][] }
  *   | { type: 'quote', children: Block[] }
- *   | { type: 'table', text: string }
+ *   | { type: 'table', align: Align[], head: Inline[][], rows: Inline[][][] }
  *   | { type: 'rule' }
  * )} Block
  */
+
+/** @typedef {'left' | 'center' | 'right' | null} Align */
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)[^`]*$/;
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/;
@@ -70,6 +73,33 @@ const isBlank = (line) => line.trim() === '';
  */
 function startsBlock(line) {
   return FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || LIST_ITEM.test(line);
+}
+
+/**
+ * The cells of a table row: split on unescaped pipes, outer pipes optional, `\|` a literal pipe.
+ * @param {string} line @returns {string[]}
+ */
+function splitRow(line) {
+  let row = line.trim();
+  if (row.startsWith('|')) row = row.slice(1);
+  if (row.endsWith('|') && !row.endsWith('\\|')) row = row.slice(0, -1);
+  return row.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, '|'));
+}
+
+/**
+ * The column alignments if `lines[i]` is a table header with a matching divider under it.
+ * @param {string[]} lines @param {number} i @returns {Align[] | null}
+ */
+function tableAt(lines, i) {
+  const divider = lines[i + 1];
+  if (!lines[i].includes('|') || divider === undefined || !TABLE_DIVIDER.test(divider) || !divider.includes('-')) return null;
+  const cells = splitRow(divider);
+  if (cells.length !== splitRow(lines[i]).length) return null;
+  return cells.map((cell) => {
+    const left = cell.startsWith(':');
+    const right = cell.endsWith(':');
+    return left && right ? 'center' : right ? 'right' : left ? 'left' : null;
+  });
 }
 
 /** @param {string[]} lines @returns {Block[]} */
@@ -138,18 +168,27 @@ function parseBlocks(lines) {
       continue;
     }
 
-    if (line.includes('|') && i + 1 < lines.length && TABLE_DIVIDER.test(lines[i + 1]) && lines[i + 1].includes('-')) {
-      /** @type {string[]} */
+    const align = tableAt(lines, i);
+    if (align) {
+      /** @param {string} row */
+      const cells = (row) => {
+        const raw = splitRow(row);
+        // Every row has the header's columns: missing cells are empty, extra ones dropped.
+        return align.map((_, c) => parseInline(raw[c] ?? ''));
+      };
+      const head = cells(lines[i]);
+      i += 2;
+      /** @type {Inline[][][]} */
       const rows = [];
-      while (i < lines.length && !isBlank(lines[i]) && lines[i].includes('|')) rows.push(lines[i++]);
-      blocks.push({ type: 'table', text: rows.join('\n') });
+      while (i < lines.length && !isBlank(lines[i]) && lines[i].includes('|')) rows.push(cells(lines[i++]));
+      blocks.push({ type: 'table', align, head, rows });
       continue;
     }
 
     /** @type {string[]} */
     const para = [line];
     i++;
-    while (i < lines.length && !isBlank(lines[i]) && !startsBlock(lines[i])) para.push(lines[i++]);
+    while (i < lines.length && !isBlank(lines[i]) && !startsBlock(lines[i]) && !tableAt(lines, i)) para.push(lines[i++]);
     blocks.push({ type: 'paragraph', children: parseInline(para.map((l) => l.trim()).join('\n')) });
   }
   return blocks;

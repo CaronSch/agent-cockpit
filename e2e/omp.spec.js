@@ -85,6 +85,17 @@ test('a streamed reply renders once, as markdown, even though omp pre-fills mess
   await expect(pane.getByText('idle')).toBeVisible();
 });
 
+test('a markdown table in a reply renders as a table, not as pipes', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'show me a table');
+  const table = pane.locator('.omp-assistant').last().locator('table');
+  await expect(table.locator('th')).toHaveText(['When', 'What happens', 'Code']);
+  await expect(table.locator('tbody td')).toHaveText(['Now', 'Stuff happened', 'tracked.rs:67']);
+  await expect(table.locator('tbody td code')).toHaveText('tracked.rs:67');
+  await expect(pane.locator('.omp-assistant').last()).not.toContainText('|');
+});
+
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
