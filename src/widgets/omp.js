@@ -13,7 +13,7 @@ import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
 import { isCommand } from '../omp/message.js';
 import { attachSelectionComments } from '../omp/selection-comment.js';
-import { isAgentActivity } from '../omp/activity.js';
+import { awaitsUser } from '../omp/activity.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -86,8 +86,8 @@ function createPane(body, ctx, daemon) {
     schedule();
   });
 
-  // ── unread: agent output the user has not looked at (what counts: omp/activity.js) ──
-  /** The newest agent activity the user has seen, in daemon time; saved with the window. */
+  // ── unread: a final response or question the user has not looked at (omp/activity.js) ──
+  /** The newest of those the user has seen, in daemon time; saved with the window. */
   let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : Date.now();
   let latest = readAt;
   let unread = false;
@@ -124,7 +124,7 @@ function createPane(body, ctx, daemon) {
 
   /** @param {SessionEvent} event */
   function noteActivity(event) {
-    if (!isAgentActivity(event) || event.at <= readAt) return;
+    if (!awaitsUser(event) || event.at <= readAt) return;
     latest = Math.max(latest, event.at);
     if (reading()) return markRead();
     if (!unread) {

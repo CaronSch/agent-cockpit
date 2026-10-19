@@ -9,6 +9,7 @@
  * - contains "mystery": emits a frame type no client knows
  * - contains "garble": writes a stdout line that is not JSON
  * - contains "table": replies with a markdown table
+ * - contains "slow": an intermediate reply and a tool run, then 1.5 s before the final reply
  * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
  *   prompt that says something: "hi" alone is too little to name a session by)
  * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
@@ -106,6 +107,12 @@ async function runPrompt(id, text) {
   if (/mystery/.test(text)) out({ type: 'mystery_frame', payload: 42 });
   if (/garble/.test(text)) process.stdout.write('this line is not json\n');
   if (/tool/.test(text)) toolCall();
+  if (/slow/.test(text)) {
+    // A turn's middle: an intermediate reply and a tool run, then a pause before the final reply.
+    streamAssistant('Let me check first.');
+    toolCall();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
   if (/ask/.test(text)) {
     const answer = await askDialog();
     const picked = answer.cancelled ? 'nothing (cancelled)' : (answer.answers?.[0]?.selectedOptions?.[0] ?? answer.answers?.[0]?.customInput);

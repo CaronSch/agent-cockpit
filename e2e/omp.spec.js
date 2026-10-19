@@ -225,7 +225,7 @@ test('long pasted text and pasted or dropped files go with the next prompt as at
   await expect(pane.locator('.omp-card')).toHaveCount(0);
 });
 
-test('output that lands while you are elsewhere lights the pane until you look at it', async ({ page }) => {
+test('a final response that lands while you are elsewhere lights the pane until you look at it', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
   const draft = pane.locator('textarea');
@@ -274,6 +274,16 @@ test('output that lands while you are elsewhere lights the pane until you look a
   await sendFromKeyboard('fourth');
   await page.waitForTimeout(200);
   await expect(pane).not.toHaveClass(/is-unread/);
+
+  // The middle of a turn (an intermediate reply, a tool run) is not news; its end is.
+  await lookAway();
+  await draft.fill('slow');
+  await draft.press('Enter');
+  await expect(pane.locator('.omp-assistant', { hasText: 'Let me check first.' })).toBeVisible();
+  await expect(pane.locator('.omp-tool').last()).toBeVisible();
+  await expect(pane).not.toHaveClass(/is-unread/);
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: slow');
+  await expect(pane).toHaveClass(/is-unread/);
 });
 
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {

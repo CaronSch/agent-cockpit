@@ -41,8 +41,10 @@ drop a file anywhere on the pane to attach it: the daemon stores it in
 `~/.agent-cockpit/attachments/<day>/` and the prompt mentions it as
 `@"<path>"`, which omp reads when the prompt starts a turn (images go to the
 model; a steer sent while the agent works carries only the path, which the agent
-can open itself). A pane whose agent wrote something you have not seen gets an
-electric-blue border; hovering, scrolling, clicking or typing in it clears it.
+can open itself). A pane whose agent finished its turn, or stopped to ask you
+something, while you were not looking gets an electric-blue border (thinking,
+tool runs and replies along the way do not); hovering, scrolling, clicking or
+typing in it clears it.
 Sessions started here are named by omp's title model after their first turn
 (the daemon sends `/rename`, so a "Session renamed to …" note appears once).
 

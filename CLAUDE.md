@@ -81,8 +81,9 @@ What runs today:
   grows with the prompt; selected reply text can be commented on and goes quoted
   with the next prompt; long pastes become editable cards and pasted or dropped
   files are stored in `~/.agent-cockpit/attachments/` and sent as omp `@"<path>"`
-  mentions. A pane with output its user has not seen gets an electric-blue
-  border until it is hovered, scrolled, clicked or typed in.
+  mentions. A pane whose agent finished its turn (or asks something) while its
+  user was not looking gets an electric-blue border until it is hovered,
+  scrolled, clicked or typed in.
 - The Sessions window: every past omp conversation (read from omp's session
   files), searchable across titles, directories and prompts, sortable, and
   draggable onto the grid to resume it in a new omp pane. Sessions already open
@@ -193,7 +194,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/new-leaf.js` — Fresh leaf ids for widgets entering the tree.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
-- `src/omp/activity.js` — Which omp events mean the agent produced something for the user to read, or needs them: what turns an omp window "unread".
+- `src/omp/activity.js` — Which omp events turn an omp window "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
 - `src/omp/composer.js` — The omp pane's message box: a draft that grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, pasted text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
