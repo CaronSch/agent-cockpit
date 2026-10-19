@@ -5,7 +5,7 @@
   "description": "In-browser workbench for AI coding harnesses: magnetic, split-tree modular windows (VS Code workbench grid model).",
   "type": "module",
   "scripts": {
-    "start": "python3 -m http.server 5173",
+    "start": "node daemon/main.js",
     "test": "node --test \"tests/**/*.test.js\"",
     "test:coverage": "node --test --experimental-test-coverage \"tests/**/*.test.js\"",
     "test:e2e": "playwright test",

@@ -41,11 +41,24 @@ Planned capabilities:
 ## Architecture
 
 - **Browser UI** (`src/`): the window grid and the widgets. No build step.
-- **Local daemon** (not yet written): the only process that touches the machine.
-  It launches omp in rpc mode and owns those processes. The workbench is
-  self-contained: it shows agents it launched and does not attach to sessions
-  started in other terminals. The daemon also samples process trees, proxies
-  model calls, observes the filesystem, and stores events locally.
+- **Local daemon** (`daemon/`, Node): the only process that touches the machine.
+  `npm start` runs it; it serves the UI on `127.0.0.1:4777` and launches each omp
+  session as `omp --mode rpc-ui` in the chosen directory, owning those processes.
+  The workbench is self-contained: it shows agents it launched and does not attach
+  to sessions started in other terminals. Later it also samples process trees,
+  proxies model calls and observes the filesystem.
+- **Wire** (`daemon/wire.js`): a JSON API for commands and one Server-Sent Events
+  stream per page carrying every session's events in order: each omp stdout frame
+  verbatim, each frame the daemon wrote to omp, stderr lines, undecodable stdout
+  (`garbled`) and session status changes. The browser replays it on load, so a
+  window shows the same history whether it was open all along or not.
+  `src/daemon/client.js` is the browser side; widgets never open their own
+  connections.
+- **Windows keep their own settings** in `leaf.params` (e.g. which session an
+  omp pane shows), saved with the layout. **User data lives with the daemon**,
+  not in the layout: anything that must outlive a window, a browser profile or
+  a port change (the scratchpad's notes) is a file in the state directory
+  (`~/.agent-cockpit`). Closing a window must never delete it.
 - **Telemetry provenance**: every recorded fact carries its source: `harness`
   (omp said so), `proxy` (seen on the wire), or `os` (seen by the kernel or the
   filesystem). The UI shows the source. The gap between what an agent claims it
@@ -54,11 +67,26 @@ Planned capabilities:
 
 ## Current state
 
-Window-system skeleton only. None of the capabilities above exist yet. What runs
-today is a VS Code-style split-tree grid: windows (widgets) are dragged, dropped,
-split and resized with magnetic snapping, the layout persists in localStorage,
-and the only widget is an empty `pane`. There is no daemon and no harness
-connection.
+What runs today:
+
+- The split-tree window grid: windows (widgets) are dragged, dropped, split and
+  resized with magnetic snapping, and the layout persists in localStorage.
+- The daemon and the `omp` pane: start omp in a directory, chat with it from its
+  structured event stream (streamed replies, thinking, tool calls with output,
+  `!` bash), pick model and thinking level, log in to providers, use slash
+  commands, answer approval and `ask` dialogs, steer or stop a running turn, and
+  resume the conversation after a daemon restart. Several panes can run side by
+  side, each bound to its own session.
+- The Sessions window: every past omp conversation (read from omp's session
+  files), searchable across titles, directories and prompts, sortable, and
+  draggable onto the grid to resume it in a new omp pane. Sessions already open
+  in a pane are marked and cannot be opened twice.
+- The Scratchpad window: notes shared by every Scratchpad window and tab, saved
+  as you type to `~/.agent-cockpit/scratchpad.md`. An edit made elsewhere (the
+  file itself, another tab) is never overwritten without asking.
+
+Not built yet: saved-context pins, terminal panes, process view,
+telemetry views, cmux-parity features beyond the above.
 
 ## How we decide
 
@@ -77,10 +105,13 @@ connection.
 
 ## Invariants (current stage)
 
-- The daemon binds `127.0.0.1` only, requires a per-launch random token on every
-  connection, and rejects any `Origin` that is not the workbench's own. Without
-  this, any web page open in the user's browser can reach the daemon and run
-  commands on the machine.
+- The daemon binds `127.0.0.1` only, checks every request's `Host` (DNS
+  rebinding), requires the token cookie on every API request, and refuses any
+  foreign `Origin` or cross-site `Sec-Fetch-Site`. The token is random, stored
+  owner-only in `~/.agent-cockpit/token`, and reaches the browser once through
+  the URL the daemon prints (it becomes an HttpOnly, SameSite=Strict cookie).
+  Without this, any web page open in the user's browser can reach the daemon and
+  run commands on the machine. `tests/daemon.test.js` guards each check.
 - Every agent the workbench shows was launched by the daemon.
 - An omp event or message kind the adapter does not know is shown as an
   unrecognised entry, never dropped. Telemetry that silently loses events lies.
@@ -109,14 +140,22 @@ connection.
 - Several agent sessions may share this checkout. Make changes in a worktree
   (`git worktree add ../agent-cockpit-<topic> -b <branch> main`), never by
   switching branches or stashing in the shared tree.
+- Run it: `npm start`, then open the URL it prints once (it carries the token;
+  the browser keeps a cookie afterwards). `--port`, `--omp <path>` and
+  `AGENT_COCKPIT_STATE_DIR` override the defaults.
 - Before committing, all of these must pass (CI in `.github/workflows/ci.yml`
   runs the same on every push to `main` and every PR):
   - `npm run typecheck`
-  - `npm test`: node:test unit suites for the pure modules in `tests/`
-  - `npm run test:e2e`: Playwright suites in `e2e/`, driving the real app in
-    Chromium. First run on a machine needs `npx playwright install chromium`.
+  - `npm test`: node:test suites in `tests/`: the pure modules, plus the daemon
+    end to end against `tests/fixtures/fake-omp.js`, a scripted stand-in for omp
+  - `npm run test:e2e`: Playwright suites in `e2e/`, driving the real app and
+    daemon (with the fake omp) in Chromium. First run on a machine needs
+    `npx playwright install chromium`.
   - `npm run claude-md:check`
 - A UI behaviour change comes with an e2e test that fails without it.
+- When omp changes its protocol, re-record frames from the real omp (never
+  commit them: they contain local tool and MCP names) and update the fake to
+  match.
 
 ## Keeping this file current
 
@@ -131,9 +170,10 @@ particular, move a capability into "Current state" when it ships.
 
 <!-- BEGIN GENERATED: scripts/update-claude-md.js — do not edit by hand -->
 
-### Modules (`src/`)
+### Modules (`src/` browser, `daemon/` local daemon)
 
 - `src/app.js` — Cockpit controller: owns the layout atom and wires rendering, interaction and widgets together.
+- `src/daemon/client.js` — Browser side of the daemon connection: one event stream per page, shared by every widget.
 - `src/interaction/drag-controller.js` — Pointer-driven drag & drop for moving widgets and adding new ones.
 - `src/interaction/sash-controller.js` — Sash (divider) resizing with magnetic detents.
 - `src/layout/compute-layout.js` — Turns a split tree into absolute pixel rects for leaves and sashes.
@@ -143,22 +183,45 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/new-leaf.js` — Fresh leaf ids for widgets entering the tree.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
+- `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
+- `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
+- `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
+- `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
+- `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
 - `src/render/drop-indicator.js` — Landing preview for drag & drop, plus the sash snap guide.
 - `src/render/grid-renderer.js` — Imperative, diffed DOM writer for the grid.
+- `src/scratchpad/store.js` — The page's copy of the shared scratchpad: every Scratchpad window in the page edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
+- `src/sessions/order.js` — Sorting and labels for the Sessions window, kept free of the DOM so they can be tested.
 - `src/state/atom.js` — Tiny Focal-style atom: get/set/subscribe plus `lens(key)` and `view(fn)`.
 - `src/state/persistence.js` — Versioned, schema-validated layout storage in localStorage.
 - `src/ui/dom.js` — Element construction helper.
 - `src/ui/palette.js` — "Add widget" palette.
+- `src/widgets/omp.js` — The omp pane: starts an omp coding agent in a chosen directory through the daemon and lets the user chat with it and set it up, rendered from omp's structured event stream.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
+- `src/widgets/scratchpad.js` — Free-form notes beside the agents.
+- `src/widgets/sessions.js` — Past omp sessions, searchable and sortable: drag one onto the grid, or press Resume, to continue it in a new omp window.
+- `daemon/frame-decoder.js` — Decodes omp's stdout: newline-delimited JSON frames, with protocol-v2 `rpc_chunk` sequences reassembled into the one frame they carry.
+- `daemon/guard.js` — Loopback guard: decides which requests may reach the daemon (CLAUDE.md, Invariants).
+- `daemon/history.js` — Past omp sessions, read from omp's session files: one summary per conversation, searchable by title, directory and what the user asked.
+- `daemon/hub.js` — The daemon's omp sessions and the single ordered event log the browser replays.
+- `daemon/main.js` — Daemon entry point (`npm start`): serves the workbench on loopback and runs the omp processes it shows.
+- `daemon/omp-session.js` — One omp process in RPC mode: launch, protocol setup, command/response correlation and lifecycle, with everything it does reported as session events.
+- `daemon/scratchpad.js` — The shared scratchpad: one plain-text file the daemon keeps for every Scratchpad window.
+- `daemon/server.js` — HTTP face of the daemon: the workbench's static files, the JSON API and the event stream (routes in `wire.js`), all behind the loopback guard.
+- `daemon/token.js` — The daemon's access token: random, created once, kept owner-only in the state directory so a browser stays signed in across daemon restarts.
+- `daemon/wire.js` — Wire contract between the daemon and the browser: session metadata, stream events and HTTP payloads.
 
 ### Registered widgets
 
 - `pane` — Pane: An empty window
+- `omp` — omp: Chat with an omp coding agent
+- `sessions` — Sessions: Past omp sessions: search, sort, drag one out to resume it
+- `scratchpad` — Scratchpad: Notes, shared by every Scratchpad window and saved as you type
 
 ### npm scripts
 
-- `npm run start` — `python3 -m http.server 5173`
+- `npm run start` — `node daemon/main.js`
 - `npm run test` — `node --test "tests/**/*.test.js"`
 - `npm run test:coverage` — `node --test --experimental-test-coverage "tests/**/*.test.js"`
 - `npm run test:e2e` — `playwright test`
@@ -169,6 +232,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/drop-zone.test.js`, `tests/grid-model.test.js`, `tests/neighbors.test.js`, `tests/persistence.test.js`, `tests/snap.test.js`, `e2e/grid.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-transcript.test.js`, `tests/persistence.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`
 
 <!-- END GENERATED -->

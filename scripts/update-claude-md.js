@@ -55,7 +55,8 @@ function moduleSummary(source) {
 }
 
 async function generate() {
-  const modules = listFiles(join(ROOT, 'src'), '.js').map((path) => {
+  const sources = [...listFiles(join(ROOT, 'src'), '.js'), ...listFiles(join(ROOT, 'daemon'), '.js')];
+  const modules = sources.map((path) => {
     const summary = moduleSummary(readFileSync(path, 'utf8'));
     return `- \`${relative(ROOT, path)}\` — ${summary ?? '**no module doc comment; add one**'}`;
   });
@@ -75,7 +76,7 @@ async function generate() {
   return [
     BEGIN,
     '',
-    '### Modules (`src/`)',
+    '### Modules (`src/` browser, `daemon/` local daemon)',
     '',
     ...modules,
     '',

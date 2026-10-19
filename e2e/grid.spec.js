@@ -386,6 +386,13 @@ test.describe('persistence', () => {
     await expect(page.locator('.widget')).toHaveCount(0);
   });
 
+  test('a change made just before a reload is not lost to the save debounce', async ({ page }) => {
+    const a = await addPane(page);
+    await page.reload(); // well inside the 250ms debounce
+    await settle(page);
+    await expect(page.locator(`.widget[data-id="${a}"]`)).toBeVisible();
+  });
+
   for (const [name, value] of [
     ['unparseable JSON', '{not json'],
     ['a schema-invalid tree', JSON.stringify({ version: 1, tree: { kind: 'leaf', id: 7 } })],

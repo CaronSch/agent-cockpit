@@ -1,0 +1,93 @@
+/**
+ * Wire contract between the daemon and the browser: session metadata, stream events and
+ * HTTP payloads.
+ *
+ * Routes (all same-origin, authenticated by the `ac_token` cookie; see `guard.js`):
+ *
+ *   GET    /api/config                 → DaemonConfig
+ *   GET    /api/history?q=words        → { sessions: PastSession[] } (unordered; every word must match)
+ *   GET    /api/sessions               → { sessions: SessionMeta[] }
+ *   POST   /api/sessions               { cwd, resume? } → 201 { session: SessionMeta }
+ *   DELETE /api/sessions/:id           → 204 (closes omp's stdin, kills it if it lingers)
+ *   POST   /api/sessions/:id/rpc       omp command without `id` → the omp response frame, or
+ *                                      202 { pending: true, id } when omp has not answered within
+ *                                      the hold time; the response then arrives on the stream
+ *   POST   /api/sessions/:id/ui        omp `extension_ui_response` → 204
+ *   GET    /api/scratchpad             → Scratchpad
+ *   PUT    /api/scratchpad             { text, base } → { rev }, or 409 { error, current: Scratchpad }
+ *                                      when the scratchpad is no longer at version `base`
+ *   GET    /api/stream                 Server-Sent Events, one StreamEvent per message
+ *
+ * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
+ * `<bootId>:<seq>`, so a reconnect resumes after the last event it saw; the first message
+ * on every connection is a `hello` carrying the current boot id and session list.
+ * `scratchpad` events carry no id and are not replayed: a reconnecting page reads
+ * GET /api/scratchpad instead.
+ */
+
+/** @typedef {'starting' | 'ready' | 'exited' | 'failed'} SessionStatus */
+
+/**
+ * One omp process the daemon launched. `sessionFile` is the journal it writes, learned from
+ * omp's `get_state` answers (the resumed file until then); it changes on /new or /fork.
+ * @typedef {{
+ *   id: string,
+ *   cwd: string,
+ *   resume: string | null,
+ *   sessionFile: string | null,
+ *   status: SessionStatus,
+ *   pid: number | null,
+ *   exitCode: number | null,
+ *   error: string | null,
+ *   startedAt: number,
+ * }} SessionMeta
+ */
+
+/**
+ * A past omp conversation, summarised from its journal. `firstPrompt`/`lastPrompt` are
+ * one-line previews; times are epoch milliseconds.
+ * @typedef {{
+ *   file: string,
+ *   id: string,
+ *   title: string | null,
+ *   cwd: string | null,
+ *   createdAt: number | null,
+ *   modifiedAt: number,
+ *   size: number,
+ *   prompts: number,
+ *   firstPrompt: string | null,
+ *   lastPrompt: string | null,
+ * }} PastSession
+ */
+
+/**
+ * Everything the daemon observed or did for a session, in order. `frame` is an omp stdout
+ * frame exactly as omp sent it (after protocol-v2 chunk reassembly), responses included;
+ * `sent` is a frame the daemon wrote to omp's stdin, its own setup commands included;
+ * `garbled` is stdout the daemon could not decode (not JSON, or a broken chunk sequence),
+ * kept verbatim (truncated to 64 KiB) rather than dropped.
+ * @typedef {(
+ *   | { kind: 'session', meta: SessionMeta }
+ *   | { kind: 'frame', frame: Record<string, any> }
+ *   | { kind: 'sent', command: Record<string, any> }
+ *   | { kind: 'stderr', line: string }
+ *   | { kind: 'garbled', line: string, error: string }
+ * ) & { seq: number, at: number, session: string }} SessionEvent
+ */
+
+/** @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[] }} HelloEvent */
+
+/** The shared scratchpad's text; `rev` names this exact text (a hash of it). @typedef {{ text: string, rev: string }} Scratchpad */
+/** Sent to every page after a scratchpad write. @typedef {{ kind: 'scratchpad' } & Scratchpad} ScratchpadEvent */
+
+/** @typedef {HelloEvent | ScratchpadEvent | SessionEvent} StreamEvent */
+
+/** @typedef {{ defaultCwd: string, home: string, ompVersion: string | null, scratchpadFile: string }} DaemonConfig */
+
+/**
+ * omp's reply to one command (see omp's rpc docs). `success: false` is a normal answer,
+ * not a transport failure.
+ * @typedef {{ type: 'response', command: string, success: boolean, data?: any, error?: string, code?: string, id?: string }} RpcResponse
+ */
+
+export {};

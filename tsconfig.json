@@ -11,5 +11,5 @@
     "types": ["node"],
     "skipLibCheck": true
   },
-  "include": ["src", "scripts", "tests", "e2e", "playwright.config.js"]
+  "include": ["src", "daemon", "scripts", "tests", "e2e", "playwright.config.js"]
 }

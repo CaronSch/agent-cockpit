@@ -5,22 +5,38 @@ first): chats, terminals, scratchpads, process views and telemetry, each a
 modular window you drag, drop, split and resize in a VS Code-style grid with
 magnetic snapping.
 
-Status: window-system skeleton. The only widget is an empty **Pane**; real
-widgets plug into the registry. Direction and invariants live in
-[`CLAUDE.md`](CLAUDE.md); deferred risks in [`RISKS.md`](RISKS.md).
+Status: early. A local daemon runs [omp](https://github.com/can1357/oh-my-pi)
+sessions; the **omp** pane chats with them, the **Sessions** window lists past
+ones to resume, and the **Scratchpad** keeps notes. Other windows are still to come.
+Direction and invariants live in [`CLAUDE.md`](CLAUDE.md); deferred risks in
+[`RISKS.md`](RISKS.md).
 
-No runtime dependencies, no build step: plain ES modules. Development tools
-(TypeScript for JSDoc type checking, Playwright) are dev dependencies only.
+Requires Node 22+ and `omp` on your `PATH`. No runtime dependencies, no build
+step: plain ES modules. Development tools (TypeScript for JSDoc type checking,
+Playwright) are dev dependencies only.
 
 ```bash
 npm install                      # dev tools + git hooks
+npm start                        # daemon on http://127.0.0.1:4777; open the URL it prints
 npx playwright install chromium  # once per machine, for e2e
-npm start                        # http://localhost:5173
 npm run typecheck                # tsc --checkJs over JSDoc types
-npm test                         # node:test suites for the pure modules
-npm run test:e2e                 # Playwright, real app in Chromium
+npm test                         # unit suites, plus the daemon against a fake omp
+npm run test:e2e                 # Playwright: real app and daemon in Chromium
 npm run test:coverage
 ```
+
+The URL `npm start` prints carries an access token. Open it once; the browser
+keeps it as a cookie. The daemon listens on loopback only and refuses requests
+from other sites. Pick **＋ Widget → omp**, choose a directory, and start
+chatting. To continue an earlier conversation, add **＋ Widget → Sessions**,
+search or sort, and drag a session onto the grid (or press **Resume**). The list
+comes from omp's session files (`~/.omp/agent/sessions`, or
+`$AGENT_COCKPIT_OMP_SESSIONS`).
+
+**＋ Widget → Scratchpad** holds notes. Every Scratchpad window (and tab) shows
+the same text, saved as you type to `~/.agent-cockpit/scratchpad.md`, a plain
+file you can also open in an editor or point an agent at. If the file changes
+elsewhere while you type, the window asks which version to keep.
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push to `main`
 and every pull request.
@@ -73,14 +89,17 @@ export default {
   title: 'My Widget',
   glyph: '◆',
   description: 'Shown in the palette',
-  mount(body) {
-    body.textContent = 'hello';
+  // ctx.params: this window's saved settings; ctx.setParams(patch) persists changes.
+  // ctx.addWidget(type, params) / ctx.dragWidget(type, params, pointerdown) open another window.
+  mount(body, ctx) {
+    body.textContent = `hello ${ctx.params.name ?? 'world'}`;
     return { destroy() {} };
   },
 };
 ```
 
-Register it in `src/widgets/registry.js`.
+Register it in `src/widgets/registry.js`. Widgets that talk to agents use the
+page's shared daemon connection (`getDaemon()` in `src/daemon/client.js`).
 
 ## Project layout
 
@@ -90,12 +109,18 @@ src/
 ├── render/        grid-renderer (diffed DOM), drop-indicator (clip-path preview)
 ├── interaction/   drag-controller, sash-controller
 ├── state/         atom, persistence
-├── widgets/       registry + pane
+├── daemon/        browser client for the daemon (one shared event stream)
+├── omp/           omp pane internals: transcript reducer, markdown, views
+├── sessions/      Sessions window ordering (pure)
+├── scratchpad/    the page's shared scratchpad: save, follow other pages, conflicts
+├── widgets/       registry, pane, omp, sessions, scratchpad
 ├── ui/            palette, dom helpers
 ├── app.js         wiring
 └── main.js        bootstrap
-styles/            tokens.css, app.css
-tests/             node:test suites for every pure module
+daemon/            local daemon: HTTP server, loopback guard, omp processes, event log, session history, scratchpad file
+styles/            tokens.css, app.css, omp.css, sessions.css, scratchpad.css
+tests/             node:test suites; fixtures/fake-omp.js stands in for omp
+e2e/               Playwright suites against the real daemon
 ```
 
 Layout is saved to `localStorage["cockpit.layout.v1"]` (versioned and

@@ -14,6 +14,7 @@ import {
   setSizes,
   normalize,
   isValidTree,
+  setLeafParams,
 } from '../src/layout/grid-model.js';
 
 /** @import { Tree, GridNode, Branch, Leaf } from '../src/layout/grid-model.js' */
@@ -195,5 +196,31 @@ describe('setSizes / normalize / isValidTree', () => {
     assert.equal(isValidTree({ kind: 'branch', axis: 'diag', children: [], sizes: [] }), false);
     assert.equal(isValidTree({ kind: 'leaf', id: 42 }), false);
     assert.equal(isValidTree(branch('row', [leaf('a', 'x'), leaf('a', 'x')])), false, 'duplicate ids');
+  });
+});
+
+describe('leaf params', () => {
+  test('setLeafParams merges into one leaf and leaves the others alone', () => {
+    const tree = branch('row', [{ ...leaf('a', 'x'), params: { session: 's1', cwd: '/p' } }, leaf('b', 'x')]);
+    const next = setLeafParams(tree, 'a', { session: 's2' });
+    assert.deepEqual(findLeaf(next, 'a')?.params, { session: 's2', cwd: '/p' });
+    assert.equal(findLeaf(next, 'b')?.params, undefined);
+    assert.equal(setLeafParams(tree, 'missing', { session: 's3' }), tree);
+  });
+
+  test('params travel with their window through moves and swaps', () => {
+    const bound = { ...leaf('a', 'omp'), params: { session: 's1' } };
+    const tree = branch('row', [bound, leaf('b', 'x'), leaf('c', 'x')]);
+    assert.deepEqual(findLeaf(moveLeaf(tree, 'a', 'c', 'down'), 'a')?.params, { session: 's1' });
+    assert.deepEqual(findLeaf(swapLeaves(tree, 'a', 'b'), 'a')?.params, { session: 's1' });
+  });
+
+  test('isValidTree accepts flat JSON params and rejects anything else', () => {
+    const withParams = (/** @type {unknown} */ params) => ({ kind: 'leaf', id: 'a', widget: 'x', params });
+    assert.equal(isValidTree(withParams({ session: 's', n: 1, on: true, none: null })), true);
+    assert.equal(isValidTree(withParams({ nested: { a: 1 } })), false);
+    assert.equal(isValidTree(withParams(['s'])), false);
+    assert.equal(isValidTree(withParams(null)), false);
+    assert.equal(isValidTree(withParams({ n: Number.NaN })), false);
   });
 });

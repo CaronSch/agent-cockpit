@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
+import { E2E_OMP_SESSIONS, E2E_PORT, E2E_STATE_DIR } from './e2e/daemon.js';
 
-const PORT = 4173;
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+const BASE_URL = `http://127.0.0.1:${E2E_PORT}`;
 const CI = Boolean(process.env.CI);
 
 export default defineConfig({
@@ -15,9 +15,10 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: `python3 -m http.server ${PORT} --bind 127.0.0.1`,
+    // The real daemon, driving the scripted fake omp instead of a real agent.
+    command: `node daemon/main.js --port ${E2E_PORT} --omp tests/fixtures/fake-omp.js`,
+    env: { AGENT_COCKPIT_STATE_DIR: E2E_STATE_DIR, AGENT_COCKPIT_OMP_SESSIONS: E2E_OMP_SESSIONS },
     url: BASE_URL,
     reuseExistingServer: !CI,
-    stderr: 'ignore', // http.server writes one access-log line per request to stderr
   },
 });
