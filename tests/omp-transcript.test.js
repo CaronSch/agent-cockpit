@@ -265,6 +265,11 @@ describe('derived state', () => {
     assert.equal(state.streaming, false);
   });
 
+  test('the session title loses omp’s nerd-font icon, which browsers draw as a box', () => {
+    const state = run([frame({ type: 'session_info_update', title: '\u{F056E} Fix the login flow', sessionId: 'x' })]);
+    assert.equal(state.title, 'Fix the login flow');
+  });
+
   test('queue, commands, status strip, editor text and login URL', () => {
     const state = run([
       frame({ type: 'queue_update', steering: ['use the parser'], followUp: [] }),

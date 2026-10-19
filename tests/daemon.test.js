@@ -293,6 +293,50 @@ describe('sessions', () => {
     assert.equal(ready.sessionFile, '/tmp/fake-omp-session.jsonl', 'learned from omp’s get_state before ready');
   });
 
+  /**
+   * Sends `message` in session `id` and waits until its turn has settled and anything the
+   * daemon sent in reply has been answered; returns the session's whole log so far.
+   * @param {string} id @param {string} message
+   */
+  async function turn(id, message) {
+    const before = forSession((await readStream({ ms: 100 })).events, id);
+    const settled = (/** @type {SessionEvent[]} */ log) => log.filter((e) => e.kind === 'frame' && e.frame.type === 'session_settled').length;
+    await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'prompt', message } });
+    await readStream({ done: (all) => settled(forSession(all, id)) > settled(before) });
+    await new Promise((r) => setTimeout(r, 150)); // a /rename, if the daemon sends one, and omp's answer
+    return forSession((await readStream({ ms: 100 })).events, id);
+  }
+  /** @param {SessionEvent[]} log */
+  const renames = (log) => log.filter((e) => e.kind === 'sent' && e.command.message === '/rename').length;
+
+  test('a session with no name asks omp for one after a turn, again after a turn too thin to name, then stops', async () => {
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    const id = json.session.id;
+    await waitForStatus(id, 'ready');
+
+    assert.equal(renames(await turn(id, 'hi')), 1);
+    let log = await turn(id, 'fix the login bug');
+    assert.equal(renames(log), 2, 'omp could not name it from "hi": ask again');
+    assert.ok(log.some((e) => e.kind === 'frame' && e.frame.type === 'session_info_update' && e.frame.title === 'About fix the login bug'));
+    log = await turn(id, 'now add tests');
+    assert.equal(renames(log), 2, 'named: never asked again');
+  });
+
+  test('a session that already has a name is not renamed, and one that cannot be named is asked only 3 times', async () => {
+    const journal = join(cwd, 'titled.jsonl');
+    await writeFile(journal, '');
+    const titled = (await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } })).json.session.id;
+    await waitForStatus(titled, 'ready');
+    assert.equal(renames(await turn(titled, 'fix the login bug')), 0);
+
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    await waitForStatus(json.session.id, 'ready');
+    /** @type {SessionEvent[]} */
+    let log = [];
+    for (let i = 0; i < 4; i++) log = await turn(json.session.id, 'hi');
+    assert.equal(renames(log), 3);
+  });
+
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {
     const missing = createHub({ ompPath: join(cwd, 'no-such-omp') });
     const meta = missing.create({ cwd, resume: null });

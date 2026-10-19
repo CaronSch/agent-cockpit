@@ -1,6 +1,11 @@
 /**
  * One omp process in RPC mode: launch, protocol setup, command/response correlation and
  * lifecycle, with everything it does reported as session events.
+ *
+ * It also gets the session a title. omp names sessions by itself only in its TUI (RPC mode
+ * sets PI_NO_TITLE), so once a turn has settled in a session that has no name, the daemon
+ * asks the way a user would, with `/rename`: omp's title model summarises the conversation
+ * and the title lands in the journal, where the Sessions window reads it.
  */
 import { spawn } from 'node:child_process';
 import { createFrameDecoder } from './frame-decoder.js';
@@ -22,6 +27,9 @@ export const SETUP_COMMANDS = Object.freeze([
 
 const CLOSE_GRACE_MS = 5000;
 const MAX_GARBLED_CHARS = 64 * 1024;
+/** A conversation too thin to name ("hi") gets another try after later turns, this many in all. */
+const TITLE_ATTEMPTS = 3;
+const RENAME = Object.freeze({ type: 'prompt', message: '/rename' });
 
 export class SessionNotRunning extends Error {}
 
@@ -54,6 +62,8 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
   /** @type {() => void} */
   let markClosed = () => {};
   const closed = new Promise((resolve) => (markClosed = () => resolve(undefined)));
+  let named = false;
+  let titleAttempts = 0;
 
   /** @param {Partial<SessionMeta>} patch */
   const update = (patch) => {
@@ -98,7 +108,11 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
     if (frame.type === 'response' && frame.command === 'get_state' && frame.success) {
       const file = frame.data?.sessionFile;
       if (typeof file === 'string' && file !== meta.sessionFile) update({ sessionFile: file });
+      if (frame.data?.sessionName) named = true;
     }
+    if (frame.type === 'session_info_update' && frame.title) named = true;
+    // omp settles once per stretch of agent activity, so this follows a turn, never a command.
+    if (frame.type === 'session_settled') askForTitle();
     if (frame.type === 'response' && typeof frame.id === 'string') {
       const waiter = pending.get(frame.id);
       pending.delete(frame.id);
@@ -140,6 +154,12 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
     // the protocol omp does support, so it becomes ready either way.
     for (const command of SETUP_COMMANDS) await send(command).response.catch(() => {});
     if (!finished) update({ status: 'ready' });
+  }
+
+  function askForTitle() {
+    if (named || titleAttempts >= TITLE_ATTEMPTS || meta.status !== 'ready') return;
+    titleAttempts++;
+    send(RENAME).response.catch(() => {});
   }
 
   return {

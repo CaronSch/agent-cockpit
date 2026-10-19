@@ -343,7 +343,8 @@ function applyFrame(state, frame) {
     case 'command_output':
       return note(state, 'info', 'command', '', String(frame.text ?? ''));
     case 'session_info_update':
-      if (typeof frame.title === 'string') state.title = frame.title;
+      // omp's titles start with a nerd-font icon (a private-use character); browsers show a box.
+      if (typeof frame.title === 'string') state.title = frame.title.replace(/\p{Co}/gu, '').trim();
       return;
     case 'rpc_frame_error':
       return note(state, 'error', 'transport', `Dropped ${frame.originalType ?? 'a frame'}: ${frame.error}`);
