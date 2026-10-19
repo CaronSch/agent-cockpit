@@ -186,6 +186,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/new-leaf.js` — Fresh leaf ids for widgets entering the tree.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
+- `src/omp/composer.js` — The omp pane's message box: a draft that grows with its text up to half the pane, and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).

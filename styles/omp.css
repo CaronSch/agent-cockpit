@@ -778,16 +778,22 @@
 .omp-composer {
   flex: none;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2);
 }
 
+.omp-compose-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+/* Grows with its text (composer.js sets the height, up to half the pane), so no resize grip. */
 .omp-draft {
   flex: 1;
   min-height: 2.6em;
-  max-height: 12em;
-  resize: vertical;
+  resize: none;
   padding: 6px 8px;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-s);

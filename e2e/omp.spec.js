@@ -96,6 +96,30 @@ test('a markdown table in a reply renders as a table, not as pipes', async ({ pa
   await expect(pane.locator('.omp-assistant').last()).not.toContainText('|');
 });
 
+test('the message box grows with the prompt, up to half the pane, and shrinks again after sending', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  const box = () =>
+    draft.evaluate((el) => ({ height: el.getBoundingClientRect().height, scrolls: el.scrollHeight > el.clientHeight + 1 }));
+  const paneHeight = await pane.locator('.omp-session').evaluate((el) => el.getBoundingClientRect().height);
+  const empty = await box();
+
+  await draft.fill(`${'a line of the prompt\n'.repeat(6)}the end`);
+  const grown = await box();
+  expect(grown.height).toBeGreaterThan(empty.height + 60);
+  expect(grown.scrolls, 'the whole prompt shows').toBe(false);
+
+  await draft.fill('a line of the prompt\n'.repeat(80));
+  const capped = await box();
+  expect(capped.height).toBeLessThanOrEqual(paneHeight / 2 + 1);
+  expect(capped.height).toBeGreaterThan(grown.height);
+  expect(capped.scrolls, 'past the cap it scrolls').toBe(true);
+
+  await draft.press('Enter');
+  await expect.poll(async () => (await box()).height).toBe(empty.height);
+});
+
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

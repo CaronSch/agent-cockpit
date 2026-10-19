@@ -10,6 +10,7 @@ import { getDaemon } from '../daemon/client.js';
 import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/transcript.js';
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
+import { createComposer } from '../omp/composer.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { RpcResponse, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -343,14 +344,9 @@ function createPane(body, ctx, daemon) {
     const queue = el('div', 'omp-queue');
     const suggest = el('div', 'omp-suggest');
     suggest.setAttribute('role', 'listbox');
-    const composer = el('div', 'omp-composer');
-    const draft = el('textarea', 'omp-draft');
-    draft.rows = 2;
-    draft.setAttribute('aria-label', 'Message omp');
-    const sendBtn = el('button', 'btn btn-accent', 'Send');
-    sendBtn.type = 'button';
-    composer.append(draft, sendBtn);
-    node.append(toolbar, menu, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer);
+    const composer = createComposer({ pane: node });
+    const { draft, sendBtn } = composer;
+    node.append(toolbar, menu, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
@@ -393,7 +389,7 @@ function createPane(body, ctx, daemon) {
     function send() {
       const text = draft.value.trim();
       if (!text || !ready()) return;
-      draft.value = '';
+      composer.setText('');
       hideSuggestions();
       /** @type {Record<string, unknown>} */
       const command = text.startsWith('!')
@@ -403,7 +399,7 @@ function createPane(body, ctx, daemon) {
           : { type: 'prompt', message: text };
       void rpc(command).then((res) => {
         // Give the text back if omp refused it and the user has not typed anything since.
-        if ((!res || !res.success) && !draft.value) draft.value = text;
+        if ((!res || !res.success) && !draft.value) composer.setText(text);
       });
     }
 
@@ -415,7 +411,7 @@ function createPane(body, ctx, daemon) {
       const restored = [...(res.data?.steering ?? []), ...(res.data?.followUp ?? [])];
       const texts = restored.map((m) => str(m?.text)).filter((t) => t !== null);
       if (texts.length) {
-        draft.value = [...texts, draft.value].filter(Boolean).join('\n\n');
+        composer.setText([...texts, draft.value].filter(Boolean).join('\n\n'));
         draft.focus();
       }
     }
@@ -600,7 +596,7 @@ function createPane(body, ctx, daemon) {
 
     /** @param {SlashCommand} command */
     function complete(command) {
-      draft.value = `/${command.name} `;
+      composer.setText(`/${command.name} `);
       hideSuggestions();
       draft.focus();
     }
@@ -804,7 +800,7 @@ function createPane(body, ctx, daemon) {
           : 'Message omp… (Enter sends, Shift+Enter newline, !cmd runs a shell command, / for commands)';
       if (state.editorText && state.editorText.seq > editorSeen) {
         editorSeen = state.editorText.seq;
-        draft.value = state.editorText.text;
+        composer.setText(state.editorText.text);
         updateSuggestions();
         draft.focus();
       }
@@ -844,6 +840,7 @@ function createPane(body, ctx, daemon) {
         subscription();
         closeMenu();
         resizes.disconnect();
+        composer.destroy();
       },
     };
   }
