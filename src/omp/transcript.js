@@ -230,6 +230,13 @@ export function askAnswers(questions, picks) {
 
 // ── Frames ──────────────────────────────────────────────
 
+/**
+ * omp's titles start with a nerd-font icon, a private-use character that browsers draw as a
+ * box; they reach the pane as the session title and in `/rename`'s output.
+ * @param {string} text
+ */
+const withoutIcons = (text) => text.replace(/\p{Co}/gu, '').replace(/ {2,}/g, ' ').trim();
+
 /** @param {Transcript} state @param {Record<string, any>} frame */
 function applyFrame(state, frame) {
   const type = typeof frame?.type === 'string' ? frame.type : '';
@@ -341,10 +348,9 @@ function applyFrame(state, frame) {
       state.commands = Array.isArray(frame.commands) ? frame.commands.map(slashCommand) : [];
       return;
     case 'command_output':
-      return note(state, 'info', 'command', '', String(frame.text ?? ''));
+      return note(state, 'info', 'command', '', withoutIcons(String(frame.text ?? '')));
     case 'session_info_update':
-      // omp's titles start with a nerd-font icon (a private-use character); browsers show a box.
-      if (typeof frame.title === 'string') state.title = frame.title.replace(/\p{Co}/gu, '').trim();
+      if (typeof frame.title === 'string') state.title = withoutIcons(frame.title);
       return;
     case 'rpc_frame_error':
       return note(state, 'error', 'transport', `Dropped ${frame.originalType ?? 'a frame'}: ${frame.error}`);
