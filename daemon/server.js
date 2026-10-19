@@ -10,9 +10,10 @@ import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './gua
 import { SessionNotRunning } from './omp-session.js';
 /** @import { IncomingMessage, ServerResponse } from 'node:http' */
 /** @import { AddressInfo } from 'node:net' */
-/** @import { DaemonConfig, SessionEvent } from './wire.js' */
+/** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
 /** @import { Hub } from './hub.js' */
 /** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
+/** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpad>} ScratchpadStore */
 
 const STATIC_DIRS = ['src', 'styles'];
 const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
@@ -111,9 +112,9 @@ function lastSeenSeq(header, bootId) {
 export const RPC_HOLD_MS = 2000;
 
 /**
- * @param {{ hub: Hub, history: History, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
+ * @param {{ hub: Hub, history: History, scratchpad: ScratchpadStore, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
  */
-export function createDaemonServer({ hub, history, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
+export function createDaemonServer({ hub, history, scratchpad, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, 'index.html');
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
@@ -127,10 +128,15 @@ export function createDaemonServer({ hub, history, token, root, config, rpcHoldM
       res.write(`id: ${hub.bootId}:${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
     for (const event of hub.since(lastSeenSeq(req.headers['last-event-id'], hub.bootId))) send(event);
     const unsubscribe = hub.subscribe(send);
+    // No id: scratchpad events are not part of the replayable log (see wire.js).
+    const offScratchpad = scratchpad.subscribe((/** @type {Scratchpad} */ pad) =>
+      res.write(`data: ${JSON.stringify({ kind: 'scratchpad', ...pad })}\n\n`),
+    );
     const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS);
     req.on('close', () => {
       clearInterval(heartbeat);
       unsubscribe();
+      offScratchpad();
     });
   }
 
@@ -142,6 +148,16 @@ export function createDaemonServer({ hub, history, token, root, config, rpcHoldM
     if (pathname === '/api/config' && method === 'GET') return sendJson(res, 200, config);
     if (pathname === '/api/history' && method === 'GET') {
       return sendJson(res, 200, { sessions: await history.list(url.searchParams.get('q') ?? '') });
+    }
+    if (pathname === '/api/scratchpad' && method === 'GET') return sendJson(res, 200, await scratchpad.read());
+    if (pathname === '/api/scratchpad' && method === 'PUT') {
+      const body = await readJson(req);
+      if (typeof body?.text !== 'string' || typeof body?.base !== 'string') {
+        throw new HttpError(400, 'expected { text: string, base: string }');
+      }
+      const result = await scratchpad.write(body.text, body.base);
+      if (!result.ok) return sendJson(res, 409, { error: 'the scratchpad changed since this edit began', current: result.current });
+      return sendJson(res, 200, { rev: result.rev });
     }
     if (pathname === '/api/sessions' && method === 'GET') return sendJson(res, 200, { sessions: hub.list() });
     if (pathname === '/api/sessions' && method === 'POST') {

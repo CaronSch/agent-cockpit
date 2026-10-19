@@ -13,11 +13,16 @@
  *                                      202 { pending: true, id } when omp has not answered within
  *                                      the hold time; the response then arrives on the stream
  *   POST   /api/sessions/:id/ui        omp `extension_ui_response` → 204
+ *   GET    /api/scratchpad             → Scratchpad
+ *   PUT    /api/scratchpad             { text, base } → { rev }, or 409 { error, current: Scratchpad }
+ *                                      when the scratchpad is no longer at version `base`
  *   GET    /api/stream                 Server-Sent Events, one StreamEvent per message
  *
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
  * `<bootId>:<seq>`, so a reconnect resumes after the last event it saw; the first message
  * on every connection is a `hello` carrying the current boot id and session list.
+ * `scratchpad` events carry no id and are not replayed: a reconnecting page reads
+ * GET /api/scratchpad instead.
  */
 
 /** @typedef {'starting' | 'ready' | 'exited' | 'failed'} SessionStatus */
@@ -71,9 +76,13 @@
  */
 
 /** @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[] }} HelloEvent */
-/** @typedef {HelloEvent | SessionEvent} StreamEvent */
 
-/** @typedef {{ defaultCwd: string, home: string, ompVersion: string | null }} DaemonConfig */
+/** The shared scratchpad's text; `rev` names this exact text (a hash of it). @typedef {{ text: string, rev: string }} Scratchpad */
+/** Sent to every page after a scratchpad write. @typedef {{ kind: 'scratchpad' } & Scratchpad} ScratchpadEvent */
+
+/** @typedef {HelloEvent | ScratchpadEvent | SessionEvent} StreamEvent */
+
+/** @typedef {{ defaultCwd: string, home: string, ompVersion: string | null, scratchpadFile: string }} DaemonConfig */
 
 /**
  * omp's reply to one command (see omp's rpc docs). `success: false` is a normal answer,

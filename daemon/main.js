@@ -6,7 +6,7 @@
  *   node daemon/main.js [--port 4777] [--omp <path to omp>]
  *
  * Environment: AGENT_COCKPIT_PORT, AGENT_COCKPIT_OMP, AGENT_COCKPIT_STATE_DIR (default
- * ~/.agent-cockpit; holds the access token), AGENT_COCKPIT_OMP_SESSIONS (omp's session
+ * ~/.agent-cockpit; holds the access token and scratchpad.md), AGENT_COCKPIT_OMP_SESSIONS (omp's session
  * journals; default `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
  */
 import { execFile } from 'node:child_process';
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 import { createHistory } from './history.js';
 import { createHub } from './hub.js';
+import { createScratchpad } from './scratchpad.js';
 import { createDaemonServer } from './server.js';
 import { loadToken } from './token.js';
 
@@ -44,13 +45,20 @@ const ompSessions =
 const token = await loadToken(stateDir);
 const version = await ompVersion(ompPath);
 const hub = createHub({ ompPath });
+const scratchpad = createScratchpad({ file: join(stateDir, 'scratchpad.md') });
 const server = createDaemonServer({
   hub,
   history: createHistory({ root: ompSessions }),
+  scratchpad,
   token,
   root: ROOT,
   // npm sets INIT_CWD to where `npm start` was typed: the likeliest project to work on.
-  config: { defaultCwd: process.env.INIT_CWD ?? process.cwd(), home: homedir(), ompVersion: version },
+  config: {
+    defaultCwd: process.env.INIT_CWD ?? process.cwd(),
+    home: homedir(),
+    ompVersion: version,
+    scratchpadFile: scratchpad.file,
+  },
 });
 
 server.on('error', (/** @type {NodeJS.ErrnoException} */ err) => {

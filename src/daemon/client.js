@@ -6,11 +6,13 @@
  * all along. When the daemon restarts, its sessions are gone: buffers are cleared and
  * `onReset` listeners fire before any event from the new daemon is delivered.
  */
-/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
+/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, Scratchpad, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
+/** @typedef {{ ok: true, rev: string } | { ok: false, current: Scratchpad }} ScratchpadSave */
 
 /** @typedef {'connecting' | 'open' | 'down' | 'unauthorized'} ConnectionStatus */
 
 const RECONNECT_MS = 1500;
+const KEEPALIVE_MAX_BYTES = 60_000;
 
 export class DaemonError extends Error {
   /** @param {number} status @param {string} message */
@@ -30,6 +32,9 @@ export class DaemonError extends Error {
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
  *   history(query?: string): Promise<PastSession[]>,
+ *   scratchpad(): Promise<Scratchpad>,
+ *   saveScratchpad(text: string, base: string, options?: { keepalive?: boolean }): Promise<ScratchpadSave>,
+ *   onScratchpad(fn: (pad: Scratchpad) => void): () => void,
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string }): Promise<SessionMeta>,
  *   closeSession(session: string): Promise<void>,
@@ -68,6 +73,8 @@ export function createDaemonClient(env = {}) {
   const resetListeners = new Set();
   /** @type {Set<() => void>} */
   const sessionListeners = new Set();
+  /** @type {Set<(pad: Scratchpad) => void>} */
+  const scratchpadListeners = new Set();
   const sessionsChanged = () => {
     for (const fn of sessionListeners) fn();
   };
@@ -95,6 +102,10 @@ export function createDaemonClient(env = {}) {
   /** @param {StreamEvent} event */
   function onEvent(event) {
     if (event.kind === 'hello') return onHello(event);
+    if (event.kind === 'scratchpad') {
+      for (const fn of scratchpadListeners) fn({ text: event.text, rev: event.rev });
+      return;
+    }
     if (event.kind === 'session') {
       metas.set(event.session, event.meta);
       sessionsChanged();
@@ -203,6 +214,25 @@ export function createDaemonClient(env = {}) {
     async history(query = '') {
       const body = await request(`/api/history${query ? `?q=${encodeURIComponent(query)}` : ''}`);
       return body.sessions;
+    },
+    scratchpad: () => request('/api/scratchpad'),
+    async saveScratchpad(text, base, { keepalive = false } = {}) {
+      const body = JSON.stringify({ text, base });
+      const res = await doFetch('/api/scratchpad', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body,
+        // Browsers refuse keepalive bodies over 64 KiB outright; a plain request may still land.
+        keepalive: keepalive && new TextEncoder().encode(body).length <= KEEPALIVE_MAX_BYTES,
+      });
+      const answer = await res.json().catch(() => null);
+      if (res.status === 409 && answer?.current) return { ok: false, current: answer.current };
+      if (!res.ok) throw new DaemonError(res.status, answer?.error ?? `daemon answered ${res.status}`);
+      return { ok: true, rev: answer.rev };
+    },
+    onScratchpad(fn) {
+      scratchpadListeners.add(fn);
+      return () => scratchpadListeners.delete(fn);
     },
     config: () => request('/api/config'),
     async createSession({ cwd, resume }) {

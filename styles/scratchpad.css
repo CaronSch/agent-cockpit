@@ -1,0 +1,92 @@
+/* Scratchpad window: shared notes, one textarea filling the window. */
+
+.scratchpad {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.scratchpad-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-s);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.scratchpad-conflict[hidden] {
+  display: none;
+}
+
+.scratchpad-conflict p {
+  margin: 0;
+}
+
+.scratchpad-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.scratchpad-text {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  padding: var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  color: var(--color-text);
+  font: var(--text-sm) / 1.55 var(--font-mono);
+  tab-size: 4;
+}
+
+.scratchpad-text:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.scratchpad-text::placeholder {
+  color: var(--color-text-faint);
+}
+
+.scratchpad-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--color-text-faint);
+  font: var(--text-2xs) / 1.4 var(--font-mono);
+}
+
+.scratchpad-status.is-error {
+  color: var(--color-danger);
+}
+
+.scratchpad-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scratchpad-theirs summary {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.scratchpad-theirs pre {
+  max-height: 10em;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2);
+  overflow: auto;
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  font: var(--text-xs) / 1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

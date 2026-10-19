@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
+import { createScratchpad } from '../daemon/scratchpad.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { SETUP_COMMANDS } from '../daemon/omp-session.js';
 /** @import { AddressInfo } from 'node:net' */
@@ -107,7 +108,7 @@ async function waitForStatus(id, status) {
 
 /** @param {StreamEvent[]} events @param {string} session @returns {SessionEvent[]} */
 const forSession = (events, session) =>
-  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.session === session));
+  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.session === session));
 
 before(async () => {
   cwd = await mkdtemp(join(tmpdir(), 'ac-daemon-test-'));
@@ -115,9 +116,10 @@ before(async () => {
   server = createDaemonServer({
     hub,
     history: createHistory({ root: join(cwd, 'no-sessions-yet') }),
+    scratchpad: createScratchpad({ file: join(cwd, 'state', 'scratchpad.md') }),
     token: TOKEN,
     root: ROOT,
-    config: { defaultCwd: cwd, home: cwd, ompVersion: 'omp/fake' },
+    config: { defaultCwd: cwd, home: cwd, ompVersion: 'omp/fake', scratchpadFile: join(cwd, 'state', 'scratchpad.md') },
     rpcHoldMs: 200,
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
@@ -304,5 +306,36 @@ describe('sessions', () => {
     const res = await call({ method: 'POST', path: '/api/sessions', body: { cwd: join(cwd, 'missing') } });
     assert.equal(res.status, 400);
     assert.equal(hub.list().length, before);
+  });
+});
+
+describe('scratchpad', () => {
+  test('a save from the current version lands, and every open page hears about it', async () => {
+    const before = await call({ path: '/api/scratchpad' });
+    assert.equal(before.status, 200);
+    const reading = readStream({ done: (events) => events.some((e) => e.kind === 'scratchpad') });
+    await new Promise((r) => setTimeout(r, 150)); // let the stream connect before the write
+    const saved = await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 'remember the milk', base: before.json.rev } });
+    assert.equal(saved.status, 200);
+
+    const { events, ids } = await reading;
+    const heard = events.find((e) => e.kind === 'scratchpad');
+    assert.deepEqual(heard, { kind: 'scratchpad', text: 'remember the milk', rev: saved.json.rev });
+    assert.equal(ids.length, events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad').length, 'not part of the replayable log');
+    assert.deepEqual((await call({ path: '/api/scratchpad' })).json, { text: 'remember the milk', rev: saved.json.rev });
+  });
+
+  test('a save from an older version is refused with what is there now', async () => {
+    const { json: current } = await call({ path: '/api/scratchpad' });
+    await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 'first', base: current.rev } });
+    const stale = await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 'second', base: current.rev } });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.json.current.text, 'first');
+    assert.equal((await call({ path: '/api/scratchpad' })).json.text, 'first');
+  });
+
+  test('a malformed save is a 400, not a blank scratchpad', async () => {
+    const res = await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 42 } });
+    assert.equal(res.status, 400);
   });
 });

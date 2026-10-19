@@ -6,8 +6,8 @@ modular window you drag, drop, split and resize in a VS Code-style grid with
 magnetic snapping.
 
 Status: early. A local daemon runs [omp](https://github.com/can1357/oh-my-pi)
-sessions; the **omp** pane chats with them and the **Sessions** window lists past
-ones to resume. Other windows are still to come.
+sessions; the **omp** pane chats with them, the **Sessions** window lists past
+ones to resume, and the **Scratchpad** keeps notes. Other windows are still to come.
 Direction and invariants live in [`CLAUDE.md`](CLAUDE.md); deferred risks in
 [`RISKS.md`](RISKS.md).
 
@@ -32,6 +32,11 @@ chatting. To continue an earlier conversation, add **＋ Widget → Sessions**,
 search or sort, and drag a session onto the grid (or press **Resume**). The list
 comes from omp's session files (`~/.omp/agent/sessions`, or
 `$AGENT_COCKPIT_OMP_SESSIONS`).
+
+**＋ Widget → Scratchpad** holds notes. Every Scratchpad window (and tab) shows
+the same text, saved as you type to `~/.agent-cockpit/scratchpad.md`, a plain
+file you can also open in an editor or point an agent at. If the file changes
+elsewhere while you type, the window asks which version to keep.
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push to `main`
 and every pull request.
@@ -107,12 +112,13 @@ src/
 ├── daemon/        browser client for the daemon (one shared event stream)
 ├── omp/           omp pane internals: transcript reducer, markdown, views
 ├── sessions/      Sessions window ordering (pure)
-├── widgets/       registry, pane, omp, sessions
+├── scratchpad/    the page's shared scratchpad: save, follow other pages, conflicts
+├── widgets/       registry, pane, omp, sessions, scratchpad
 ├── ui/            palette, dom helpers
 ├── app.js         wiring
 └── main.js        bootstrap
-daemon/            local daemon: HTTP server, loopback guard, omp processes, event log, session history
-styles/            tokens.css, app.css, omp.css, sessions.css
+daemon/            local daemon: HTTP server, loopback guard, omp processes, event log, session history, scratchpad file
+styles/            tokens.css, app.css, omp.css, sessions.css, scratchpad.css
 tests/             node:test suites; fixtures/fake-omp.js stands in for omp
 e2e/               Playwright suites against the real daemon
 ```
