@@ -14,6 +14,7 @@ import scratchpad from './scratchpad.js';
  * `ctx.addWidget(type, params)` opens another window beside the largest one;
  * `ctx.dragWidget(type, params, pointerdown)` lets the user drop it where they want, exactly
  * like dragging from the palette (a plain click does nothing).
+ * `ctx.setUnread(true)` lights the window's border: it has news its user has not seen.
  */
 /** @import { LeafParams } from '../layout/grid-model.js' */
 /** @import { DragEndResult } from '../interaction/drag-controller.js' */
@@ -23,6 +24,7 @@ import scratchpad from './scratchpad.js';
  *   setParams(patch: LeafParams): void,
  *   addWidget(type: string, params: LeafParams): void,
  *   dragWidget(type: string, params: LeafParams, event: PointerEvent, options?: { label?: string, onEnd?: (result: DragEndResult) => void }): void,
+ *   setUnread(unread: boolean): void,
  * }} WidgetContext
  */
 /**

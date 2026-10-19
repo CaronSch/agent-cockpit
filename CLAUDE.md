@@ -186,6 +186,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/new-leaf.js` — Fresh leaf ids for widgets entering the tree.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
+- `src/omp/activity.js` — Which omp events mean the agent produced something for the user to read, or needs them: what turns an omp window "unread".
 - `src/omp/composer.js` — The omp pane's message box: a draft that grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
@@ -240,6 +241,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/persistence.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/persistence.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`
 
 <!-- END GENERATED -->

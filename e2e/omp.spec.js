@@ -155,6 +155,57 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
   await expect(pane.locator('textarea')).toHaveValue('');
 });
 
+test('output that lands while you are elsewhere lights the pane until you look at it', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  const lookAway = () => page.mouse.move(5, 5); // the top bar, outside the pane
+  /** Sends from the keyboard, so the pointer stays wherever it is. @param {string} text */
+  const sendFromKeyboard = async (text) => {
+    await draft.fill(text);
+    await draft.press('Enter');
+    await expect(pane.locator('.omp-assistant').last()).toContainText(text);
+  };
+  await lookAway();
+  await sendFromKeyboard('first');
+  await expect(pane).toHaveClass(/is-unread/);
+
+  // Still unread after a reload: what was not seen is not forgotten.
+  await page.reload();
+  await expect(pane.locator('.omp-assistant').last()).toContainText('first');
+  await expect(pane).toHaveClass(/is-unread/);
+
+  const box = await pane.boundingBox();
+  if (!box) throw new Error('pane not laid out');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(pane).not.toHaveClass(/is-unread/);
+  // …and read stays read, even across a reload straight after.
+  await lookAway();
+  await page.reload();
+  await expect(pane.locator('.omp-assistant').last()).toContainText('first');
+  await page.waitForTimeout(200);
+  await expect(pane).not.toHaveClass(/is-unread/);
+
+  // Scrolling the transcript reads it.
+  await sendFromKeyboard('second');
+  await expect(pane).toHaveClass(/is-unread/);
+  await pane.locator('.omp-transcript').dispatchEvent('wheel');
+  await expect(pane).not.toHaveClass(/is-unread/);
+
+  // So does putting the cursor in the message box (without the mouse).
+  await sendFromKeyboard('third');
+  await expect(pane).toHaveClass(/is-unread/);
+  await page.locator('#palette-toggle').focus();
+  await draft.focus();
+  await expect(pane).not.toHaveClass(/is-unread/);
+
+  // Output that arrives while the pointer is over the pane is read as it comes.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await sendFromKeyboard('fourth');
+  await page.waitForTimeout(200);
+  await expect(pane).not.toHaveClass(/is-unread/);
+});
+
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

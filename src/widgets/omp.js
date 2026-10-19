@@ -13,8 +13,9 @@ import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
 import { isCommand } from '../omp/message.js';
 import { attachSelectionComments } from '../omp/selection-comment.js';
+import { isAgentActivity } from '../omp/activity.js';
 /** @import { WidgetContext } from './registry.js' */
-/** @import { RpcResponse, SessionMeta } from '../../daemon/wire.js' */
+/** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { SlashCommand } from '../omp/transcript.js' */
 
@@ -27,6 +28,8 @@ import { attachSelectionComments } from '../omp/selection-comment.js';
 
 const MAX_SUGGESTIONS = 8;
 const BOTTOM_SLACK_PX = 24;
+/** Seen-up-to is saved this long after it last moved, not on every streamed token. */
+const READ_SAVE_MS = 1000;
 
 export default {
   type: 'omp',
@@ -82,6 +85,65 @@ function createPane(body, ctx, daemon) {
     view = null;
     schedule();
   });
+
+  // ── unread: agent output the user has not looked at (what counts: omp/activity.js) ──
+  /** The newest agent activity the user has seen, in daemon time; saved with the window. */
+  let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : Date.now();
+  let latest = readAt;
+  let unread = false;
+  let pointerInside = false;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let readSave;
+  /** Looking at this window: the pointer is over it, in a page that has focus. */
+  const reading = () => pointerInside && document.visibilityState === 'visible' && document.hasFocus();
+
+  /**
+   * Saves `readAt` with the window: `soon` while output streams in under the reader's eyes
+   * (every token moves it), at once when something unread has just been read.
+   * @param {{ soon?: boolean }} [options]
+   */
+  function saveReadAt({ soon = false } = {}) {
+    clearTimeout(readSave);
+    const save = () => {
+      if (!destroyed && ctx.params.readAt !== readAt) ctx.setParams({ readAt });
+    };
+    // Never during mount: a commit while the grid is still drawing this window would re-enter it.
+    if (soon) readSave = setTimeout(save, READ_SAVE_MS);
+    else queueMicrotask(save);
+  }
+
+  function markRead() {
+    if (latest <= readAt && !unread) return;
+    readAt = Math.max(readAt, latest);
+    saveReadAt({ soon: !unread });
+    if (unread) {
+      unread = false;
+      ctx.setUnread(false);
+    }
+  }
+
+  /** @param {SessionEvent} event */
+  function noteActivity(event) {
+    if (!isAgentActivity(event) || event.at <= readAt) return;
+    latest = Math.max(latest, event.at);
+    if (reading()) return markRead();
+    if (!unread) {
+      unread = true;
+      ctx.setUnread(true);
+    }
+  }
+
+  // Moving over the pane, scrolling it, clicking or typing in it: all count as reading it.
+  body.addEventListener('pointerenter', () => {
+    pointerInside = true;
+  });
+  body.addEventListener('pointerleave', () => {
+    pointerInside = false;
+  });
+  for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'focusin']) {
+    body.addEventListener(type, markRead, { passive: true });
+  }
+  if (typeof ctx.params.readAt !== 'number') saveReadAt();
 
   function schedule() {
     if (frame || destroyed) return;
@@ -292,6 +354,7 @@ function createPane(body, ctx, daemon) {
     const state = createTranscript();
     const subscription = daemon.subscribe(session, (event) => {
       applyEvent(state, event);
+      noteActivity(event);
       schedule();
     });
     // The subscription replayed history synchronously: requests in it are already handled.
@@ -871,6 +934,7 @@ function createPane(body, ctx, daemon) {
     destroy() {
       destroyed = true;
       if (frame) cancelAnimationFrame(frame);
+      clearTimeout(readSave);
       offStatus();
       offReset();
       // Closing the window ends its agent, as closing a terminal pane does; otherwise omp

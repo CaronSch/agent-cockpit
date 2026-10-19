@@ -21,6 +21,8 @@
   --color-accent-ink: oklch(22% 0.04 72);
   --color-accent-glow: oklch(81% 0.155 72 / 0.18);
   --color-danger: oklch(69% 0.19 27);
+  /* A window with news its user has not seen: electric blue, unlike anything else here. */
+  --color-unread: oklch(80% 0.16 225);
 
   /* Type */
   --font-ui: 'IBM Plex Sans Condensed', 'Arial Narrow', system-ui, sans-serif;

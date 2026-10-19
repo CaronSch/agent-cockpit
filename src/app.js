@@ -112,6 +112,10 @@ export function createApp(root) {
           onEnd: options.onEnd,
         });
       },
+      setUnread(/** @type {boolean} */ unread) {
+        frameEl.classList.toggle('is-unread', unread);
+        frameEl.dataset.unread = String(unread);
+      },
     };
 
     let instance = { destroy() {} };
