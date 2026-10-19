@@ -33,6 +33,19 @@ search or sort, and drag a session onto the grid (or press **Resume**). The list
 comes from omp's session files (`~/.omp/agent/sessions`, or
 `$AGENT_COCKPIT_OMP_SESSIONS`).
 
+In an omp pane, select text in a reply to **Comment** on it: the comment waits as
+a card above the message box and goes with your next prompt, quoting what it is
+about. A paste longer than 10 lines or 1000 characters becomes a card too (click
+it to edit) and is sent wrapped in `<attachment>` tags. Paste a screenshot or
+drop a file anywhere on the pane to attach it: the daemon stores it in
+`~/.agent-cockpit/attachments/<day>/` and the prompt mentions it as
+`@"<path>"`, which omp reads when the prompt starts a turn (images go to the
+model; a steer sent while the agent works carries only the path, which the agent
+can open itself). A pane whose agent wrote something you have not seen gets an
+electric-blue border; hovering, scrolling, clicking or typing in it clears it.
+Sessions started here are named by omp's title model after their first turn
+(the daemon sends `/rename`, so a "Session renamed to …" note appears once).
+
 **＋ Widget → Scratchpad** holds notes. Each new window starts its own pad; the
 title button switches a window to another pad (or deletes one), and windows or
 tabs showing the same pad stay in sync. Paste a screenshot or drop a file into

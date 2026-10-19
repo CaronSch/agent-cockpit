@@ -54,6 +54,17 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
+- **Auto-titles and attachments lean on omp internals.** Titles rely on `/rename`
+  with no title generating one in RPC mode (it is not gated by `PI_NO_TITLE`), and
+  on `session_settled` following only agent activity (if it followed a builtin
+  command too, the daemon's own `/rename` would trigger the next one, up to the
+  attempt cap). Attachments rely on `@"<absolute path>"` mentions being read when a
+  prompt starts a turn. A change shows up as sessions that stay untitled, or files
+  that reach the model only as a bare path. *Response:* re-read omp's
+  `slash-commands/builtin-lifecycle.ts` (`rename`), `modes/rpc/rpc-session-settle.ts`
+  and `utils/file-mentions.ts`, then update `daemon/omp-session.js`,
+  `src/omp/message.js` and the fake.
+
 ## When the session history reaches thousands of journals
 
 - **Listing past sessions gets slow.** The first listing after a daemon start
@@ -61,6 +72,15 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   re-read only files whose size or mtime changed. *Threshold detail:* the first
   Sessions listing takes over a second. *Response:* read only each file's head
   and a bounded tail, or persist the summaries across restarts.
+
+## When `~/.agent-cockpit` passes 1 GB
+
+- **Attached files are never deleted.** Every file pasted or dropped on an omp
+  pane stays in `attachments/<day>/`, and a pad's files go only when the pad does.
+  *Response:* prune attachment folders older than a week at daemon start. omp
+  keeps sent images and inlined text in its own journal, so an old attachment is
+  only needed if a steered path is still being opened. Show each pad's size in the
+  switcher.
 
 ## When building the browser pane or chasing shortcut parity
 
@@ -86,6 +106,10 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
 - **No real auth.** The loopback guard (token plus Origin check) assumes one user
   on one machine. *Response:* real authentication, TLS, and per-user isolation of
   sessions and telemetry.
+- **Unread marks compare two clocks.** A window's seen-up-to time starts at the
+  browser's clock and is compared with the daemon's event times; skew between two
+  machines would mark output read or unread wrongly. *Response:* take the starting
+  time from the daemon (the newest event's `at`).
 - **The telemetry store holds secrets.** Prompts, file contents, env values and
   tool output are stored in plain text, with the same trust as omp's own
   `~/.omp` session files. *Response:* redaction before storage or display to

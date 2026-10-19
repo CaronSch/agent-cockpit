@@ -73,15 +73,22 @@ What runs today:
 - The split-tree window grid: windows (widgets) are dragged, dropped, split and
   resized with magnetic snapping, and the layout persists in localStorage.
 - The daemon and the `omp` pane: start omp in a directory, chat with it from its
-  structured event stream (streamed replies, thinking, tool calls with output,
-  `!` bash), pick model and thinking level, log in to providers, use slash
-  commands, answer approval and `ask` dialogs, steer or stop a running turn, and
-  resume the conversation after a daemon restart. Several panes can run side by
-  side, each bound to its own session.
+  structured event stream (streamed replies with Markdown and tables, thinking,
+  tool calls with output, `!` bash), pick model and thinking level, log in to
+  providers, use slash commands, answer approval and `ask` dialogs, steer or stop
+  a running turn, and resume the conversation after a daemon restart. Several
+  panes can run side by side, each bound to its own session. The message box
+  grows with the prompt; selected reply text can be commented on and goes quoted
+  with the next prompt; long pastes become editable cards and pasted or dropped
+  files are stored in `~/.agent-cockpit/attachments/` and sent as omp `@"<path>"`
+  mentions. A pane with output its user has not seen gets an electric-blue
+  border until it is hovered, scrolled, clicked or typed in.
 - The Sessions window: every past omp conversation (read from omp's session
   files), searchable across titles, directories and prompts, sortable, and
   draggable onto the grid to resume it in a new omp pane. Sessions already open
-  in a pane are marked and cannot be opened twice.
+  in a pane are marked and cannot be opened twice. Sessions the daemon runs get a
+  summarising title: after a turn settles in an unnamed session it sends omp
+  `/rename`, which RPC mode otherwise never does by itself.
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
   Markdown files in `~/.agent-cockpit/scratchpads/`; pasted or dropped
