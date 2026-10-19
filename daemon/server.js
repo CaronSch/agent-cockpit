@@ -16,6 +16,7 @@ import { PAD_ID } from './scratchpad.js';
 /** @import { Hub } from './hub.js' */
 /** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
 /** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
+/** @typedef {ReturnType<typeof import('./attachments.js').createAttachments>} Attachments */
 
 const STATIC_DIRS = ['src', 'styles'];
 const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
@@ -132,9 +133,9 @@ function lastSeenSeq(header, bootId) {
 export const RPC_HOLD_MS = 2000;
 
 /**
- * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
+ * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
  */
-export function createDaemonServer({ hub, history, scratchpads, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
+export function createDaemonServer({ hub, history, scratchpads, attachments, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, 'index.html');
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
@@ -217,6 +218,11 @@ export function createDaemonServer({ hub, history, scratchpads, token, root, con
     }
     const pads = /^\/api\/scratchpads(?:\/([^/]+)(?:\/([^/]+)(?:\/([^/]+))?)?)?$/.exec(pathname);
     if (pads) return scratchpadRoute(req, res, method, pads.slice(1));
+    if (pathname === '/api/attachments') {
+      if (method !== 'POST') throw new HttpError(405, 'method not allowed');
+      const name = decodeURIComponent(String(req.headers['x-file-name'] ?? 'file'));
+      return sendJson(res, 201, { path: await attachments.save(name, await readBody(req, MAX_UPLOAD_BYTES)) });
+    }
     if (pathname === '/api/sessions' && method === 'GET') return sendJson(res, 200, { sessions: hub.list() });
     if (pathname === '/api/sessions' && method === 'POST') {
       const body = await readJson(req);

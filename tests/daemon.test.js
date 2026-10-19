@@ -1,12 +1,13 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
+import { createAttachments } from '../daemon/attachments.js';
 import { createScratchpads } from '../daemon/scratchpad.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { SETUP_COMMANDS } from '../daemon/omp-session.js';
@@ -117,6 +118,7 @@ before(async () => {
     hub,
     history: createHistory({ root: join(cwd, 'no-sessions-yet') }),
     scratchpads: createScratchpads({ dir: join(cwd, 'state', 'scratchpads') }),
+    attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
     token: TOKEN,
     root: ROOT,
     config: { defaultCwd: cwd, home: cwd, ompVersion: 'omp/fake', scratchpadDir: join(cwd, 'state', 'scratchpads') },
@@ -371,5 +373,21 @@ describe('scratchpads', () => {
     assert.equal((await call({ path: '/api/scratchpads/doomed' })).json.text, '');
     assert.equal((await call({ path: `/api/scratchpads/doomed/assets/${up.json.path.split('/')[1]}` })).status, 404);
     assert.ok(!(await call({ path: '/api/scratchpads' })).json.pads.some((/** @type {any} */ p) => p.id === 'doomed'));
+  });
+});
+
+describe('attachments', () => {
+  test('an attached file is stored, owner-only and intact, at a path omp can read', async () => {
+    const headers = { 'x-file-name': encodeURIComponent('Screen Shot 1.png') };
+    const first = await call({ method: 'POST', path: '/api/attachments', headers, raw: 'PNG one' });
+    const second = await call({ method: 'POST', path: '/api/attachments', headers, raw: 'PNG two' });
+    assert.equal(first.status, 201);
+    const dir = join(cwd, 'state', 'attachments');
+    assert.match(first.json.path, new RegExp(`^${dir}/\\d{4}-\\d\\d-\\d\\d/[a-z0-9]+-Screen-Shot-1\\.png$`));
+    assert.notEqual(first.json.path, second.json.path, 'the same name twice is two files');
+    assert.equal(await readFile(first.json.path, 'utf8'), 'PNG one');
+    assert.equal(await readFile(second.json.path, 'utf8'), 'PNG two');
+    assert.equal((await stat(first.json.path)).mode & 0o777, 0o600);
+    assert.equal((await call({ path: '/api/attachments' })).status, 405);
   });
 });

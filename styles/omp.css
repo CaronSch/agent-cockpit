@@ -940,3 +940,30 @@
   border-radius: var(--radius-s);
   background: var(--color-surface-raised);
 }
+
+.omp-card.is-text {
+  border-left: 2px solid var(--color-text-faint);
+}
+
+.omp-card.is-uploading {
+  opacity: 0.6;
+}
+
+.omp-card-thumb {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  object-fit: cover;
+  border-right: 1px solid var(--color-line);
+  border-radius: var(--radius-s) 0 0 var(--radius-s);
+}
+
+div.omp-card-main {
+  cursor: default;
+}
+
+/* A file dragged over the pane: dropping it attaches it to the next message. */
+.omp-session.is-dropping {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -4px;
+}

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
 import { createHistory } from './history.js';
 import { createHub } from './hub.js';
+import { createAttachments } from './attachments.js';
 import { adoptLegacyScratchpad, createScratchpads } from './scratchpad.js';
 import { createDaemonServer } from './server.js';
 import { loadToken } from './token.js';
@@ -51,6 +52,7 @@ const server = createDaemonServer({
   hub,
   history: createHistory({ root: ompSessions }),
   scratchpads: createScratchpads({ dir: scratchpadDir }),
+  attachments: createAttachments({ dir: join(stateDir, 'attachments') }),
   token,
   root: ROOT,
   // npm sets INIT_CWD to where `npm start` was typed: the likeliest project to work on.

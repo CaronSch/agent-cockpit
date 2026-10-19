@@ -21,6 +21,8 @@
  *   POST   /api/scratchpads/:id/assets raw file body, `x-file-name` header (URI-encoded)
  *                                      → 201 { path } for the pad's Markdown, e.g. `<id>.assets/<name>`
  *   GET    /api/scratchpads/:id/assets/:name → the file (images inline, anything else as a download)
+ *   POST   /api/attachments            raw file body, `x-file-name` header (URI-encoded)
+ *                                      → 201 { path }: where omp can read it, for an `@"<path>"` mention
  *   GET    /api/stream                 Server-Sent Events, one StreamEvent per message
  *
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are

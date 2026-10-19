@@ -409,7 +409,14 @@ function createPane(body, ctx, daemon) {
     const queue = el('div', 'omp-queue');
     const suggest = el('div', 'omp-suggest');
     suggest.setAttribute('role', 'listbox');
-    const composer = createComposer({ pane: node });
+    const composer = createComposer({
+      pane: node,
+      upload: (file, name) => daemon.uploadAttachment(file, name),
+      onError: (text) => {
+        addNote(state, 'error', 'attach', text);
+        schedule();
+      },
+    });
     const { draft, sendBtn } = composer;
     const quoteComments = attachSelectionComments({
       host: node,
@@ -459,11 +466,14 @@ function createPane(body, ctx, daemon) {
       }
     }
 
-    function send() {
+    async function send() {
       if (!ready()) return;
-      // `/command` and `!shell` go as typed; comments wait for the next real prompt.
+      // `/command` and `!shell` go as typed; comments and attachments wait for the next prompt.
       const command = isCommand(draft.value);
-      const taken = composer.take({ withComments: !command });
+      // A file dropped a moment ago may still be on its way to the daemon: send it too.
+      if (!command) await composer.settled();
+      if (!ready()) return;
+      const taken = composer.take({ withCards: !command });
       const text = taken.message;
       if (!text) return;
       hideSuggestions();
@@ -696,13 +706,13 @@ function createPane(body, ctx, daemon) {
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        send();
+        void send();
       } else if (e.key === 'Escape') {
         if (suggestions.length) hideSuggestions();
         else if (state.streaming) void stop();
       }
     });
-    sendBtn.addEventListener('click', send);
+    sendBtn.addEventListener('click', () => void send());
     node.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && menuAnchor) closeMenu();
     });

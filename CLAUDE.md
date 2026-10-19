@@ -187,12 +187,12 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
 - `src/omp/activity.js` — Which omp events mean the agent produced something for the user to read, or needs them: what turns an omp window "unread".
-- `src/omp/composer.js` — The omp pane's message box: a draft that grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text), and the Send button.
+- `src/omp/composer.js` — The omp pane's message box: a draft that grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, pasted text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
-- `src/omp/message.js` — Builds the prompt the omp pane sends from what the composer holds: comments on quoted parts of earlier replies, then the draft.
+- `src/omp/message.js` — Builds the prompt the omp pane sends from what the composer holds: comments on quoted parts of earlier replies, the draft, then attachments.
 - `src/omp/selection-comment.js` — Comments on highlighted transcript text: select part of a reply and a small Comment button appears at the end of the selection; it opens a box for the comment, which is handed to the composer with the selected text as its quote.
 - `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
 - `src/render/drop-indicator.js` — Landing preview for drag & drop, plus the sash snap guide.
@@ -210,6 +210,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
 - `src/widgets/scratchpad.js` — Notes beside the agents: text with screenshots and files in it.
 - `src/widgets/sessions.js` — Past omp sessions, searchable and sortable: drag one onto the grid, or press Resume, to continue it in a new omp window.
+- `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
 - `daemon/frame-decoder.js` — Decodes omp's stdout: newline-delimited JSON frames, with protocol-v2 `rpc_chunk` sequences reassembled into the one frame they carry.
 - `daemon/guard.js` — Loopback guard: decides which requests may reach the daemon (CLAUDE.md, Invariants).
 - `daemon/history.js` — Past omp sessions, read from omp's session files: one summary per conversation, searchable by title, directory and what the user asked.

@@ -37,6 +37,7 @@ export class DaemonError extends Error {
  *   saveScratchpad(id: string, text: string, base: string, options?: { keepalive?: boolean }): Promise<ScratchpadSave>,
  *   deleteScratchpad(id: string): Promise<void>,
  *   uploadScratchpadFile(id: string, file: Blob, name: string): Promise<string>,
+ *   uploadAttachment(file: Blob, name: string): Promise<string>,
  *   onScratchpad(fn: (id: string, pad: Scratchpad) => void): () => void,
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string }): Promise<SessionMeta>,
@@ -153,6 +154,18 @@ export function createDaemonClient(env = {}) {
     return body;
   }
 
+  /** Posts a file as the raw body; the daemon answers with where it stored it. @param {string} path @param {Blob} file @param {string} name @returns {Promise<string>} */
+  async function upload(path, file, name) {
+    const res = await doFetch(path, {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(name) },
+      body: file,
+    });
+    const answer = await res.json().catch(() => null);
+    if (!res.ok) throw new DaemonError(res.status, answer?.error ?? `daemon answered ${res.status}`);
+    return answer.path;
+  }
+
   const sessionPath = (/** @type {string} */ session) => `/api/sessions/${encodeURIComponent(session)}`;
   const padPath = (/** @type {string} */ id) => `/api/scratchpads/${encodeURIComponent(id)}`;
 
@@ -240,15 +253,11 @@ export function createDaemonClient(env = {}) {
     async deleteScratchpad(id) {
       await request(padPath(id), { method: 'DELETE' });
     },
-    async uploadScratchpadFile(id, file, name) {
-      const res = await doFetch(`${padPath(id)}/assets`, {
-        method: 'POST',
-        headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(name) },
-        body: file,
-      });
-      const answer = await res.json().catch(() => null);
-      if (!res.ok) throw new DaemonError(res.status, answer?.error ?? `daemon answered ${res.status}`);
-      return answer.path;
+    uploadScratchpadFile(id, file, name) {
+      return upload(`${padPath(id)}/assets`, file, name);
+    },
+    uploadAttachment(file, name) {
+      return upload('/api/attachments', file, name);
     },
     onScratchpad(fn) {
       scratchpadListeners.add(fn);

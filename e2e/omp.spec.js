@@ -1,9 +1,9 @@
 // Behaviour tests for the omp pane against the real daemon driving tests/fixtures/fake-omp.js.
 import { test, expect } from '@playwright/test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { e2eToken } from './daemon.js';
+import { E2E_STATE_DIR, e2eToken } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 
@@ -153,6 +153,76 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
   expect((await sent).postDataJSON().message).toBe('> hello\n\nwhy this word?\n\nand the next step?');
   await expect(card).toHaveCount(0);
   await expect(pane.locator('textarea')).toHaveValue('');
+});
+
+test('long pasted text and pasted or dropped files go with the next prompt as attachments', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  /** Pastes `text` into the draft; true when the browser was left to paste it as typing. @param {string} text */
+  const paste = (text) =>
+    draft.evaluate((node, text) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', text);
+      return node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, text);
+
+  // A short paste is ordinary typing; a long one becomes a card, as omp's editor does.
+  expect(await paste('one\ntwo')).toBe(true);
+  const log = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n');
+  expect(await paste(log)).toBe(false);
+  const textCard = pane.locator('.omp-card.is-text');
+  await expect(textCard).toContainText('Paste #1 · +12 lines');
+
+  // Clicking it opens the text to edit.
+  await textCard.locator('.omp-card-main').click();
+  const box = pane.getByRole('textbox', { name: 'Edit paste #1' });
+  await expect(box).toHaveValue(log);
+  await box.fill(`${log}\nline 13, added`);
+  await pane.getByRole('button', { name: 'Save' }).click();
+  await expect(textCard).toContainText('+13 lines');
+
+  // A screenshot pasted from the clipboard shows as a thumbnail once stored.
+  await draft.evaluate((node) => {
+    const data = new DataTransfer();
+    data.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'image.png', { type: 'image/png' }));
+    node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  const files = pane.locator('.omp-card.is-file');
+  await expect(files.first()).not.toHaveClass(/is-uploading/);
+  await expect(files.first().locator('img')).toBeVisible();
+
+  // A file dropped anywhere on the pane; its upload is held so the message goes while it is on its way.
+  /** @type {() => void} */
+  let release = () => {};
+  const held = new Promise((resolve) => (release = () => resolve(undefined)));
+  await page.route('**/api/attachments', async (route) => {
+    if (route.request().headers()['x-file-name'] === 'notes.txt') await held;
+    await route.continue();
+  });
+  const dataTransfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(['hello from a file'], 'notes.txt', { type: 'text/plain' }));
+    return data;
+  });
+  const session = pane.locator('.omp-session');
+  await pane.locator('.omp-transcript').dispatchEvent('dragover', { dataTransfer });
+  await expect(session).toHaveClass(/is-dropping/);
+  await pane.locator('.omp-transcript').dispatchEvent('drop', { dataTransfer });
+  await expect(session).not.toHaveClass(/is-dropping/);
+  await expect(files.last()).toHaveClass(/is-uploading/);
+
+  const sent = page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'prompt');
+  await draft.fill('what are these?');
+  await draft.press('Enter');
+  release();
+  const message = (await sent).postDataJSON().message;
+  const paths = [...message.matchAll(/@"([^"]+)"/g)].map((m) => m[1]);
+  expect(message).toBe(`what are these?\n\n<attachment>\n${log}\nline 13, added\n</attachment>\n\n@"${paths[0]}"\n\n@"${paths[1]}"`);
+  expect(paths[0]).toMatch(new RegExp(`^${join(E2E_STATE_DIR, 'attachments')}/.+-image\\.png$`));
+  expect(paths[1]).toMatch(/-notes\.txt$/);
+  expect(readFileSync(paths[1], 'utf8')).toBe('hello from a file');
+  await expect(pane.locator('.omp-card')).toHaveCount(0);
 });
 
 test('output that lands while you are elsewhere lights the pane until you look at it', async ({ page }) => {
