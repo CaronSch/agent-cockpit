@@ -2,7 +2,7 @@
  * Notes beside the agents: text with screenshots and files in it. Each new Scratchpad window
  * starts its own pad; the switcher reopens any pad (two windows may show the same one).
  *
- * A pad is a Markdown file the daemon keeps (`~/.agent-cockpit/scratchpads/<id>.md`), so
+ * A pad is a Markdown file the daemon keeps (`~/.cockpit/scratchpads/<id>.md`), so
  * closing a window loses nothing. Pasted or dropped files are stored beside it and shown
  * inline between text blocks (see `scratchpad/blocks.js`).
  */

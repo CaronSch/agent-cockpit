@@ -1,4 +1,4 @@
-# Agent Cockpit
+# Cockpit
 
 An in-browser workbench for agentic development with AI coding harnesses (omp
 first): chats, terminals, scratchpads, process views and telemetry, each a
@@ -31,7 +31,7 @@ from other sites. Pick **＋ Widget → omp**, choose a directory, and start
 chatting. To continue an earlier conversation, add **＋ Widget → Sessions**,
 search or sort, and drag a session onto the grid (or press **Resume**). The list
 comes from omp's session files (`~/.omp/agent/sessions`, or
-`$AGENT_COCKPIT_OMP_SESSIONS`). When the workbench's own files change under an
+`$COCKPIT_OMP_SESSIONS`). When the workbench's own files change under an
 open tab (a `git pull`, or a daemon restart on new code), the top bar says so;
 **Reload** picks up the new version. It never reloads by itself, so an unsent
 draft is never lost.
@@ -45,7 +45,7 @@ the session. Closing the popup stops an answer still coming. Like a comment, a
 paste longer than 10 lines or 1000 characters waits as a card above the message
 box (click it to edit); it is sent wrapped in `<attachment>` tags. Paste a screenshot or
 drop a file anywhere on the pane to attach it: the daemon stores it in
-`~/.agent-cockpit/attachments/<day>/` and the prompt mentions it as
+`~/.cockpit/attachments/<day>/` and the prompt mentions it as
 `@"<path>"`, which omp reads when the prompt starts a turn (images go to the
 model; a steer sent while the agent works carries only the path, which the agent
 can open itself). A pane whose agent finished its turn, or stopped to ask you
@@ -59,7 +59,7 @@ Sessions started here are named by omp's title model after their first turn
 title button switches a window to another pad (or deletes one), and windows or
 tabs showing the same pad stay in sync. Paste a screenshot or drop a file into
 a pad to add it inline. Pads are plain Markdown files in
-`~/.agent-cockpit/scratchpads/` with their files beside them, so you can open
+`~/.cockpit/scratchpads/` with their files beside them, so you can open
 them in an editor or point an agent at them. If a pad changes elsewhere while
 you type, the window asks which version to keep.
 

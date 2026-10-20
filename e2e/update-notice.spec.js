@@ -31,7 +31,7 @@ test('a page running older UI code says so when you come back to it, and Reload 
   await comeBack();
   await expect(notice).toBeVisible();
   await expect(notice).toHaveAttribute('role', 'status');
-  await expect(notice).toContainText('Agent Cockpit was updated');
+  await expect(notice).toContainText('Cockpit was updated');
 
   const reloaded = page.waitForEvent('load');
   await notice.getByRole('button', { name: 'Reload' }).click();

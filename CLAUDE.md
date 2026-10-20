@@ -1,4 +1,4 @@
-# Agent Cockpit
+# Cockpit
 
 An open-source, in-browser workbench for agentic development with AI coding
 harnesses. v1 drives omp only.
@@ -59,7 +59,8 @@ Planned capabilities:
   omp pane shows), saved with the layout. **User data lives with the daemon**,
   not in the layout: anything that must outlive a window, a browser profile or
   a port change (the scratchpad's notes) is a file in the state directory
-  (`~/.agent-cockpit`). Closing a window must never delete it.
+  (`~/.cockpit`; the daemon moves a pre-rename `~/.agent-cockpit` there on start,
+  see `daemon/state-dir.js`). Closing a window must never delete it.
 - **Telemetry provenance**: every recorded fact carries its source: `harness`
   (omp said so), `proxy` (seen on the wire), or `os` (seen by the kernel or the
   filesystem). The UI shows the source. The gap between what an agent claims it
@@ -83,7 +84,7 @@ What runs today:
   grows with the prompt; selected reply text can be commented on (the comment goes
   quoted with the next prompt) or asked about (omp's `btw` answers in the popup,
   outside the chat); long pastes become editable cards and pasted or dropped
-  files are stored in `~/.agent-cockpit/attachments/` and sent as omp `@"<path>"`
+  files are stored in `~/.cockpit/attachments/` and sent as omp `@"<path>"`
   mentions. A pane whose agent finished its turn (or asks something) while its
   user was not looking gets an electric-blue border until it is hovered,
   scrolled, clicked or typed in.
@@ -95,7 +96,7 @@ What runs today:
   `/rename`, which RPC mode otherwise never does by itself.
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
-  Markdown files in `~/.agent-cockpit/scratchpads/`; pasted or dropped
+  Markdown files in `~/.cockpit/scratchpads/`; pasted or dropped
   screenshots and files are stored beside them and shown inline. An edit made
   elsewhere (the file itself, another tab) is never overwritten without asking.
 
@@ -122,7 +123,7 @@ telemetry views, cmux-parity features beyond the above.
 - The daemon binds `127.0.0.1` only, checks every request's `Host` (DNS
   rebinding), requires the token cookie on every API request, and refuses any
   foreign `Origin` or cross-site `Sec-Fetch-Site`. The token is random, stored
-  owner-only in `~/.agent-cockpit/token`, and reaches the browser once through
+  owner-only in `~/.cockpit/token`, and reaches the browser once through
   the URL the daemon prints (it becomes an HttpOnly, SameSite=Strict cookie).
   Without this, any web page open in the user's browser can reach the daemon and
   run commands on the machine. `tests/daemon.test.js` guards each check.
@@ -156,7 +157,7 @@ telemetry views, cmux-parity features beyond the above.
   switching branches or stashing in the shared tree.
 - Run it: `npm start`, then open the URL it prints once (it carries the token;
   the browser keeps a cookie afterwards). `--port`, `--omp <path>` and
-  `AGENT_COCKPIT_STATE_DIR` override the defaults.
+  `COCKPIT_STATE_DIR` override the defaults.
 - Before committing, all of these must pass (CI in `.github/workflows/ci.yml`
   runs the same on every push to `main` and every PR):
   - `npm run typecheck`
@@ -231,6 +232,7 @@ particular, move a capability into "Current state" when it ships.
 - `daemon/omp-session.js` — One omp process in RPC mode: launch, protocol setup, command/response correlation and lifecycle, with everything it does reported as session events.
 - `daemon/scratchpad.js` — Scratchpads: plain Markdown files the daemon keeps, one per pad, with pasted screenshots and files stored beside them.
 - `daemon/server.js` — HTTP face of the daemon: the workbench's static files, the JSON API and the event stream (routes in `wire.js`), all behind the loopback guard.
+- `daemon/state-dir.js` — Moves the state folder from its pre-rename home (`~/.agent-cockpit`) to `~/.cockpit`.
 - `daemon/token.js` — The daemon's access token: random, created once, kept owner-only in the state directory so a browser stays signed in across daemon restarts.
 - `daemon/ui-files.js` — The files that make up the browser UI: which ones the daemon serves, and a version that changes whenever any of them does, so an open page can tell it is running older code.
 - `daemon/wire.js` — Wire contract between the daemon and the browser: session metadata, stream events and HTTP payloads.
@@ -255,6 +257,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/persistence.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/ui-files.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/persistence.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/state-dir.test.js`, `tests/ui-files.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->

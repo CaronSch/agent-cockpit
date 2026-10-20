@@ -21,7 +21,7 @@ export function createUpdateNotice({ daemon, reload = () => location.reload() })
   dismiss.addEventListener('click', () => {
     root.hidden = true;
   });
-  root.append(el('span', 'update-notice-text', 'Agent Cockpit was updated. Reload to use the new version.'), reloadBtn, dismiss);
+  root.append(el('span', 'update-notice-text', 'Cockpit was updated. Reload to use the new version.'), reloadBtn, dismiss);
 
   // A daemon restart reports its files on reconnect; a `git pull` under a running daemon
   // changes them silently, so ask again whenever the user comes back to the tab (while
