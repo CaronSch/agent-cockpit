@@ -26,8 +26,29 @@ function renderBlock(block) {
       pre.append(code);
       return pre;
     }
-    case 'table':
-      return el('pre', 'md-table', block.text);
+    case 'table': {
+      const table = el('table', 'md-table');
+      /** @param {'th' | 'td'} tag @param {Inline[][]} cells */
+      const row = (tag, cells) => {
+        const tr = el('tr');
+        cells.forEach((cell, c) => {
+          const td = withInline(el(tag), cell);
+          const align = block.align[c];
+          if (align) td.style.textAlign = align;
+          tr.append(td);
+        });
+        return tr;
+      };
+      const head = el('thead');
+      head.append(row('th', block.head));
+      const body = el('tbody');
+      for (const cells of block.rows) body.append(row('td', cells));
+      table.append(head, body);
+      // Wide tables scroll sideways inside the transcript instead of squeezing their columns.
+      const wrap = el('div', 'md-table-wrap');
+      wrap.append(table);
+      return wrap;
+    }
     case 'rule':
       return el('hr');
     case 'quote': {

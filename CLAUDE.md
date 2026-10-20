@@ -32,7 +32,8 @@ Planned capabilities:
   screen-scraped. Several open at once, side by side, each bound to a session.
 - **Saved context**: pin parts of a chat into their own windows; fork a session
   into a new pane to compare.
-- **Scratchpad**: free-form notes next to the agents, shared across windows.
+- **Scratchpads**: free-form notes with screenshots next to the agents, any
+  number of them, each openable in several windows.
 - **Terminal panes**: a real shell (and omp's own TUI, if wanted).
 - **Process view**: the processes each agent runs, and their CPU, memory and I/O.
 - **Telemetry**: every model call, tool call, process and file-system access,
@@ -72,18 +73,28 @@ What runs today:
 - The split-tree window grid: windows (widgets) are dragged, dropped, split and
   resized with magnetic snapping, and the layout persists in localStorage.
 - The daemon and the `omp` pane: start omp in a directory, chat with it from its
-  structured event stream (streamed replies, thinking, tool calls with output,
-  `!` bash), pick model and thinking level, log in to providers, use slash
-  commands, answer approval and `ask` dialogs, steer or stop a running turn, and
-  resume the conversation after a daemon restart. Several panes can run side by
-  side, each bound to its own session.
+  structured event stream (streamed replies with Markdown and tables, thinking,
+  tool calls with output, `!` bash), pick model and thinking level, log in to
+  providers, use slash commands, answer approval and `ask` dialogs, steer or stop
+  a running turn, and resume the conversation after a daemon restart. Several
+  panes can run side by side, each bound to its own session. The message box
+  grows with the prompt; selected reply text can be commented on and goes quoted
+  with the next prompt; long pastes become editable cards and pasted or dropped
+  files are stored in `~/.agent-cockpit/attachments/` and sent as omp `@"<path>"`
+  mentions. A pane whose agent finished its turn (or asks something) while its
+  user was not looking gets an electric-blue border until it is hovered,
+  scrolled, clicked or typed in.
 - The Sessions window: every past omp conversation (read from omp's session
   files), searchable across titles, directories and prompts, sortable, and
   draggable onto the grid to resume it in a new omp pane. Sessions already open
-  in a pane are marked and cannot be opened twice.
-- The Scratchpad window: notes shared by every Scratchpad window and tab, saved
-  as you type to `~/.agent-cockpit/scratchpad.md`. An edit made elsewhere (the
-  file itself, another tab) is never overwritten without asking.
+  in a pane are marked and cannot be opened twice. Sessions the daemon runs get a
+  summarising title: after a turn settles in an unnamed session it sends omp
+  `/rename`, which RPC mode otherwise never does by itself.
+- Scratchpad windows: each new window starts its own pad; a switcher reopens or
+  deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
+  Markdown files in `~/.agent-cockpit/scratchpads/`; pasted or dropped
+  screenshots and files are stored beside them and shown inline. An edit made
+  elsewhere (the file itself, another tab) is never overwritten without asking.
 
 Not built yet: saved-context pins, terminal panes, process view,
 telemetry views, cmux-parity features beyond the above.
@@ -183,31 +194,38 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/new-leaf.js` — Fresh leaf ids for widgets entering the tree.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
+- `src/omp/activity.js` — Which omp events turn an omp window "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
+- `src/omp/composer.js` — The omp pane's message box: a draft that grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, pasted text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
+- `src/omp/message.js` — Builds the prompt the omp pane sends from what the composer holds: comments on quoted parts of earlier replies, the draft, then attachments.
+- `src/omp/selection-comment.js` — Comments on highlighted transcript text: select part of a reply and a small Comment button appears at the end of the selection; it opens a box for the comment, which is handed to the composer with the selected text as its quote.
 - `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
 - `src/render/drop-indicator.js` — Landing preview for drag & drop, plus the sash snap guide.
 - `src/render/grid-renderer.js` — Imperative, diffed DOM writer for the grid.
-- `src/scratchpad/store.js` — The page's copy of the shared scratchpad: every Scratchpad window in the page edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
+- `src/scratchpad/blocks.js` — A scratchpad's text as blocks to edit: runs of text, and the images and files it references, kept free of the DOM so the round trip can be tested.
+- `src/scratchpad/store.js` — The page's copy of one scratchpad: every window in the page showing that pad edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
 - `src/sessions/order.js` — Sorting and labels for the Sessions window, kept free of the DOM so they can be tested.
 - `src/state/atom.js` — Tiny Focal-style atom: get/set/subscribe plus `lens(key)` and `view(fn)`.
 - `src/state/persistence.js` — Versioned, schema-validated layout storage in localStorage.
+- `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
 - `src/ui/dom.js` — Element construction helper.
 - `src/ui/palette.js` — "Add widget" palette.
 - `src/widgets/omp.js` — The omp pane: starts an omp coding agent in a chosen directory through the daemon and lets the user chat with it and set it up, rendered from omp's structured event stream.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
-- `src/widgets/scratchpad.js` — Free-form notes beside the agents.
+- `src/widgets/scratchpad.js` — Notes beside the agents: text with screenshots and files in it.
 - `src/widgets/sessions.js` — Past omp sessions, searchable and sortable: drag one onto the grid, or press Resume, to continue it in a new omp window.
+- `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
 - `daemon/frame-decoder.js` — Decodes omp's stdout: newline-delimited JSON frames, with protocol-v2 `rpc_chunk` sequences reassembled into the one frame they carry.
 - `daemon/guard.js` — Loopback guard: decides which requests may reach the daemon (CLAUDE.md, Invariants).
 - `daemon/history.js` — Past omp sessions, read from omp's session files: one summary per conversation, searchable by title, directory and what the user asked.
 - `daemon/hub.js` — The daemon's omp sessions and the single ordered event log the browser replays.
 - `daemon/main.js` — Daemon entry point (`npm start`): serves the workbench on loopback and runs the omp processes it shows.
 - `daemon/omp-session.js` — One omp process in RPC mode: launch, protocol setup, command/response correlation and lifecycle, with everything it does reported as session events.
-- `daemon/scratchpad.js` — The shared scratchpad: one plain-text file the daemon keeps for every Scratchpad window.
+- `daemon/scratchpad.js` — Scratchpads: plain Markdown files the daemon keeps, one per pad, with pasted screenshots and files stored beside them.
 - `daemon/server.js` — HTTP face of the daemon: the workbench's static files, the JSON API and the event stream (routes in `wire.js`), all behind the loopback guard.
 - `daemon/token.js` — The daemon's access token: random, created once, kept owner-only in the state directory so a browser stays signed in across daemon restarts.
 - `daemon/wire.js` — Wire contract between the daemon and the browser: session metadata, stream events and HTTP payloads.
@@ -217,7 +235,7 @@ particular, move a capability into "Current state" when it ships.
 - `pane` — Pane: An empty window
 - `omp` — omp: Chat with an omp coding agent
 - `sessions` — Sessions: Past omp sessions: search, sort, drag one out to resume it
-- `scratchpad` — Scratchpad: Notes, shared by every Scratchpad window and saved as you type
+- `scratchpad` — Scratchpad: Notes with screenshots and files; each new window starts its own pad
 
 ### npm scripts
 
@@ -232,6 +250,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-transcript.test.js`, `tests/persistence.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/persistence.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`
 
 <!-- END GENERATED -->

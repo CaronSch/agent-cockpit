@@ -230,6 +230,20 @@ export function askAnswers(questions, picks) {
 
 // ── Frames ──────────────────────────────────────────────
 
+/**
+ * omp's titles start with a nerd-font icon, a private-use character that browsers draw as a
+ * box; they reach the pane as the session title and in `/rename`'s output.
+ * @param {string} text
+ */
+const withoutIcons = (text) => text.replace(/\p{Co}/gu, '').replace(/ {2,}/g, ' ').trim();
+
+/**
+ * Whether an `agent_end` hands the turn back to the user; `yielded: false` means the agent
+ * carries on. Older runtimes omit `yielded`: treat those as yielded only when terminal.
+ * @param {Record<string, any>} frame
+ */
+export const handsTurnBack = (frame) => (typeof frame.yielded === 'boolean' ? frame.yielded : frame.isTerminal !== false);
+
 /** @param {Transcript} state @param {Record<string, any>} frame */
 function applyFrame(state, frame) {
   const type = typeof frame?.type === 'string' ? frame.type : '';
@@ -242,10 +256,8 @@ function applyFrame(state, frame) {
       state.streaming = true;
       return;
     case 'agent_end': {
-      // Older runtimes omit `yielded`: treat those as yielded only when terminal.
-      const yielded = typeof frame.yielded === 'boolean' ? frame.yielded : frame.isTerminal !== false;
       // `messages` repeats what message_end frames already delivered (and may be compacted).
-      if (yielded) state.streaming = false;
+      if (handsTurnBack(frame)) state.streaming = false;
       return;
     }
     case 'message_start':
@@ -341,9 +353,9 @@ function applyFrame(state, frame) {
       state.commands = Array.isArray(frame.commands) ? frame.commands.map(slashCommand) : [];
       return;
     case 'command_output':
-      return note(state, 'info', 'command', '', String(frame.text ?? ''));
+      return note(state, 'info', 'command', '', withoutIcons(String(frame.text ?? '')));
     case 'session_info_update':
-      if (typeof frame.title === 'string') state.title = frame.title;
+      if (typeof frame.title === 'string') state.title = withoutIcons(frame.title);
       return;
     case 'rpc_frame_error':
       return note(state, 'error', 'transport', `Dropped ${frame.originalType ?? 'a frame'}: ${frame.error}`);

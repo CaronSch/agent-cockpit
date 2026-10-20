@@ -41,8 +41,31 @@ describe('blocks', () => {
     ]);
   });
 
-  test('tables stay preformatted', () => {
-    assert.deepEqual(parseMarkdown('| a | b |\n|---|---|\n| 1 | 2 |'), [{ type: 'table', text: '| a | b |\n|---|---|\n| 1 | 2 |' }]);
+  test('a table becomes header and body cells, with inline formatting in the cells', () => {
+    /** @param {string} text */
+    const t = (text) => ({ type: 'text', text });
+    assert.deepEqual(parseMarkdown('| When | What happens | Code |\n|---|---|---|\n| Now | Stuff **happened** | `tracked.rs:67` |'), [
+      {
+        type: 'table',
+        align: [null, null, null],
+        head: [[t('When')], [t('What happens')], [t('Code')]],
+        rows: [[[t('Now')], [t('Stuff '), { type: 'strong', children: [t('happened')] }], [{ type: 'code', text: 'tracked.rs:67' }]]],
+      },
+    ]);
+  });
+
+  test('alignment, missing outer pipes, escaped pipes, and rows padded or cut to the header', () => {
+    const [table] = parseMarkdown('a | b | c\n:--|:-:|--:\n1 \\| 2 | x\n1 | 2 | 3 | 4');
+    assert.ok(table.type === 'table');
+    assert.deepEqual(table.align, ['left', 'center', 'right']);
+    const text = (/** @type {any} */ cell) => cell.map((/** @type {any} */ n) => n.text).join('');
+    assert.deepEqual(table.rows.map((row) => row.map(text)), [['1 | 2', 'x', ''], ['1', '2', '3']]);
+  });
+
+  test('a table can start right under a paragraph line, and a mismatched divider is not one', () => {
+    assert.deepEqual(parseMarkdown('Here it is:\n| a | b |\n|---|---|').map((b) => b.type), ['paragraph', 'table']);
+    assert.deepEqual(parseMarkdown('a | b\n---').map((b) => b.type), ['paragraph', 'rule'], 'a rule under text with a pipe');
+    assert.deepEqual(parseMarkdown('| a | b |\n|---|').map((b) => b.type), ['paragraph']);
   });
 });
 

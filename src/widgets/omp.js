@@ -10,8 +10,12 @@ import { getDaemon } from '../daemon/client.js';
 import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/transcript.js';
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
+import { createComposer } from '../omp/composer.js';
+import { isCommand } from '../omp/message.js';
+import { attachSelectionComments } from '../omp/selection-comment.js';
+import { awaitsUser } from '../omp/activity.js';
 /** @import { WidgetContext } from './registry.js' */
-/** @import { RpcResponse, SessionMeta } from '../../daemon/wire.js' */
+/** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { SlashCommand } from '../omp/transcript.js' */
 
@@ -24,6 +28,8 @@ import { renderDialog } from '../omp/dialogs-view.js';
 
 const MAX_SUGGESTIONS = 8;
 const BOTTOM_SLACK_PX = 24;
+/** Seen-up-to is saved this long after it last moved, not on every streamed token. */
+const READ_SAVE_MS = 1000;
 
 export default {
   type: 'omp',
@@ -79,6 +85,65 @@ function createPane(body, ctx, daemon) {
     view = null;
     schedule();
   });
+
+  // ── unread: a final response or question the user has not looked at (omp/activity.js) ──
+  /** The newest of those the user has seen, in daemon time; saved with the window. */
+  let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : Date.now();
+  let latest = readAt;
+  let unread = false;
+  let pointerInside = false;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let readSave;
+  /** Looking at this window: the pointer is over it, in a page that has focus. */
+  const reading = () => pointerInside && document.visibilityState === 'visible' && document.hasFocus();
+
+  /**
+   * Saves `readAt` with the window: `soon` while output streams in under the reader's eyes
+   * (every token moves it), at once when something unread has just been read.
+   * @param {{ soon?: boolean }} [options]
+   */
+  function saveReadAt({ soon = false } = {}) {
+    clearTimeout(readSave);
+    const save = () => {
+      if (!destroyed && ctx.params.readAt !== readAt) ctx.setParams({ readAt });
+    };
+    // Never during mount: a commit while the grid is still drawing this window would re-enter it.
+    if (soon) readSave = setTimeout(save, READ_SAVE_MS);
+    else queueMicrotask(save);
+  }
+
+  function markRead() {
+    if (latest <= readAt && !unread) return;
+    readAt = Math.max(readAt, latest);
+    saveReadAt({ soon: !unread });
+    if (unread) {
+      unread = false;
+      ctx.setUnread(false);
+    }
+  }
+
+  /** @param {SessionEvent} event */
+  function noteActivity(event) {
+    if (!awaitsUser(event) || event.at <= readAt) return;
+    latest = Math.max(latest, event.at);
+    if (reading()) return markRead();
+    if (!unread) {
+      unread = true;
+      ctx.setUnread(true);
+    }
+  }
+
+  // Moving over the pane, scrolling it, clicking or typing in it: all count as reading it.
+  body.addEventListener('pointerenter', () => {
+    pointerInside = true;
+  });
+  body.addEventListener('pointerleave', () => {
+    pointerInside = false;
+  });
+  for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'focusin']) {
+    body.addEventListener(type, markRead, { passive: true });
+  }
+  if (typeof ctx.params.readAt !== 'number') saveReadAt();
 
   function schedule() {
     if (frame || destroyed) return;
@@ -289,6 +354,7 @@ function createPane(body, ctx, daemon) {
     const state = createTranscript();
     const subscription = daemon.subscribe(session, (event) => {
       applyEvent(state, event);
+      noteActivity(event);
       schedule();
     });
     // The subscription replayed history synchronously: requests in it are already handled.
@@ -343,14 +409,24 @@ function createPane(body, ctx, daemon) {
     const queue = el('div', 'omp-queue');
     const suggest = el('div', 'omp-suggest');
     suggest.setAttribute('role', 'listbox');
-    const composer = el('div', 'omp-composer');
-    const draft = el('textarea', 'omp-draft');
-    draft.rows = 2;
-    draft.setAttribute('aria-label', 'Message omp');
-    const sendBtn = el('button', 'btn btn-accent', 'Send');
-    sendBtn.type = 'button';
-    composer.append(draft, sendBtn);
-    node.append(toolbar, menu, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer);
+    const composer = createComposer({
+      pane: node,
+      upload: (file, name) => daemon.uploadAttachment(file, name),
+      onError: (text) => {
+        addNote(state, 'error', 'attach', text);
+        schedule();
+      },
+    });
+    const { draft, sendBtn } = composer;
+    const quoteComments = attachSelectionComments({
+      host: node,
+      transcript,
+      onComment: (quote, comment) => {
+        composer.addComment(quote, comment);
+        draft.focus();
+      },
+    });
+    node.append(toolbar, menu, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
@@ -390,20 +466,26 @@ function createPane(body, ctx, daemon) {
       }
     }
 
-    function send() {
-      const text = draft.value.trim();
-      if (!text || !ready()) return;
-      draft.value = '';
+    async function send() {
+      if (!ready()) return;
+      // `/command` and `!shell` go as typed; comments and attachments wait for the next prompt.
+      const command = isCommand(draft.value);
+      // A file dropped a moment ago may still be on its way to the daemon: send it too.
+      if (!command) await composer.settled();
+      if (!ready()) return;
+      const taken = composer.take({ withCards: !command });
+      const text = taken.message;
+      if (!text) return;
       hideSuggestions();
       /** @type {Record<string, unknown>} */
-      const command = text.startsWith('!')
+      const request = text.startsWith('!')
         ? { type: 'bash', command: text.slice(1).trim() }
         : state.streaming
           ? { type: 'prompt', message: text, streamingBehavior: 'steer' }
           : { type: 'prompt', message: text };
-      void rpc(command).then((res) => {
-        // Give the text back if omp refused it and the user has not typed anything since.
-        if ((!res || !res.success) && !draft.value) draft.value = text;
+      void rpc(request).then((res) => {
+        // Give it all back if omp refused it and nothing new has been written since.
+        if (!res || !res.success) taken.restore();
       });
     }
 
@@ -415,7 +497,7 @@ function createPane(body, ctx, daemon) {
       const restored = [...(res.data?.steering ?? []), ...(res.data?.followUp ?? [])];
       const texts = restored.map((m) => str(m?.text)).filter((t) => t !== null);
       if (texts.length) {
-        draft.value = [...texts, draft.value].filter(Boolean).join('\n\n');
+        composer.setText([...texts, draft.value].filter(Boolean).join('\n\n'));
         draft.focus();
       }
     }
@@ -600,7 +682,7 @@ function createPane(body, ctx, daemon) {
 
     /** @param {SlashCommand} command */
     function complete(command) {
-      draft.value = `/${command.name} `;
+      composer.setText(`/${command.name} `);
       hideSuggestions();
       draft.focus();
     }
@@ -624,13 +706,13 @@ function createPane(body, ctx, daemon) {
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        send();
+        void send();
       } else if (e.key === 'Escape') {
         if (suggestions.length) hideSuggestions();
         else if (state.streaming) void stop();
       }
     });
-    sendBtn.addEventListener('click', send);
+    sendBtn.addEventListener('click', () => void send());
     node.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && menuAnchor) closeMenu();
     });
@@ -804,7 +886,7 @@ function createPane(body, ctx, daemon) {
           : 'Message omp… (Enter sends, Shift+Enter newline, !cmd runs a shell command, / for commands)';
       if (state.editorText && state.editorText.seq > editorSeen) {
         editorSeen = state.editorText.seq;
-        draft.value = state.editorText.text;
+        composer.setText(state.editorText.text);
         updateSuggestions();
         draft.focus();
       }
@@ -844,6 +926,8 @@ function createPane(body, ctx, daemon) {
         subscription();
         closeMenu();
         resizes.disconnect();
+        composer.destroy();
+        quoteComments.destroy();
       },
     };
   }
@@ -860,6 +944,7 @@ function createPane(body, ctx, daemon) {
     destroy() {
       destroyed = true;
       if (frame) cancelAnimationFrame(frame);
+      clearTimeout(readSave);
       offStatus();
       offReset();
       // Closing the window ends its agent, as closing a terminal pane does; otherwise omp

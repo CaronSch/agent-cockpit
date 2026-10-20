@@ -1,36 +1,82 @@
 /**
- * Free-form notes beside the agents. Every Scratchpad window shows the same text, saved by
- * the daemon to one plain file (`~/.agent-cockpit/scratchpad.md`), so closing a window loses
- * nothing and the notes outlive the browser.
+ * Notes beside the agents: text with screenshots and files in it. Each new Scratchpad window
+ * starts its own pad; the switcher reopens any pad (two windows may show the same one).
+ *
+ * A pad is a Markdown file the daemon keeps (`~/.agent-cockpit/scratchpads/<id>.md`), so
+ * closing a window loses nothing. Pasted or dropped files are stored beside it and shown
+ * inline between text blocks (see `scratchpad/blocks.js`).
  */
 import { el } from '../ui/dom.js';
+import { autosize } from '../ui/autosize.js';
 import { getDaemon } from '../daemon/client.js';
 import { getScratchpad } from '../scratchpad/store.js';
+import { assetUrl, insertAsset, parseBlocks, serializeBlocks, titleOf, withGaps } from '../scratchpad/blocks.js';
 /** @import { WidgetContext } from './registry.js' */
+/** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { ScratchpadStore } from '../scratchpad/store.js' */
+/** @import { Block } from '../scratchpad/blocks.js' */
+/** @import { ScratchpadSummary } from '../../daemon/wire.js' */
+
+/** The pad windows from before there were several pads keep showing (the daemon's LEGACY_PAD). */
+const LEGACY_PAD = 'scratchpad';
+const PAD_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** Shown inline; the daemon serves these types as images (and anything else as a download). */
+const INLINE_IMAGES = /** @type {Record<string, string>} */ ({
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/avif': '.avif',
+});
+
+const newPadId = () => crypto.randomUUID().slice(0, 8);
 
 export default {
   type: 'scratchpad',
   title: 'Scratchpad',
   glyph: '✎',
-  description: 'Notes, shared by every Scratchpad window and saved as you type',
+  description: 'Notes with screenshots and files; each new window starts its own pad',
+  newParams: () => ({ pad: newPadId() }),
 
-  /** @param {HTMLElement} body @param {WidgetContext} _ctx */
-  mount(body, _ctx) {
-    return createScratchpadWindow(body, getScratchpad());
+  /** @param {HTMLElement} body @param {WidgetContext} ctx */
+  mount(body, ctx) {
+    return createScratchpadWindow(body, ctx, getDaemon());
   },
 };
 
-/** @param {HTMLElement} body @param {ScratchpadStore} store */
-function createScratchpadWindow(body, store) {
+/** @param {unknown} err */
+const message = (err) => (err instanceof Error ? err.message : String(err));
+
+/** A name the daemon will serve the way the file is meant to be shown. @param {File} file */
+function fileName(file) {
+  const ext = INLINE_IMAGES[file.type];
+  const name = file.name || (ext ? 'screenshot' : 'file');
+  return ext && !name.toLowerCase().endsWith(ext) && !(ext === '.jpg' && /\.jpe?g$/i.test(name)) ? `${name}${ext}` : name;
+}
+
+/** @param {HTMLElement} body @param {WidgetContext} ctx @param {DaemonClient} daemon */
+function createScratchpadWindow(body, ctx, daemon) {
+  const padId = () => (typeof ctx.params.pad === 'string' && PAD_ID.test(ctx.params.pad) ? ctx.params.pad : LEGACY_PAD);
+
   const root = el('div', 'scratchpad');
+
+  // ── pad switcher ──
+  const bar = el('div', 'pad-bar');
+  const switcher = el('button', 'pad-switch');
+  switcher.type = 'button';
+  switcher.setAttribute('aria-haspopup', 'menu');
+  switcher.setAttribute('aria-expanded', 'false');
+  switcher.title = 'Switch scratchpad';
+  const switchTitle = el('span', 'pad-title');
+  switcher.append(switchTitle, el('span', 'pad-caret', '▾'));
+  const menu = el('div', 'pad-menu');
+  menu.setAttribute('role', 'menu');
+  menu.hidden = true;
+  bar.append(switcher, menu);
+
+  // ── conflict ──
   const conflict = el('div', 'scratchpad-conflict');
   conflict.setAttribute('role', 'alert');
-  const conflictText = el(
-    'p',
-    '',
-    'The scratchpad was changed somewhere else (another tab, or the file itself) while you were typing.',
-  );
   const keepMine = el('button', 'btn btn-accent', 'Keep mine');
   keepMine.type = 'button';
   keepMine.title = 'Save this text over the other version';
@@ -42,66 +88,354 @@ function createScratchpadWindow(body, store) {
   const theirsView = el('details', 'scratchpad-theirs');
   const theirsText = el('pre', '');
   theirsView.append(el('summary', '', 'Show their version'), theirsText);
-  conflict.append(conflictText, theirsView, conflictActions);
+  conflict.append(
+    el('p', '', 'This scratchpad was changed somewhere else (another tab, or the file itself) while you were typing.'),
+    theirsView,
+    conflictActions,
+  );
 
-  const text = el('textarea', 'scratchpad-text');
-  text.setAttribute('aria-label', 'Scratchpad');
-  text.spellcheck = false;
-  text.placeholder = 'Notes, links, commands, prompts to reuse… Saved as you type; every Scratchpad window shows the same text.';
+  // ── document ──
+  const doc = el('div', 'pad-doc');
   const footer = el('div', 'scratchpad-footer');
   const status = el('span', 'scratchpad-status');
   status.setAttribute('aria-live', 'polite');
   const where = el('span', 'scratchpad-file');
   footer.append(status, where);
-  root.append(conflict, text, footer);
+  root.append(bar, conflict, doc, footer);
   body.append(root);
 
-  getDaemon()
+  /** @type {ScratchpadStore} */
+  let store = getScratchpad(padId());
+  let off = store.subscribe(draw);
+  /** The rendered blocks, gaps included; edits change them in place. @type {Block[]} */
+  let blocks = [];
+  /** The pad text the blocks were last rendered from (or typed into). @type {string | null} */
+  let rendered = null;
+  /** What an upload in progress is doing, shown instead of the save status. @type {string | null} */
+  let busy = null;
+  /** @type {{ dir: string, home: string } | null} */
+  let paths = null;
+
+  daemon
     .config()
-    .then(({ scratchpadFile, home }) => {
-      where.textContent = scratchpadFile.startsWith(`${home}/`) ? `~${scratchpadFile.slice(home.length)}` : scratchpadFile;
-      where.title = scratchpadFile;
+    .then(({ scratchpadDir, home }) => {
+      paths = { dir: scratchpadDir, home };
+      draw();
     })
     .catch(() => {});
 
-  function draw() {
-    const s = store.state();
-    if (text.value !== s.text) {
-      // Another window (or page) changed it: keep the caret where it was, as far as possible.
-      const { selectionStart, selectionEnd } = text;
-      text.value = s.text;
-      text.setSelectionRange(Math.min(selectionStart, s.text.length), Math.min(selectionEnd, s.text.length));
+  /** @param {Block} block @param {number} index @param {boolean} onlyBlock */
+  function renderBlock(block, index, onlyBlock) {
+    if (block.kind === 'text') {
+      const area = el('textarea', 'pad-text');
+      area.rows = 1;
+      area.spellcheck = false;
+      area.value = block.text;
+      area.dataset.index = String(index);
+      area.setAttribute('aria-label', 'Scratchpad text');
+      if (onlyBlock) area.placeholder = 'Notes, links, commands… Paste a screenshot or drop a file to add it.';
+      return area;
     }
-    text.readOnly = s.phase === 'loading';
-    conflict.hidden = s.phase !== 'conflict';
-    theirsText.textContent = s.theirs ? s.theirs.text || '(empty)' : '';
-    status.classList.toggle('is-error', s.phase === 'error');
-    status.textContent = {
-      loading: s.error ? `Waiting for the daemon: ${s.error}` : 'Loading…',
-      saved: 'Saved',
-      saving: 'Saving…',
-      error: `Not saved: ${s.error}. Retrying when the daemon is back.`,
-      conflict: 'Not saved: choose a version above',
-    }[s.phase];
+    const url = assetUrl(block.path);
+    const box = el('div', block.kind === 'image' ? 'pad-image' : 'pad-file');
+    box.dataset.index = String(index);
+    const link = el('a', '');
+    link.href = url;
+    if (block.kind === 'image') {
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.title = `${block.name}: open full size`;
+      const img = el('img', '');
+      img.src = url;
+      img.alt = block.name;
+      img.loading = 'lazy';
+      link.append(img);
+    } else {
+      link.download = block.name;
+      link.textContent = block.name;
+      link.title = `Download ${block.name}`;
+    }
+    const remove = el('button', 'pad-remove', '×');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `Remove ${block.name}`);
+    box.append(link, remove);
+    return box;
   }
 
-  text.addEventListener('input', () => store.edit(text.value));
-  text.addEventListener('keydown', (event) => {
+  const textAreas = () => /** @type {HTMLTextAreaElement[]} */ ([...doc.querySelectorAll('textarea.pad-text')]);
+  const sizeAll = () => {
+    for (const area of textAreas()) autosize(area, { scroller: doc });
+  };
+
+  /** Rebuilds the blocks from `text`, keeping the caret where it was if possible. @param {string} text */
+  function renderDoc(text) {
+    const active = /** @type {HTMLTextAreaElement | null} */ (doc.contains(document.activeElement) ? document.activeElement : null);
+    const caret = active?.classList.contains('pad-text')
+      ? { index: Number(active.dataset.index), start: active.selectionStart, end: active.selectionEnd }
+      : null;
+    blocks = withGaps(parseBlocks(text));
+    doc.replaceChildren(...blocks.map((b, i) => renderBlock(b, i, blocks.length === 1)));
+    rendered = text;
+    sizeAll();
+    if (caret) {
+      const area = /** @type {HTMLTextAreaElement | undefined} */ (textAreas().find((a) => Number(a.dataset.index) >= caret.index) ?? textAreas().at(-1));
+      area?.focus();
+      area?.setSelectionRange(Math.min(caret.start, area.value.length), Math.min(caret.end, area.value.length));
+    }
+  }
+
+  /** @param {Block[]} next */
+  function commit(next) {
+    const text = serializeBlocks(next);
+    rendered = null; // the structure changed: render it from the store's text
+    store.edit(text);
+    if (rendered === null) renderDoc(text); // the store had this text already: nothing redrew
+  }
+
+  function draw() {
+    const s = store.state();
+    if (s.text !== rendered) renderDoc(s.text);
+    for (const area of textAreas()) area.readOnly = s.phase === 'loading';
+    switchTitle.textContent = titleOf(s.text) || 'Untitled';
+    conflict.hidden = s.phase !== 'conflict';
+    theirsText.textContent = s.theirs ? s.theirs.text || '(empty)' : '';
+    status.classList.toggle('is-error', !busy && s.phase === 'error');
+    status.textContent =
+      busy ??
+      {
+        loading: s.error ? `Waiting for the daemon: ${s.error}` : 'Loading…',
+        saved: 'Saved',
+        saving: 'Saving…',
+        error: `Not saved: ${s.error}. Retrying when the daemon is back.`,
+        conflict: 'Not saved: choose a version above',
+      }[s.phase];
+    if (paths) {
+      const file = `${paths.dir}/${padId()}.md`;
+      where.textContent = file.startsWith(`${paths.home}/`) ? `~${file.slice(paths.home.length)}` : file;
+      where.title = file;
+    }
+  }
+
+  /** Shows pad `id` in this window. @param {string} id */
+  function showPad(id) {
+    closeMenu();
+    if (id === padId()) return;
+    ctx.setParams({ pad: id });
+    off();
+    store = getScratchpad(padId());
+    off = store.subscribe(draw);
+    rendered = null;
+    draw();
+  }
+
+  // ── files ──
+  /**
+   * Stores each file beside the pad and puts it into text block `index` at `caret`, in order.
+   * @param {File[]} files @param {number} index @param {number} caret
+   */
+  async function addFiles(files, index, caret) {
+    const pad = padId();
+    let at = { index, caret };
+    for (const file of files) {
+      const name = fileName(file);
+      busy = `Adding ${name}…`;
+      draw();
+      try {
+        const path = await daemon.uploadScratchpadFile(pad, file, name);
+        if (padId() !== pad) break; // the window moved on to another pad meanwhile
+        const kind = INLINE_IMAGES[file.type] ? 'image' : 'file';
+        blocks = insertAsset(blocks, at.index, at.caret, { kind, name, path });
+        at = { index: at.index + 2, caret: 0 }; // the text after the file just added
+        busy = null;
+        commit(blocks);
+      } catch (err) {
+        busy = `Could not add ${name}: ${message(err)}`;
+        draw();
+        return;
+      }
+    }
+    busy = null;
+    draw();
+  }
+
+  /** Where typing would go: the caret of a focused text block, else the end of the pad. */
+  function insertionPoint() {
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement && doc.contains(active)) {
+      return { index: Number(active.dataset.index), caret: active.selectionStart };
+    }
+    const last = blocks.length - 1;
+    const lastBlock = blocks[last];
+    return { index: last, caret: lastBlock?.kind === 'text' ? lastBlock.text.length : 0 };
+  }
+
+  doc.addEventListener('input', (event) => {
+    const area = /** @type {HTMLTextAreaElement} */ (event.target);
+    if (!area.classList.contains('pad-text')) return;
+    blocks[Number(area.dataset.index)] = { kind: 'text', text: area.value };
+    autosize(area, { scroller: doc });
+    rendered = serializeBlocks(blocks);
+    store.edit(rendered);
+  });
+  doc.addEventListener('paste', (event) => {
+    const area = /** @type {HTMLElement} */ (event.target);
+    const files = [...(event.clipboardData?.files ?? [])];
+    if (!area.classList.contains('pad-text') || files.length === 0) return;
+    event.preventDefault();
+    void addFiles(files, Number(area.dataset.index), /** @type {HTMLTextAreaElement} */ (area).selectionStart);
+  });
+  doc.addEventListener('click', (event) => {
+    if (event.target === doc) {
+      // A click below the last block types at the end, as in any editor.
+      const last = textAreas().at(-1);
+      last?.focus();
+      last?.setSelectionRange(last.value.length, last.value.length);
+      return;
+    }
+    const remove = /** @type {Element} */ (event.target).closest('.pad-remove');
+    const box = /** @type {HTMLElement | null} */ (remove?.parentElement ?? null);
+    if (!box) return;
+    commit(blocks.filter((_, i) => i !== Number(box.dataset.index)));
+  });
+  root.addEventListener('keydown', (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === 's') {
       event.preventDefault();
       void store.flush();
     }
   });
+
+  const carriesFiles = (/** @type {DragEvent} */ event) => event.dataTransfer?.types.includes('Files') ?? false;
+  root.addEventListener('dragover', (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    root.classList.add('is-drop-target');
+  });
+  root.addEventListener('dragleave', (event) => {
+    if (!root.contains(/** @type {Node | null} */ (event.relatedTarget))) root.classList.remove('is-drop-target');
+  });
+  root.addEventListener('drop', (event) => {
+    root.classList.remove('is-drop-target');
+    const files = [...(event.dataTransfer?.files ?? [])];
+    if (files.length === 0) return;
+    event.preventDefault();
+    const { index, caret } = insertionPoint();
+    void addFiles(files, index, caret);
+  });
+
   keepMine.addEventListener('click', () => store.keepMine());
   takeTheirs.addEventListener('click', () => store.takeTheirs());
 
-  const off = store.subscribe(draw);
+  // ── switcher menu ──
+  /** @param {string} label @param {string} [detail] */
+  function menuItem(label, detail) {
+    const item = el('button', 'pad-menu-item');
+    item.type = 'button';
+    item.setAttribute('role', 'menuitem');
+    item.append(el('span', 'pad-menu-label', label));
+    if (detail) item.append(el('span', 'pad-menu-detail', detail));
+    return item;
+  }
+
+  /** @param {ScratchpadSummary[]} pads */
+  function fillMenu(pads) {
+    const current = padId();
+    const listed = pads.some((p) => p.id === current);
+    const items = [];
+    if (!listed) items.push({ id: current, title: titleOf(store.state().text), modifiedAt: null });
+    items.push(...pads);
+    menu.replaceChildren();
+    for (const pad of items) {
+      const when = pad.modifiedAt === null ? 'not saved yet' : new Date(pad.modifiedAt).toLocaleString();
+      const item = menuItem(pad.title || 'Untitled', when);
+      if (pad.id === current) item.setAttribute('aria-current', 'true');
+      item.addEventListener('click', () => showPad(pad.id));
+      menu.append(item);
+    }
+    menu.append(el('div', 'pad-menu-sep'));
+    const fresh = menuItem('New scratchpad');
+    fresh.addEventListener('click', () => showPad(newPadId()));
+    menu.append(fresh);
+    if (listed) {
+      const remove = menuItem('Delete this scratchpad…');
+      remove.classList.add('is-danger');
+      remove.addEventListener('click', confirmDelete);
+      menu.append(remove);
+    }
+  }
+
+  function confirmDelete() {
+    const id = padId();
+    const title = titleOf(store.state().text) || 'Untitled';
+    const yes = el('button', 'btn btn-danger', 'Delete');
+    yes.type = 'button';
+    const no = el('button', 'btn', 'Cancel');
+    no.type = 'button';
+    const actions = el('div', 'scratchpad-row');
+    actions.append(yes, no);
+    menu.replaceChildren(el('p', 'pad-menu-confirm', `Delete “${title}” and its files, for every window showing it?`), actions);
+    no.addEventListener('click', closeMenu);
+    yes.addEventListener('click', () => {
+      daemon
+        .deleteScratchpad(id)
+        .then(() => showPad(newPadId()))
+        .catch((err) => {
+          busy = `Could not delete: ${message(err)}`;
+          closeMenu();
+          draw();
+        });
+    });
+    yes.focus();
+  }
+
+  function openMenu() {
+    menu.hidden = false;
+    switcher.setAttribute('aria-expanded', 'true');
+    menu.replaceChildren(el('p', 'pad-menu-confirm', 'Loading…'));
+    daemon
+      .scratchpads()
+      .then((pads) => {
+        if (menu.hidden) return;
+        fillMenu(pads);
+        /** @type {HTMLElement | null} */ (menu.querySelector('[aria-current="true"]') ?? menu.querySelector('.pad-menu-item'))?.focus();
+      })
+      .catch((err) => menu.replaceChildren(el('p', 'pad-menu-confirm', `Could not list scratchpads: ${message(err)}`)));
+  }
+
+  function closeMenu() {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    switcher.setAttribute('aria-expanded', 'false');
+  }
+
+  switcher.addEventListener('click', () => (menu.hidden ? openMenu() : closeMenu()));
+  menu.addEventListener('keydown', (event) => {
+    const items = /** @type {HTMLElement[]} */ ([...menu.querySelectorAll('button')]);
+    const at = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeMenu();
+      switcher.focus();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+    }
+  });
+  /** @param {PointerEvent} event */
+  const outside = (event) => {
+    if (!bar.contains(/** @type {Node} */ (event.target))) closeMenu();
+  };
+  document.addEventListener('pointerdown', outside);
+
+  const resize = new ResizeObserver(sizeAll);
+  resize.observe(doc);
   draw();
 
   return {
     destroy() {
       // The store is the page's, not this window's: it still saves anything typed here.
       off();
+      resize.disconnect();
+      document.removeEventListener('pointerdown', outside);
       root.remove();
     },
   };

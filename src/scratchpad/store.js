@@ -1,5 +1,5 @@
 /**
- * The page's copy of the shared scratchpad: every Scratchpad window in the page edits this one
+ * The page's copy of one scratchpad: every window in the page showing that pad edits this one
  * object, so they agree as you type; it saves to the daemon after a pause and follows what
  * other pages save.
  *
@@ -23,8 +23,8 @@ export const SAVE_DELAY_MS = 400;
 /** @param {unknown} err */
 const message = (err) => (err instanceof Error ? err.message : String(err));
 
-/** @param {{ daemon: DaemonClient, timers?: Timers, delayMs?: number }} options */
-export function createScratchpadStore({ daemon, timers = globalThis, delayMs = SAVE_DELAY_MS }) {
+/** @param {{ daemon: DaemonClient, id: string, timers?: Timers, delayMs?: number }} options */
+export function createScratchpadStore({ daemon, id, timers = globalThis, delayMs = SAVE_DELAY_MS }) {
   let text = '';
   /** The daemon's version `text` was edited from; null until the first load. @type {string | null} */
   let base = null;
@@ -70,7 +70,7 @@ export function createScratchpadStore({ daemon, timers = globalThis, delayMs = S
     notify();
     let retry = false;
     try {
-      const result = await daemon.saveScratchpad(sent, base, { keepalive });
+      const result = await daemon.saveScratchpad(id, sent, base, { keepalive });
       error = null;
       if (result.ok) accept({ text: sent, rev: result.rev });
       else if (result.current.text === sent) accept(result.current);
@@ -110,7 +110,7 @@ export function createScratchpadStore({ daemon, timers = globalThis, delayMs = S
 
   async function load() {
     try {
-      arrive(await daemon.scratchpad());
+      arrive(await daemon.scratchpad(id));
       error = null;
     } catch (err) {
       error = message(err);
@@ -119,7 +119,9 @@ export function createScratchpadStore({ daemon, timers = globalThis, delayMs = S
     if (dirty) void save();
   }
 
-  daemon.onScratchpad(arrive);
+  daemon.onScratchpad((padId, pad) => {
+    if (padId === id) arrive(pad);
+  });
   daemon.onStatus((status) => {
     if (status === 'open') void load();
   });
@@ -167,8 +169,12 @@ export function createScratchpadStore({ daemon, timers = globalThis, delayMs = S
 
 /** @typedef {ReturnType<typeof createScratchpadStore>} ScratchpadStore */
 
-/** @type {ScratchpadStore | null} */
-let shared = null;
+/** @type {Map<string, ScratchpadStore>} */
+const stores = new Map();
 
-/** The page's one scratchpad, created on first use. */
-export const getScratchpad = () => (shared ??= createScratchpadStore({ daemon: getDaemon() }));
+/** The page's copy of pad `id`, created on first use. @param {string} id */
+export function getScratchpad(id) {
+  let store = stores.get(id);
+  if (!store) stores.set(id, (store = createScratchpadStore({ daemon: getDaemon(), id })));
+  return store;
+}

@@ -1,9 +1,9 @@
 // Behaviour tests for the omp pane against the real daemon driving tests/fixtures/fake-omp.js.
 import { test, expect } from '@playwright/test';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { e2eToken } from './daemon.js';
+import { E2E_STATE_DIR, e2eToken } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 
@@ -83,6 +83,207 @@ test('a streamed reply renders once, as markdown, even though omp pre-fills mess
   await expect(reply.locator('li')).toHaveText(['one', 'two']);
   await expect(reply).toHaveText(/^You said: hello\s*one\s*two$/);
   await expect(pane.getByText('idle')).toBeVisible();
+});
+
+test('a markdown table in a reply renders as a table, not as pipes', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'show me a table');
+  const table = pane.locator('.omp-assistant').last().locator('table');
+  await expect(table.locator('th')).toHaveText(['When', 'What happens', 'Code']);
+  await expect(table.locator('tbody td')).toHaveText(['Now', 'Stuff happened', 'tracked.rs:67']);
+  await expect(table.locator('tbody td code')).toHaveText('tracked.rs:67');
+  await expect(pane.locator('.omp-assistant').last()).not.toContainText('|');
+});
+
+test('the message box grows with the prompt, up to half the pane, and shrinks again after sending', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  const box = () =>
+    draft.evaluate((el) => ({ height: el.getBoundingClientRect().height, scrolls: el.scrollHeight > el.clientHeight + 1 }));
+  const paneHeight = await pane.locator('.omp-session').evaluate((el) => el.getBoundingClientRect().height);
+  const empty = await box();
+
+  await draft.fill(`${'a line of the prompt\n'.repeat(6)}the end`);
+  const grown = await box();
+  expect(grown.height).toBeGreaterThan(empty.height + 60);
+  expect(grown.scrolls, 'the whole prompt shows').toBe(false);
+
+  await draft.fill('a line of the prompt\n'.repeat(80));
+  const capped = await box();
+  expect(capped.height).toBeLessThanOrEqual(paneHeight / 2 + 1);
+  expect(capped.height).toBeGreaterThan(grown.height);
+  expect(capped.scrolls, 'past the cap it scrolls').toBe(true);
+
+  await draft.press('Enter');
+  await expect.poll(async () => (await box()).height).toBe(empty.height);
+});
+
+test('a comment on selected reply text goes with the next prompt, quoting what it is about', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('strong')).toHaveText('hello');
+
+  // Text outside the transcript (here the toolbar) is not something to comment on.
+  await pane.locator('.omp-cwd').dblclick();
+  await page.waitForTimeout(100);
+  await expect(pane.locator('.omp-quote-btn')).toHaveCount(0);
+
+  await reply.locator('strong').dblclick(); // selects the word, as a reader would
+  await pane.getByRole('button', { name: 'Comment' }).click();
+  const box = pane.getByRole('textbox', { name: 'Comment on the selected text' });
+  await expect(pane.locator('.omp-quote-pop .omp-quote-preview')).toHaveText('hello');
+  await box.fill('why this word?');
+  await box.press('Enter');
+  const card = pane.locator('.omp-card.is-comment');
+  await expect(card).toContainText('“hello”');
+  await expect(card).toContainText('why this word?');
+  await expect(pane.locator('.omp-quote-pop')).toBeHidden();
+
+  // A shell line goes as typed and leaves the comment waiting.
+  await send(pane, '!echo hi');
+  await expect(pane.locator('.omp-bash').last()).toBeVisible();
+  await expect(card).toBeVisible();
+
+  const sent = page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'prompt');
+  await send(pane, 'and the next step?');
+  expect((await sent).postDataJSON().message).toBe('> hello\n\nwhy this word?\n\nand the next step?');
+  await expect(card).toHaveCount(0);
+  await expect(pane.locator('textarea')).toHaveValue('');
+});
+
+test('long pasted text and pasted or dropped files go with the next prompt as attachments', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  /** Pastes `text` into the draft; true when the browser was left to paste it as typing. @param {string} text */
+  const paste = (text) =>
+    draft.evaluate((node, text) => {
+      const data = new DataTransfer();
+      data.setData('text/plain', text);
+      return node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, text);
+
+  // A short paste is ordinary typing; a long one becomes a card, as omp's editor does.
+  expect(await paste('one\ntwo')).toBe(true);
+  const log = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n');
+  expect(await paste(log)).toBe(false);
+  const textCard = pane.locator('.omp-card.is-text');
+  await expect(textCard).toContainText('Paste #1 · +12 lines');
+
+  // Clicking it opens the text to edit.
+  await textCard.locator('.omp-card-main').click();
+  const box = pane.getByRole('textbox', { name: 'Edit paste #1' });
+  await expect(box).toHaveValue(log);
+  await box.fill(`${log}\nline 13, added`);
+  await pane.getByRole('button', { name: 'Save' }).click();
+  await expect(textCard).toContainText('+13 lines');
+
+  // A screenshot pasted from the clipboard shows as a thumbnail once stored.
+  await draft.evaluate((node) => {
+    const data = new DataTransfer();
+    data.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'image.png', { type: 'image/png' }));
+    node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  const files = pane.locator('.omp-card.is-file');
+  await expect(files.first()).not.toHaveClass(/is-uploading/);
+  await expect(files.first().locator('img')).toBeVisible();
+
+  // A file dropped anywhere on the pane; its upload is held so the message goes while it is on its way.
+  /** @type {() => void} */
+  let release = () => {};
+  const held = new Promise((resolve) => (release = () => resolve(undefined)));
+  await page.route('**/api/attachments', async (route) => {
+    if (route.request().headers()['x-file-name'] === 'notes.txt') await held;
+    await route.continue();
+  });
+  const dataTransfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(['hello from a file'], 'notes.txt', { type: 'text/plain' }));
+    return data;
+  });
+  const session = pane.locator('.omp-session');
+  await pane.locator('.omp-transcript').dispatchEvent('dragover', { dataTransfer });
+  await expect(session).toHaveClass(/is-dropping/);
+  await pane.locator('.omp-transcript').dispatchEvent('drop', { dataTransfer });
+  await expect(session).not.toHaveClass(/is-dropping/);
+  await expect(files.last()).toHaveClass(/is-uploading/);
+
+  const sent = page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'prompt');
+  await draft.fill('what are these?');
+  await draft.press('Enter');
+  release();
+  const message = (await sent).postDataJSON().message;
+  const paths = [...message.matchAll(/@"([^"]+)"/g)].map((m) => m[1]);
+  expect(message).toBe(`what are these?\n\n<attachment>\n${log}\nline 13, added\n</attachment>\n\n@"${paths[0]}"\n\n@"${paths[1]}"`);
+  expect(paths[0]).toMatch(new RegExp(`^${join(E2E_STATE_DIR, 'attachments')}/.+-image\\.png$`));
+  expect(paths[1]).toMatch(/-notes\.txt$/);
+  expect(readFileSync(paths[1], 'utf8')).toBe('hello from a file');
+  await expect(pane.locator('.omp-card')).toHaveCount(0);
+});
+
+test('a final response that lands while you are elsewhere lights the pane until you look at it', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  const lookAway = () => page.mouse.move(5, 5); // the top bar, outside the pane
+  /** Sends from the keyboard, so the pointer stays wherever it is. @param {string} text */
+  const sendFromKeyboard = async (text) => {
+    await draft.fill(text);
+    await draft.press('Enter');
+    await expect(pane.locator('.omp-assistant').last()).toContainText(text);
+  };
+  await lookAway();
+  await sendFromKeyboard('first');
+  await expect(pane).toHaveClass(/is-unread/);
+
+  // Still unread after a reload: what was not seen is not forgotten.
+  await page.reload();
+  await expect(pane.locator('.omp-assistant').last()).toContainText('first');
+  await expect(pane).toHaveClass(/is-unread/);
+
+  const box = await pane.boundingBox();
+  if (!box) throw new Error('pane not laid out');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(pane).not.toHaveClass(/is-unread/);
+  // …and read stays read, even across a reload straight after.
+  await lookAway();
+  await page.reload();
+  await expect(pane.locator('.omp-assistant').last()).toContainText('first');
+  await page.waitForTimeout(200);
+  await expect(pane).not.toHaveClass(/is-unread/);
+
+  // Scrolling the transcript reads it.
+  await sendFromKeyboard('second');
+  await expect(pane).toHaveClass(/is-unread/);
+  await pane.locator('.omp-transcript').dispatchEvent('wheel');
+  await expect(pane).not.toHaveClass(/is-unread/);
+
+  // So does putting the cursor in the message box (without the mouse).
+  await sendFromKeyboard('third');
+  await expect(pane).toHaveClass(/is-unread/);
+  await page.locator('#palette-toggle').focus();
+  await draft.focus();
+  await expect(pane).not.toHaveClass(/is-unread/);
+
+  // Output that arrives while the pointer is over the pane is read as it comes.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await sendFromKeyboard('fourth');
+  await page.waitForTimeout(200);
+  await expect(pane).not.toHaveClass(/is-unread/);
+
+  // The middle of a turn (an intermediate reply, a tool run) is not news; its end is.
+  await lookAway();
+  await draft.fill('slow');
+  await draft.press('Enter');
+  await expect(pane.locator('.omp-assistant', { hasText: 'Let me check first.' })).toBeVisible();
+  await expect(pane.locator('.omp-tool').last()).toBeVisible();
+  await expect(pane).not.toHaveClass(/is-unread/);
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: slow');
+  await expect(pane).toHaveClass(/is-unread/);
 });
 
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {

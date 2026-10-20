@@ -6,7 +6,7 @@
  * all along. When the daemon restarts, its sessions are gone: buffers are cleared and
  * `onReset` listeners fire before any event from the new daemon is delivered.
  */
-/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, Scratchpad, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
+/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
 /** @typedef {{ ok: true, rev: string } | { ok: false, current: Scratchpad }} ScratchpadSave */
 
 /** @typedef {'connecting' | 'open' | 'down' | 'unauthorized'} ConnectionStatus */
@@ -32,9 +32,13 @@ export class DaemonError extends Error {
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
  *   history(query?: string): Promise<PastSession[]>,
- *   scratchpad(): Promise<Scratchpad>,
- *   saveScratchpad(text: string, base: string, options?: { keepalive?: boolean }): Promise<ScratchpadSave>,
- *   onScratchpad(fn: (pad: Scratchpad) => void): () => void,
+ *   scratchpads(): Promise<ScratchpadSummary[]>,
+ *   scratchpad(id: string): Promise<Scratchpad>,
+ *   saveScratchpad(id: string, text: string, base: string, options?: { keepalive?: boolean }): Promise<ScratchpadSave>,
+ *   deleteScratchpad(id: string): Promise<void>,
+ *   uploadScratchpadFile(id: string, file: Blob, name: string): Promise<string>,
+ *   uploadAttachment(file: Blob, name: string): Promise<string>,
+ *   onScratchpad(fn: (id: string, pad: Scratchpad) => void): () => void,
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string }): Promise<SessionMeta>,
  *   closeSession(session: string): Promise<void>,
@@ -73,7 +77,7 @@ export function createDaemonClient(env = {}) {
   const resetListeners = new Set();
   /** @type {Set<() => void>} */
   const sessionListeners = new Set();
-  /** @type {Set<(pad: Scratchpad) => void>} */
+  /** @type {Set<(id: string, pad: Scratchpad) => void>} */
   const scratchpadListeners = new Set();
   const sessionsChanged = () => {
     for (const fn of sessionListeners) fn();
@@ -103,7 +107,7 @@ export function createDaemonClient(env = {}) {
   function onEvent(event) {
     if (event.kind === 'hello') return onHello(event);
     if (event.kind === 'scratchpad') {
-      for (const fn of scratchpadListeners) fn({ text: event.text, rev: event.rev });
+      for (const fn of scratchpadListeners) fn(event.id, { text: event.text, rev: event.rev });
       return;
     }
     if (event.kind === 'session') {
@@ -150,7 +154,20 @@ export function createDaemonClient(env = {}) {
     return body;
   }
 
+  /** Posts a file as the raw body; the daemon answers with where it stored it. @param {string} path @param {Blob} file @param {string} name @returns {Promise<string>} */
+  async function upload(path, file, name) {
+    const res = await doFetch(path, {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(name) },
+      body: file,
+    });
+    const answer = await res.json().catch(() => null);
+    if (!res.ok) throw new DaemonError(res.status, answer?.error ?? `daemon answered ${res.status}`);
+    return answer.path;
+  }
+
   const sessionPath = (/** @type {string} */ session) => `/api/sessions/${encodeURIComponent(session)}`;
+  const padPath = (/** @type {string} */ id) => `/api/scratchpads/${encodeURIComponent(id)}`;
 
   /** @param {string} session @param {(event: SessionEvent) => void} fn @returns {() => void} */
   function subscribe(session, fn) {
@@ -215,10 +232,13 @@ export function createDaemonClient(env = {}) {
       const body = await request(`/api/history${query ? `?q=${encodeURIComponent(query)}` : ''}`);
       return body.sessions;
     },
-    scratchpad: () => request('/api/scratchpad'),
-    async saveScratchpad(text, base, { keepalive = false } = {}) {
+    async scratchpads() {
+      return (await request('/api/scratchpads')).pads;
+    },
+    scratchpad: (id) => request(padPath(id)),
+    async saveScratchpad(id, text, base, { keepalive = false } = {}) {
       const body = JSON.stringify({ text, base });
-      const res = await doFetch('/api/scratchpad', {
+      const res = await doFetch(padPath(id), {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body,
@@ -229,6 +249,15 @@ export function createDaemonClient(env = {}) {
       if (res.status === 409 && answer?.current) return { ok: false, current: answer.current };
       if (!res.ok) throw new DaemonError(res.status, answer?.error ?? `daemon answered ${res.status}`);
       return { ok: true, rev: answer.rev };
+    },
+    async deleteScratchpad(id) {
+      await request(padPath(id), { method: 'DELETE' });
+    },
+    uploadScratchpadFile(id, file, name) {
+      return upload(`${padPath(id)}/assets`, file, name);
+    },
+    uploadAttachment(file, name) {
+      return upload('/api/attachments', file, name);
     },
     onScratchpad(fn) {
       scratchpadListeners.add(fn);

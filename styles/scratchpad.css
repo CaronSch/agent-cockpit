@@ -1,12 +1,139 @@
-/* Scratchpad window: shared notes, one textarea filling the window. */
+/* Scratchpad window: a pad switcher, then text blocks with images and files between them. */
 
 .scratchpad {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
+  border-radius: var(--radius-s);
 }
+
+.scratchpad.is-drop-target {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── pad switcher ── */
+
+.pad-bar {
+  position: relative;
+  display: flex;
+}
+
+.pad-switch {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text);
+  font: 600 var(--text-sm) / 1.4 var(--font-ui);
+  cursor: pointer;
+}
+
+.pad-switch:hover,
+.pad-switch[aria-expanded='true'] {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+}
+
+.pad-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pad-caret {
+  color: var(--color-text-faint);
+}
+
+.pad-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(360px, 100%);
+  max-height: 320px;
+  padding: var(--space-1);
+  overflow: auto;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-lift);
+}
+
+.pad-menu[hidden] {
+  display: none;
+}
+
+.pad-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text);
+  font: var(--text-sm) / 1.35 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pad-menu-item:hover,
+.pad-menu-item:focus-visible {
+  background: var(--color-surface);
+  outline: none;
+}
+
+.pad-menu-item[aria-current='true'] .pad-menu-label::before {
+  content: '✓ ';
+  color: var(--color-accent);
+}
+
+.pad-menu-item.is-danger {
+  color: var(--color-danger);
+}
+
+.pad-menu-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pad-menu-detail {
+  color: var(--color-text-faint);
+  font: var(--text-2xs) / 1.4 var(--font-mono);
+}
+
+.pad-menu-sep {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-line);
+}
+
+.pad-menu-confirm {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: var(--text-sm);
+}
+
+.btn-danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+/* ── conflict ── */
 
 .scratchpad-conflict {
   display: flex;
@@ -33,27 +160,122 @@
   gap: var(--space-2);
 }
 
-.scratchpad-text {
-  flex: 1;
-  min-height: 0;
-  resize: none;
+.scratchpad-theirs summary {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.scratchpad-theirs pre {
+  max-height: 10em;
+  margin: var(--space-2) 0 0;
   padding: var(--space-2);
+  overflow: auto;
+  border-radius: var(--radius-s);
+  background: var(--color-deck);
+  font: var(--text-xs) / 1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── document ── */
+
+.pad-doc {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  padding: var(--space-2);
+  overflow: auto;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-s);
   background: var(--color-deck);
+  cursor: text;
+}
+
+.pad-text {
+  flex-shrink: 0;
+  width: 100%;
+  min-height: 1.55em;
+  padding: 0;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  background: transparent;
   color: var(--color-text);
   font: var(--text-sm) / 1.55 var(--font-mono);
   tab-size: 4;
 }
 
-.scratchpad-text:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
+.pad-text:focus {
+  outline: none;
 }
 
-.scratchpad-text::placeholder {
+.pad-text::placeholder {
   color: var(--color-text-faint);
 }
+
+/* The remove button sits beside the image or file, never over it or the text below. */
+.pad-image,
+.pad-file {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+  align-items: flex-start;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.pad-image > a,
+.pad-file > a {
+  min-width: 0;
+}
+
+.pad-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+}
+
+.pad-file a {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  color: var(--color-text);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.pad-file a::before {
+  content: '📄 ';
+}
+
+.pad-remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-surface-raised);
+  color: var(--color-text-dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.pad-image:hover .pad-remove,
+.pad-file:hover .pad-remove,
+.pad-remove:focus-visible {
+  opacity: 1;
+}
+
+/* ── footer ── */
 
 .scratchpad-footer {
   display: flex;
@@ -71,22 +293,4 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.scratchpad-theirs summary {
-  color: var(--color-text-dim);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.scratchpad-theirs pre {
-  max-height: 10em;
-  margin: var(--space-2) 0 0;
-  padding: var(--space-2);
-  overflow: auto;
-  border-radius: var(--radius-s);
-  background: var(--color-deck);
-  font: var(--text-xs) / 1.5 var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }

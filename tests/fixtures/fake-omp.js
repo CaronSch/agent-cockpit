@@ -8,7 +8,12 @@
  * - contains "ask": an `ask` dialog; the reply names the chosen option
  * - contains "mystery": emits a frame type no client knows
  * - contains "garble": writes a stdout line that is not JSON
- * With `--resume <file>`, `get_messages` returns a short earlier conversation.
+ * - contains "table": replies with a markdown table
+ * - contains "slow": an intermediate reply and a tool run, then 1.5 s before the final reply
+ * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
+ *   prompt that says something: "hi" alone is too little to name a session by)
+ * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
+ * session already has a name.
  */
 import { createInterface } from 'node:readline';
 
@@ -30,6 +35,8 @@ const messages = resumed
 let model = { provider: 'fake', id: 'fake-model', name: 'Fake Model' };
 let thinkingLevel = 'off';
 let msgCounter = 0;
+/** @type {string | null} */
+let sessionName = resumed ? 'Earlier work' : null;
 /** @type {Map<string, (answer: Record<string, any>) => void>} */
 const dialogs = new Map();
 
@@ -100,10 +107,18 @@ async function runPrompt(id, text) {
   if (/mystery/.test(text)) out({ type: 'mystery_frame', payload: 42 });
   if (/garble/.test(text)) process.stdout.write('this line is not json\n');
   if (/tool/.test(text)) toolCall();
+  if (/slow/.test(text)) {
+    // A turn's middle: an intermediate reply and a tool run, then a pause before the final reply.
+    streamAssistant('Let me check first.');
+    toolCall();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
   if (/ask/.test(text)) {
     const answer = await askDialog();
     const picked = answer.cancelled ? 'nothing (cancelled)' : (answer.answers?.[0]?.selectedOptions?.[0] ?? answer.answers?.[0]?.customInput);
     streamAssistant(`You picked **${picked}**.`);
+  } else if (/table/.test(text)) {
+    streamAssistant('Here it is:\n| When | What happens | Code |\n|---|---|---|\n| Now | Stuff happened | `tracked.rs:67` |');
   } else {
     streamAssistant(`You said: **${text}**\n\n- one\n- two`);
   }
@@ -111,6 +126,18 @@ async function runPrompt(id, text) {
   out({ type: 'agent_end', messages: [], isTerminal: true, yielded: true });
   out({ type: 'prompt_result', id, agentInvoked: true, status: 'completed', sessionSettled: true });
   out({ type: 'session_settled' });
+}
+
+/** @param {string | undefined} id @param {string} title */
+function rename(id, title) {
+  out({ type: 'prompt_result', id, agentInvoked: false, status: 'completed', sessionSettled: true });
+  const said = messages.filter((m) => m.role === 'user').map((m) => String(m.content?.[0]?.text ?? ''));
+  const topic = said.find((text) => !/^\s*hi\s*$/i.test(text));
+  const name = title || (topic ? `About ${topic.split(/\s+/).slice(0, 4).join(' ')}` : null);
+  if (!name) return out({ type: 'command_output', text: 'Could not generate a session title. Use /rename <title> to set one.' });
+  sessionName = name;
+  out({ type: 'session_info_update', title: name, sessionId: 'fake-session' });
+  out({ type: 'command_output', text: `Session renamed to ${name}.` });
 }
 
 out({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
@@ -151,6 +178,7 @@ lines.on('line', (line) => {
         isSettled: true,
         queuedMessages: { steering: [], followUp: [] },
         contextUsage: { tokens: 120, contextWindow: 1000, percent: 12 },
+        ...(sessionName ? { sessionName } : {}),
       });
     case 'get_messages':
       return ok(id, type, { messages });
@@ -179,6 +207,7 @@ lines.on('line', (line) => {
       return ok(id, type, { steering: [], followUp: [] });
     case 'prompt':
       ok(id, type);
+      if (/^\/rename(\s|$)/.test(cmd.message)) return rename(id, cmd.message.slice('/rename'.length).trim());
       return void runPrompt(id, cmd.message);
     default:
       return out({ id, type: 'response', command: type, success: false, error: `Unknown command: ${type}` });

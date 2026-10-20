@@ -1,13 +1,14 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
-import { createScratchpad } from '../daemon/scratchpad.js';
+import { createAttachments } from '../daemon/attachments.js';
+import { createScratchpads } from '../daemon/scratchpad.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { SETUP_COMMANDS } from '../daemon/omp-session.js';
 /** @import { AddressInfo } from 'node:net' */
@@ -26,10 +27,10 @@ let port = 0;
 let cwd = '';
 
 /**
- * @param {{ method?: string, path: string, headers?: Record<string, string>, body?: unknown, auth?: boolean, origin?: boolean }} options
+ * @param {{ method?: string, path: string, headers?: Record<string, string>, body?: unknown, raw?: string, auth?: boolean, origin?: boolean }} options
  * @returns {Promise<{ status: number, headers: import('node:http').IncomingHttpHeaders, text: string, json: any }>}
  */
-function call({ method = 'GET', path, headers = {}, body, auth = true, origin = method !== 'GET' }) {
+function call({ method = 'GET', path, headers = {}, body, raw, auth = true, origin = method !== 'GET' }) {
   const all = {
     host: `127.0.0.1:${port}`,
     ...(auth ? { cookie: `ac_token=${TOKEN}` } : {}),
@@ -51,7 +52,7 @@ function call({ method = 'GET', path, headers = {}, body, auth = true, origin = 
       });
     });
     req.on('error', reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
+    req.end(raw ?? (body === undefined ? undefined : JSON.stringify(body)));
   });
 }
 
@@ -116,10 +117,11 @@ before(async () => {
   server = createDaemonServer({
     hub,
     history: createHistory({ root: join(cwd, 'no-sessions-yet') }),
-    scratchpad: createScratchpad({ file: join(cwd, 'state', 'scratchpad.md') }),
+    scratchpads: createScratchpads({ dir: join(cwd, 'state', 'scratchpads') }),
+    attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
     token: TOKEN,
     root: ROOT,
-    config: { defaultCwd: cwd, home: cwd, ompVersion: 'omp/fake', scratchpadFile: join(cwd, 'state', 'scratchpad.md') },
+    config: { defaultCwd: cwd, home: cwd, ompVersion: 'omp/fake', scratchpadDir: join(cwd, 'state', 'scratchpads') },
     rpcHoldMs: 200,
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
@@ -291,6 +293,50 @@ describe('sessions', () => {
     assert.equal(ready.sessionFile, '/tmp/fake-omp-session.jsonl', 'learned from omp’s get_state before ready');
   });
 
+  /**
+   * Sends `message` in session `id` and waits until its turn has settled and anything the
+   * daemon sent in reply has been answered; returns the session's whole log so far.
+   * @param {string} id @param {string} message
+   */
+  async function turn(id, message) {
+    const before = forSession((await readStream({ ms: 100 })).events, id);
+    const settled = (/** @type {SessionEvent[]} */ log) => log.filter((e) => e.kind === 'frame' && e.frame.type === 'session_settled').length;
+    await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'prompt', message } });
+    await readStream({ done: (all) => settled(forSession(all, id)) > settled(before) });
+    await new Promise((r) => setTimeout(r, 150)); // a /rename, if the daemon sends one, and omp's answer
+    return forSession((await readStream({ ms: 100 })).events, id);
+  }
+  /** @param {SessionEvent[]} log */
+  const renames = (log) => log.filter((e) => e.kind === 'sent' && e.command.message === '/rename').length;
+
+  test('a session with no name asks omp for one after a turn, again after a turn too thin to name, then stops', async () => {
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    const id = json.session.id;
+    await waitForStatus(id, 'ready');
+
+    assert.equal(renames(await turn(id, 'hi')), 1);
+    let log = await turn(id, 'fix the login bug');
+    assert.equal(renames(log), 2, 'omp could not name it from "hi": ask again');
+    assert.ok(log.some((e) => e.kind === 'frame' && e.frame.type === 'session_info_update' && e.frame.title === 'About fix the login bug'));
+    log = await turn(id, 'now add tests');
+    assert.equal(renames(log), 2, 'named: never asked again');
+  });
+
+  test('a session that already has a name is not renamed, and one that cannot be named is asked only 3 times', async () => {
+    const journal = join(cwd, 'titled.jsonl');
+    await writeFile(journal, '');
+    const titled = (await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } })).json.session.id;
+    await waitForStatus(titled, 'ready');
+    assert.equal(renames(await turn(titled, 'fix the login bug')), 0);
+
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    await waitForStatus(json.session.id, 'ready');
+    /** @type {SessionEvent[]} */
+    let log = [];
+    for (let i = 0; i < 4; i++) log = await turn(json.session.id, 'hi');
+    assert.equal(renames(log), 3);
+  });
+
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {
     const missing = createHub({ ompPath: join(cwd, 'no-such-omp') });
     const meta = missing.create({ cwd, resume: null });
@@ -309,33 +355,83 @@ describe('sessions', () => {
   });
 });
 
-describe('scratchpad', () => {
-  test('a save from the current version lands, and every open page hears about it', async () => {
-    const before = await call({ path: '/api/scratchpad' });
+describe('scratchpads', () => {
+  test('a save from the current version lands, and every open page hears which pad changed', async () => {
+    const before = await call({ path: '/api/scratchpads/notes' });
     assert.equal(before.status, 200);
     const reading = readStream({ done: (events) => events.some((e) => e.kind === 'scratchpad') });
     await new Promise((r) => setTimeout(r, 150)); // let the stream connect before the write
-    const saved = await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 'remember the milk', base: before.json.rev } });
+    const saved = await call({ method: 'PUT', path: '/api/scratchpads/notes', body: { text: 'remember the milk', base: before.json.rev } });
     assert.equal(saved.status, 200);
 
     const { events, ids } = await reading;
     const heard = events.find((e) => e.kind === 'scratchpad');
-    assert.deepEqual(heard, { kind: 'scratchpad', text: 'remember the milk', rev: saved.json.rev });
+    assert.deepEqual(heard, { kind: 'scratchpad', id: 'notes', text: 'remember the milk', rev: saved.json.rev });
     assert.equal(ids.length, events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad').length, 'not part of the replayable log');
-    assert.deepEqual((await call({ path: '/api/scratchpad' })).json, { text: 'remember the milk', rev: saved.json.rev });
+    assert.deepEqual((await call({ path: '/api/scratchpads/notes' })).json, { text: 'remember the milk', rev: saved.json.rev });
+    assert.deepEqual(
+      (await call({ path: '/api/scratchpads' })).json.pads.map((/** @type {any} */ p) => [p.id, p.title]),
+      [['notes', 'remember the milk']],
+    );
   });
 
   test('a save from an older version is refused with what is there now', async () => {
-    const { json: current } = await call({ path: '/api/scratchpad' });
-    await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 'first', base: current.rev } });
-    const stale = await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 'second', base: current.rev } });
+    const { json: current } = await call({ path: '/api/scratchpads/race' });
+    await call({ method: 'PUT', path: '/api/scratchpads/race', body: { text: 'first', base: current.rev } });
+    const stale = await call({ method: 'PUT', path: '/api/scratchpads/race', body: { text: 'second', base: current.rev } });
     assert.equal(stale.status, 409);
     assert.equal(stale.json.current.text, 'first');
-    assert.equal((await call({ path: '/api/scratchpad' })).json.text, 'first');
+    assert.equal((await call({ path: '/api/scratchpads/race' })).json.text, 'first');
   });
 
-  test('a malformed save is a 400, not a blank scratchpad', async () => {
-    const res = await call({ method: 'PUT', path: '/api/scratchpad', body: { text: 42 } });
-    assert.equal(res.status, 400);
+  test('a malformed save is a 400, and a pad id that is not one is a 404', async () => {
+    assert.equal((await call({ method: 'PUT', path: '/api/scratchpads/notes', body: { text: 42 } })).status, 400);
+    assert.equal((await call({ path: '/api/scratchpads/..%2Ftoken' })).status, 404);
+    assert.equal((await call({ path: '/api/scratchpads/Notes' })).status, 404);
+  });
+
+  test('a stored screenshot is served as an image; anything else downloads and can never run', async () => {
+    const up = await call({ method: 'POST', path: '/api/scratchpads/shots/assets', headers: { 'x-file-name': encodeURIComponent('my shot.png') }, raw: 'PNGDATA' });
+    assert.equal(up.status, 201);
+    assert.match(up.json.path, /^shots\.assets\/[a-z0-9]+-my-shot\.png$/);
+    const image = await call({ path: `/api/scratchpads/shots/assets/${up.json.path.split('/')[1]}` });
+    assert.equal(image.status, 200);
+    assert.equal(image.text, 'PNGDATA');
+    assert.equal(image.headers['content-type'], 'image/png');
+    assert.match(String(image.headers['content-security-policy']), /sandbox/);
+    assert.equal(image.headers['content-disposition'], undefined);
+
+    const page = await call({ method: 'POST', path: '/api/scratchpads/shots/assets', headers: { 'x-file-name': 'evil.html' }, raw: '<script>alert(1)</script>' });
+    const served = await call({ path: `/api/scratchpads/shots/assets/${page.json.path.split('/')[1]}` });
+    assert.equal(served.headers['content-type'], 'application/octet-stream');
+    assert.equal(served.headers['content-disposition'], 'attachment');
+    assert.match(String(served.headers['content-security-policy']), /sandbox/);
+    assert.equal((await call({ path: '/api/scratchpads/shots/assets/nope.png' })).status, 404);
+  });
+
+  test('deleting a pad removes it and its files', async () => {
+    const { json } = await call({ path: '/api/scratchpads/doomed' });
+    await call({ method: 'PUT', path: '/api/scratchpads/doomed', body: { text: 'bye', base: json.rev } });
+    const up = await call({ method: 'POST', path: '/api/scratchpads/doomed/assets', headers: { 'x-file-name': 'a.png' }, raw: 'x' });
+    assert.equal((await call({ method: 'DELETE', path: '/api/scratchpads/doomed' })).status, 204);
+    assert.equal((await call({ path: '/api/scratchpads/doomed' })).json.text, '');
+    assert.equal((await call({ path: `/api/scratchpads/doomed/assets/${up.json.path.split('/')[1]}` })).status, 404);
+    assert.ok(!(await call({ path: '/api/scratchpads' })).json.pads.some((/** @type {any} */ p) => p.id === 'doomed'));
+  });
+});
+
+describe('attachments', () => {
+  test('an attached file is stored, owner-only and intact, at a path omp can read', async () => {
+    const headers = { 'x-file-name': encodeURIComponent('Screen Shot 1.png') };
+    const first = await call({ method: 'POST', path: '/api/attachments', headers, raw: 'PNG one' });
+    const second = await call({ method: 'POST', path: '/api/attachments', headers, raw: 'PNG two' });
+    assert.equal(first.status, 201);
+    const dir = join(cwd, 'state', 'attachments');
+    assert.match(first.json.path, new RegExp(`^${dir}/\\d{4}-\\d\\d-\\d\\d/[a-z0-9]+-Screen-Shot-1\\.png$`));
+    assert.notEqual(first.json.path, second.json.path, 'the same name twice is two files');
+    assert.equal(await readFile(first.json.path, 'utf8'), 'PNG one');
+    assert.equal(await readFile(second.json.path, 'utf8'), 'PNG two');
+    assert.equal((await stat(first.json.path)).mode & 0o777, 0o600);
+    assert.equal((await call({ path: '/api/attachments' })).status, 405);
   });
 });
