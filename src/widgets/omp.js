@@ -78,6 +78,9 @@ function createPane(body, ctx, daemon) {
     })
     .catch(() => {});
 
+  // Draw now, then on every status change: the connection may already be settled (open,
+  // or refused for want of the token) when this window mounts, and then never changes.
+  schedule();
   const offStatus = daemon.onStatus(() => schedule());
   const offReset = daemon.onReset(() => {
     // The daemon restarted: its sessions, and our view of them, are gone.

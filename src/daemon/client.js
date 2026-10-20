@@ -5,6 +5,10 @@
  * window mounted late (or after a reload) renders the same history as one that was open
  * all along. When the daemon restarts, its sessions are gone: buffers are cleared and
  * `onReset` listeners fire before any event from the new daemon is delivered.
+ *
+ * It also tracks the UI files' version (see daemon/ui-files.js): the first one the daemon
+ * reports is the code this page loaded, and `onUiChange` hears when the files served stop
+ * being, or become again, those.
  */
 /** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
 /** @typedef {{ ok: true, rev: string } | { ok: false, current: Scratchpad }} ScratchpadSave */
@@ -44,6 +48,8 @@ export class DaemonError extends Error {
  *   closeSession(session: string): Promise<void>,
  *   rpc(session: string, command: Record<string, unknown>): Promise<RpcResponse>,
  *   respondUi(session: string, response: Record<string, unknown>): Promise<void>,
+ *   onUiChange(fn: (outdated: boolean) => void): () => void,
+ *   checkUi(): Promise<void>,
  * }} DaemonClient
  */
 
@@ -79,9 +85,23 @@ export function createDaemonClient(env = {}) {
   const sessionListeners = new Set();
   /** @type {Set<(id: string, pad: Scratchpad) => void>} */
   const scratchpadListeners = new Set();
+  /** @type {Set<(outdated: boolean) => void>} */
+  const uiListeners = new Set();
+  /** The UI version this page loaded: the first one heard. @type {string | null} */
+  let loadedUi = null;
+  /** The UI version served, as last heard. @type {string | null} */
+  let servedUi = null;
   const sessionsChanged = () => {
     for (const fn of sessionListeners) fn();
   };
+
+  /** @param {unknown} version */
+  function noteUi(version) {
+    if (typeof version !== 'string' || version === servedUi) return;
+    servedUi = version;
+    if (loadedUi === null) loadedUi = version;
+    else for (const fn of uiListeners) fn(version !== loadedUi);
+  }
 
   /** @param {ConnectionStatus} next */
   function setStatus(next) {
@@ -99,6 +119,7 @@ export function createDaemonClient(env = {}) {
     }
     bootId = hello.bootId;
     for (const meta of hello.sessions) metas.set(meta.id, meta);
+    noteUi(hello.ui);
     setStatus('open');
     sessionsChanged();
   }
@@ -262,6 +283,15 @@ export function createDaemonClient(env = {}) {
     onScratchpad(fn) {
       scratchpadListeners.add(fn);
       return () => scratchpadListeners.delete(fn);
+    },
+    onUiChange(fn) {
+      uiListeners.add(fn);
+      return () => uiListeners.delete(fn);
+    },
+    /** Asks which UI version is served now: files can change under a running daemon. */
+    async checkUi() {
+      const body = await request('/api/ui').catch(() => null);
+      noteUi(body?.version);
     },
     config: () => request('/api/config'),
     async createSession({ cwd, resume }) {

@@ -12,7 +12,9 @@ import { createDropIndicator } from './render/drop-indicator.js';
 import { attachSashController } from './interaction/sash-controller.js';
 import { createDragController } from './interaction/drag-controller.js';
 import { createPalette } from './ui/palette.js';
+import { createUpdateNotice } from './ui/update-notice.js';
 import { el } from './ui/dom.js';
+import { getDaemon } from './daemon/client.js';
 import { WIDGETS, newWidgetLeaf } from './widgets/registry.js';
 /** @import { Leaf, LeafParams, Tree } from './layout/grid-model.js' */
 /** @import { WidgetContext } from './widgets/registry.js' */
@@ -260,6 +262,8 @@ export function createApp(root) {
     drag,
     onAdd: addWidget,
   });
+
+  query(root, '.brand').after(createUpdateNotice({ daemon: getDaemon() }).root);
 
   schedule();
   return { api };
