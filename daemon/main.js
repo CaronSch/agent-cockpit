@@ -5,9 +5,9 @@
  *
  *   node daemon/main.js [--port 4777] [--omp <path to omp>]
  *
- * Environment: AGENT_COCKPIT_PORT, AGENT_COCKPIT_OMP, AGENT_COCKPIT_STATE_DIR (default
- * ~/.agent-cockpit; holds the access token and scratchpads/), AGENT_COCKPIT_OMP_SESSIONS (omp's session
- * journals; default `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
+ * Environment: COCKPIT_PORT, COCKPIT_OMP, COCKPIT_STATE_DIR (default ~/.cockpit; holds the
+ * access token and scratchpads/), COCKPIT_OMP_SESSIONS (omp's session journals; default
+ * `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
  */
 import { execFile } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -19,6 +19,7 @@ import { createHub } from './hub.js';
 import { createAttachments } from './attachments.js';
 import { adoptLegacyScratchpad, createScratchpads } from './scratchpad.js';
 import { createDaemonServer } from './server.js';
+import { adoptLegacyStateDir } from './state-dir.js';
 import { loadToken } from './token.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -35,14 +36,18 @@ async function ompVersion(ompPath) {
 }
 
 const { values } = parseArgs({ options: { port: { type: 'string' }, omp: { type: 'string' } } });
-const port = Number(values.port ?? process.env.AGENT_COCKPIT_PORT ?? 4777);
-const ompOption = values.omp ?? process.env.AGENT_COCKPIT_OMP ?? 'omp';
+const port = Number(values.port ?? process.env.COCKPIT_PORT ?? 4777);
+const ompOption = values.omp ?? process.env.COCKPIT_OMP ?? 'omp';
 // A path (not a bare command name) must not depend on each session's cwd.
 const ompPath = ompOption.includes('/') ? resolve(ompOption) : ompOption;
-const stateDir = process.env.AGENT_COCKPIT_STATE_DIR ?? join(homedir(), '.agent-cockpit');
+const defaultStateDir = join(homedir(), '.cockpit');
+const stateDir = process.env.COCKPIT_STATE_DIR ?? defaultStateDir;
 const ompSessions =
-  process.env.AGENT_COCKPIT_OMP_SESSIONS ?? join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.omp', 'agent'), 'sessions');
+  process.env.COCKPIT_OMP_SESSIONS ?? join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.omp', 'agent'), 'sessions');
 
+if (stateDir === defaultStateDir && (await adoptLegacyStateDir(join(homedir(), '.agent-cockpit'), stateDir))) {
+  console.log(`[daemon] moved ~/.agent-cockpit to ${stateDir}`);
+}
 const token = await loadToken(stateDir);
 const version = await ompVersion(ompPath);
 const hub = createHub({ ompPath });
@@ -72,7 +77,7 @@ server.on('error', (/** @type {NodeJS.ErrnoException} */ err) => {
 });
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`Agent Cockpit daemon on http://127.0.0.1:${port}`);
+  console.log(`Cockpit daemon on http://127.0.0.1:${port}`);
   console.log(version ? `omp: ${version}` : `omp: not found at "${ompPath}" (sessions will fail to start)`);
   console.log(`Open: http://127.0.0.1:${port}/?token=${token}`);
 });

@@ -76,7 +76,7 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   Sessions listing takes over a second. *Response:* read only each file's head
   and a bounded tail, or persist the summaries across restarts.
 
-## When `~/.agent-cockpit` passes 1 GB
+## When `~/.cockpit` passes 1 GB
 
 - **Attached files are never deleted.** Every file pasted or dropped on an omp
   pane stays in `attachments/<day>/`, and a pad's files go only when the pad does.
@@ -125,9 +125,9 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
 
 ## When announcing publicly, or publishing a package
 
-- **Name collisions.** "Cockpit" is Red Hat's Linux admin UI, and the npm names
-  may be taken. *Response:* check npm, GitHub and trademark conflicts for
-  "agent-cockpit"; rename before announcing, not after.
+- **Name collisions.** The project is now plain "Cockpit", which is also Red
+  Hat's Linux admin UI, and the npm name `cockpit` may be taken. *Response:*
+  check npm, GitHub and trademark conflicts before announcing, not after.
 - **macOS only.** Process sampling and file tracing are written for macOS first.
   *Response:* state supported platforms in the README; add Linux backends when
   someone needs them.

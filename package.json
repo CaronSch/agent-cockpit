@@ -1,5 +1,5 @@
 {
-  "name": "agent-cockpit",
+  "name": "cockpit",
   "version": "0.1.0",
   "private": true,
   "description": "In-browser workbench for AI coding harnesses: magnetic, split-tree modular windows (VS Code workbench grid model).",

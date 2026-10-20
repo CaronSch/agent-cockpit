@@ -17,7 +17,7 @@ export default defineConfig({
   webServer: {
     // The real daemon, driving the scripted fake omp instead of a real agent.
     command: `node daemon/main.js --port ${E2E_PORT} --omp tests/fixtures/fake-omp.js`,
-    env: { AGENT_COCKPIT_STATE_DIR: E2E_STATE_DIR, AGENT_COCKPIT_OMP_SESSIONS: E2E_OMP_SESSIONS },
+    env: { COCKPIT_STATE_DIR: E2E_STATE_DIR, COCKPIT_OMP_SESSIONS: E2E_OMP_SESSIONS },
     url: BASE_URL,
     reuseExistingServer: !CI,
   },
