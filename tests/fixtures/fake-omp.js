@@ -10,6 +10,7 @@
  * - contains "garble": writes a stdout line that is not JSON
  * - contains "table": replies with a markdown table
  * - contains "slow": an intermediate reply and a tool run, then 1.5 s before the final reply
+ * - contains "think": the final reply opens with a thinking block
  * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
  *   prompt that says something: "hi" alone is too little to name a session by)
  * - `btw`: a side question, answered from the conversation and kept out of it as omp's is;
@@ -102,32 +103,43 @@ function record(message) {
   return messageId;
 }
 
-/** @param {string} text */
-function streamAssistant(text) {
-  const final = { role: 'assistant', content: [{ type: 'text', text }], provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: Date.now() };
+/** @param {string} text @param {string | null} [thinking] streamed as a thinking block ahead of the text */
+function streamAssistant(text, thinking = null) {
+  const content = [...(thinking === null ? [] : [{ type: 'thinking', thinking }]), { type: 'text', text }];
+  const final = { role: 'assistant', content, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: Date.now() };
   const messageId = record(final);
   out({ type: 'message_start', message: final, messageId }); // pre-filled, like real omp
-  out({ type: 'message_update', assistantMessageEvent: { type: 'text_start', contentIndex: 0 }, message: { role: 'assistant' }, messageId });
-  for (const piece of text.match(/.{1,6}/gs) ?? []) {
-    out({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: piece }, message: { role: 'assistant' }, messageId });
+  /** @param {Record<string, any>} event */
+  const update = (event) => out({ type: 'message_update', assistantMessageEvent: event, message: { role: 'assistant' }, messageId });
+  const at = content.length - 1;
+  if (thinking !== null) {
+    update({ type: 'thinking_start', contentIndex: 0 });
+    update({ type: 'thinking_delta', contentIndex: 0, delta: thinking });
+    update({ type: 'thinking_end', contentIndex: 0, content: thinking });
   }
-  out({ type: 'message_update', assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: text }, message: { role: 'assistant' }, messageId });
+  update({ type: 'text_start', contentIndex: at });
+  for (const piece of text.match(/.{1,6}/gs) ?? []) update({ type: 'text_delta', contentIndex: at, delta: piece });
+  update({ type: 'text_end', contentIndex: at, content: text });
   out({ type: 'message_end', message: final, messageId });
 }
 
+/** Each call gets its own id, as omp's do: a session may run the same tool many times. */
+let toolCalls = 0;
+
 function toolCall() {
-  const call = { type: 'toolCall', id: 'tool-1', name: 'bash', arguments: { command: 'echo hi' }, intent: 'Running echo' };
+  const toolCallId = `tool-${++toolCalls}`;
+  const call = { type: 'toolCall', id: toolCallId, name: 'bash', arguments: { command: 'echo hi' }, intent: 'Running echo' };
   const assistant = { role: 'assistant', content: [call], provider: model.provider, model: model.id, usage, stopReason: 'toolUse', timestamp: Date.now() };
   const messageId = record(assistant);
   out({ type: 'message_start', message: assistant, messageId });
   out({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0 }, message: { role: 'assistant' }, messageId });
   out({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_end', contentIndex: 0, toolCall: call }, message: { role: 'assistant' }, messageId });
   out({ type: 'message_end', message: assistant, messageId });
-  out({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'bash', args: { command: 'echo hi' }, intent: 'Running echo' });
-  out({ type: 'tool_execution_update', toolCallId: 'tool-1', toolName: 'bash', args: { command: 'echo hi' }, partialResult: { content: [{ type: 'text', text: 'hi\n' }], details: {} } });
+  out({ type: 'tool_execution_start', toolCallId, toolName: 'bash', args: { command: 'echo hi' }, intent: 'Running echo' });
+  out({ type: 'tool_execution_update', toolCallId, toolName: 'bash', args: { command: 'echo hi' }, partialResult: { content: [{ type: 'text', text: 'hi\n' }], details: {} } });
   const result = { content: [{ type: 'text', text: 'hi\n' }], details: {} };
-  out({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'bash', result, isError: false });
-  const toolResult = { role: 'toolResult', toolCallId: 'tool-1', toolName: 'bash', content: result.content, isError: false, timestamp: Date.now() };
+  out({ type: 'tool_execution_end', toolCallId, toolName: 'bash', result, isError: false });
+  const toolResult = { role: 'toolResult', toolCallId, toolName: 'bash', content: result.content, isError: false, timestamp: Date.now() };
   const resultId = record(toolResult);
   out({ type: 'message_start', message: toolResult, messageId: resultId });
   out({ type: 'message_end', message: toolResult, messageId: resultId });
@@ -170,7 +182,7 @@ async function runPrompt(id, text) {
   } else if (/table/.test(text)) {
     streamAssistant('Here it is:\n| When | What happens | Code |\n|---|---|---|\n| Now | Stuff happened | `tracked.rs:67` |');
   } else {
-    streamAssistant(`You said: **${text}**\n\n- one\n- two`);
+    streamAssistant(`You said: **${text}**\n\n- one\n- two`, /think/.test(text) ? 'Weighing what to say.' : null);
   }
   out({ type: 'turn_end', message: messages.at(-1), toolResults: [] });
   out({ type: 'extension_ui_request', id: `ui-${Date.now()}-w`, method: 'setWidget', widgetKey: 'autoresearch' }); // omp clears it every turn

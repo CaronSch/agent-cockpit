@@ -2,9 +2,10 @@
  * The omp pane: starts an omp coding agent in a chosen directory through the daemon and
  * lets the user chat with it and set it up, rendered from omp's structured event stream.
  *
- * Params (persisted with the layout): `session` (daemon session id), `cwd`, and
- * `sessionFile` (omp's transcript file, for resuming after the process is gone), plus
- * `resume` or `fork` while the window is starting from another journal.
+ * Params (persisted with the layout): `session` (daemon session id), `cwd`,
+ * `sessionFile` (omp's transcript file, for resuming after the process is gone), `resume`
+ * or `fork` while the window is starting from another journal, and the pane's settings
+ * from its Config panel (`SETTINGS`).
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -16,6 +17,7 @@ import { createComposer } from '../omp/composer.js';
 import { composeAsk, isCommand, shellCommand } from '../omp/message.js';
 import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { awaitsUser } from '../omp/activity.js';
+import { promptsAndResponses } from '../omp/visibility.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -25,9 +27,22 @@ import { awaitsUser } from '../omp/activity.js';
  * `resume` is a journal to resume, `fork` one to fork into a new session, as soon as the
  * window is placed (set by whoever created it: the Sessions window, another pane's Fork);
  * either is cleared once the session is running, so a fork is never taken twice.
- * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, resume: string | null, fork: string | null }} OmpParams
+ * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, resume: string | null, fork: string | null, onlyResponses: boolean }} OmpParams
  */
 /** @typedef {{ label: string, detail?: string, current?: boolean, pick: () => void }} MenuEntry */
+/**
+ * A switch in the pane's Config panel, saved with the window under `key`; off unless set.
+ * @typedef {{ key: 'onlyResponses', label: string, detail: string }} PaneSetting
+ */
+
+/** The pane's settings, in the order the Config panel lists them. @type {readonly PaneSetting[]} */
+const SETTINGS = [
+  {
+    key: 'onlyResponses',
+    label: 'Only prompts and responses',
+    detail: 'Hide thinking, tool calls and the messages in between',
+  },
+];
 
 const MAX_SUGGESTIONS = 8;
 const BOTTOM_SLACK_PX = 24;
@@ -67,6 +82,7 @@ function createPane(body, ctx, daemon) {
     sessionFile: str(ctx.params.sessionFile),
     resume: str(ctx.params.resume),
     fork: str(ctx.params.fork),
+    onlyResponses: ctx.params.onlyResponses === true,
   });
 
   /** @type {string | null} */
@@ -379,10 +395,11 @@ function createPane(body, ctx, daemon) {
     const errorBadge = el('span', 'omp-badge-error', 'error');
     const spacer = el('span', 'omp-spacer');
     const forkBtn = toolButton('Fork', FORK_TITLE);
+    const configBtn = toolButton('Config', 'Settings for this pane');
     const loginBtn = toolButton('Login', 'Log in to a model provider');
     const stopBtn = toolButton('Stop', 'Stop the agent and restore queued messages (Esc)');
     const closeBtn = toolButton('Close', 'End this omp session');
-    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, contextEl, costEl, errorBadge, spacer, forkBtn, loginBtn, stopBtn, closeBtn);
+    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, contextEl, costEl, errorBadge, spacer, forkBtn, configBtn, loginBtn, stopBtn, closeBtn);
 
     const strip = el('div', 'omp-strip');
     const loginStrip = el('div', 'omp-login');
@@ -635,6 +652,30 @@ function createPane(body, ctx, daemon) {
       { filter: true },
     );
 
+    // ── Config: this window's own settings (`SETTINGS`), saved with it ──
+    const settingsPanel = el('div', 'omp-menu omp-settings');
+    settingsPanel.popover = 'auto';
+    configBtn.popoverTargetElement = settingsPanel;
+    settingsPanel.addEventListener('toggle', (event) => {
+      if (/** @type {ToggleEvent} */ (event).newState !== 'open') return;
+      settingsPanel.replaceChildren(
+        el('p', 'omp-label', 'This pane'),
+        ...SETTINGS.map((setting) => {
+          const row = el('label', 'omp-setting');
+          const box = el('input');
+          box.type = 'checkbox';
+          box.checked = params()[setting.key];
+          box.addEventListener('change', () => {
+            ctx.setParams({ [setting.key]: box.checked });
+            schedule();
+          });
+          row.append(box, el('span', '', setting.label), el('span', 'omp-muted', setting.detail));
+          return row;
+        }),
+      );
+    });
+    configBtn.after(settingsPanel);
+
     stopBtn.addEventListener('click', () => void stop());
     // The copy is omp's own (`--fork`): a new session in a new window; this one carries on.
     forkBtn.addEventListener('click', () => {
@@ -734,11 +775,26 @@ function createPane(body, ctx, daemon) {
     let stripKey = '';
     let bannerKey = '';
     let loginKey = '';
+    /** Which view `drawn` holds: an item draws differently when only responses show. */
+    let drawnOnlyResponses = false;
+    /** Stands in for the hidden work of a running turn when only responses show. */
+    const workingEl = el('div', 'omp-working');
+    workingEl.setAttribute('role', 'status');
 
     function drawTranscript() {
+      const { onlyResponses } = params();
+      if (onlyResponses !== drawnOnlyResponses) {
+        drawnOnlyResponses = onlyResponses;
+        for (const entry of drawn.values()) {
+          resizes.unobserve(entry.node);
+          entry.node.remove();
+        }
+        drawn.clear();
+      }
+      const shown = onlyResponses ? promptsAndResponses(state.items, state.streaming) : { items: state.items, working: null };
       const live = new Set();
       const itemCtx = { tools: state.tools, open: openDetails };
-      state.items.forEach((item, i) => {
+      shown.items.forEach((item, i) => {
         live.add(item.key);
         let entry = drawn.get(item.key);
         if (!entry || entry.rev !== item.rev) {
@@ -760,6 +816,13 @@ function createPane(body, ctx, daemon) {
           entry.node.remove();
           drawn.delete(key);
         }
+      }
+      if (shown.working) {
+        const { steps } = shown.working;
+        workingEl.textContent = steps ? `Working… ${steps} step${steps === 1 ? '' : 's'}` : 'Working…';
+        if (transcript.lastElementChild !== workingEl) transcript.append(workingEl);
+      } else {
+        workingEl.remove();
       }
       pinToBottom();
     }

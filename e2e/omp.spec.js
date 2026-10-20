@@ -560,6 +560,57 @@ test('a tool call is one card whose output appears when expanded', async ({ page
   await expect(card.locator('pre').last()).toHaveText('hi');
 });
 
+test('Config can show only prompts and final replies, per pane, across a reload, and back', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const reply = pane.locator('.omp-assistant', { hasText: 'You said: run a tool and think' });
+  await send(pane, 'run a tool and think');
+  await expect(reply).toBeVisible();
+  await expect(pane.locator('.omp-tool')).toHaveCount(1);
+  await expect(pane.locator('.omp-thinking')).toHaveCount(1);
+
+  const only = pane.locator('.omp-settings:popover-open').getByRole('checkbox', { name: 'Only prompts and responses' });
+  await pane.getByRole('button', { name: 'Config' }).click();
+  await expect(only).not.toBeChecked();
+  await only.check();
+  await expect(pane.locator('.omp-tool')).toHaveCount(0);
+  await expect(pane.locator('.omp-thinking')).toHaveCount(0);
+  await expect(pane.locator('.omp-user')).toHaveText(/run a tool and think/);
+  await expect(pane.locator('.omp-assistant')).toHaveCount(1);
+  await expect(reply).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // A running turn is one indicator: its intermediate reply and tool run stay hidden.
+  await send(pane, 'slow');
+  await expect(pane.locator('.omp-working')).toHaveText('Working… 2 steps');
+  await expect(pane.locator('.omp-tool')).toHaveCount(0);
+  await expect(pane.getByText('Let me check first.')).toHaveCount(0);
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: slow');
+  await expect(pane.locator('.omp-working')).toHaveCount(0);
+  await expect(pane.getByText('Let me check first.')).toHaveCount(0);
+
+  // The setting is this window's: another pane shows everything.
+  const other = await startedPane(page);
+  await send(other, 'run a tool');
+  await expect(other.locator('.omp-tool')).toHaveCount(1);
+  await expect(pane.locator('.omp-tool')).toHaveCount(0);
+
+  // The window keeps the setting (and its id) across a reload.
+  await page.reload();
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: slow');
+  await expect(pane.locator('.omp-tool')).toHaveCount(0);
+  await expect(pane.locator('.omp-thinking')).toHaveCount(0);
+
+  // Switching it off brings back everything it hid.
+  await pane.getByRole('button', { name: 'Config' }).click();
+  await expect(only).toBeChecked();
+  await only.uncheck();
+  await expect(pane.locator('.omp-tool')).toHaveCount(2);
+  await expect(pane.locator('.omp-thinking')).toHaveCount(1);
+  await expect(pane.getByText('Let me check first.')).toBeVisible();
+  await expect(reply).toBeVisible();
+});
+
 test('an ask dialog is answered from the pane and omp continues with the answer', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
