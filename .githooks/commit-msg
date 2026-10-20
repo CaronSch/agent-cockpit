@@ -1,0 +1,13 @@
+#!/bin/sh
+# Reject commit messages that are not Conventional Commits (CLAUDE.md, "Commits & PRs").
+subject=$(head -n 1 "$1")
+case "$subject" in
+  Merge\ * | Revert\ * | fixup!\ * | squash!\ * | amend!\ *) exit 0 ;;
+esac
+types='feat|fix|refactor|perf|style|test|docs|build|ops|chore'
+if printf '%s\n' "$subject" | grep -Eq "^($types)(\([^()]+\))?!?: [^A-Z].*[^.]$"; then
+  exit 0
+fi
+echo "commit-msg: not a Conventional Commit: \"$subject\"" >&2
+echo "  expected <type>(<scope>)!: <description>, type one of ${types}; see CLAUDE.md" >&2
+exit 1

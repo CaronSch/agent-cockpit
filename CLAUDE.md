@@ -109,6 +109,10 @@ telemetry views, cmux-parity features beyond the above.
 
 - **Simple beats clever**, except where the workbench needs it: structured panes
   and the rich, modular workbench are not to be simplified away.
+- **Clean and minimal, never hacky.** Write the least code that does the job
+  properly, and delete what nothing uses. No workarounds, special cases or
+  shortcuts that hide a problem instead of fixing it: if the clean fix is out of
+  reach, stop and tell the owner.
 - **Risks:** weigh each one when it comes up, decide, and tell the owner in one
   line what you decided. Fix a risk now only if it bites at the current stage
   *and* the fix costs little next to the damage. Drop small risks whose cover
@@ -179,6 +183,51 @@ telemetry views, cmux-parity features beyond the above.
 - When omp changes its protocol, re-record frames from the real omp (never
   commit them: they contain local tool and MCP names) and update the fake to
   match.
+
+## Commits & PRs
+
+Every commit message and PR title is a [Conventional
+Commit](https://gist.github.com/qoomon/5dfcdf8eec66a051ecd85625518cfd13); the
+`commit-msg` hook in `.githooks/` rejects any other.
+
+```
+<type>(<optional scope>): <description>
+
+<optional body>
+
+<optional footer>
+```
+
+| Type | Use for |
+|---|---|
+| `feat` | adds, adjusts or removes a feature |
+| `fix` | resolves a bug in a preceding feature commit |
+| `refactor` | rewrites code without altering behavior |
+| `perf` | refactor specifically targeting performance |
+| `style` | formatting/whitespace only, no behavior change |
+| `test` | adds or corrects tests |
+| `docs` | documentation only |
+| `build` | build tools, dependencies, versioning |
+| `ops` | infrastructure, deployment, CI/CD, monitoring, backups |
+| `chore` | maintenance: initial commit, `.gitignore`, housekeeping |
+
+- **Description** (mandatory): imperative mood ("add", not "added"/"adds"),
+  lowercase first letter, no trailing period, concise.
+- **Scope** (optional): the area touched (`omp`, `daemon`, `scratchpad`, `ui`, …).
+  Never an issue identifier.
+- **Body** (optional): motivation, and how the behavior differs from before.
+- **Footer** (optional): issue references (`Closes #123`) and breaking changes.
+- **Breaking changes**: `!` before the colon, plus a `BREAKING CHANGE:` footer
+  if it needs explaining.
+- Merge and revert commits keep git's default message.
+
+```
+feat(omp): ask about selected reply text
+fix(scratchpad): keep pasted images when the pad is renamed
+refactor!: drop the Node daemon
+
+BREAKING CHANGE: install Bun to run the daemon.
+```
 
 ## Keeping this file current
 
