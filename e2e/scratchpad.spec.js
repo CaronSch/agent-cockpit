@@ -194,16 +194,16 @@ test('deleting a pad removes its file, and the window moves on to a fresh pad', 
   expect(await padFile(window)).not.toBe(file);
 });
 
-test('a window saved before there were several pads still shows the old shared notes', async ({ page }) => {
+test('a window whose layout names no pad shows the default pad', async ({ page }) => {
   mkdirSync(PADS, { recursive: true });
-  writeFileSync(join(PADS, 'scratchpad.md'), 'notes from before');
+  writeFileSync(join(PADS, 'scratchpad.md'), 'default notes');
   await openWorkbench(page);
   await page.evaluate(() => {
-    const tree = { kind: 'leaf', id: 'w_legacy1', widget: 'scratchpad' };
+    const tree = { kind: 'leaf', id: 'w_nopad01', widget: 'scratchpad' };
     localStorage.setItem('cockpit.layout.v1', JSON.stringify({ version: 1, savedAt: new Date().toISOString(), tree }));
   });
   await page.reload();
-  await expect(page.locator('.widget[data-widget="scratchpad"] .pad-text').first()).toHaveValue('notes from before');
+  await expect(page.locator('.widget[data-widget="scratchpad"] .pad-text').first()).toHaveValue('default notes');
 });
 
 test('an edit made to the file elsewhere is never overwritten without asking', async ({ page }) => {

@@ -16,7 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 // Pure and shared with the browser, so a pad has one title, and one set of ids and file rules, wherever it is used.
-import { ASSET_NAME, IMAGE_TYPES, LEGACY_PAD, PAD_ID, titleOf } from '../src/scratchpad/blocks.js';
+import { ASSET_NAME, IMAGE_TYPES, PAD_ID, titleOf } from '../src/scratchpad/blocks.js';
 /** @import { Scratchpad, ScratchpadSummary } from './wire.js' */
 
 
@@ -28,19 +28,6 @@ export function safeAssetName(name) {
   const base = name.split(/[\\/]/).pop() ?? '';
   const cleaned = base.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(-100);
   return `${Date.now().toString(36)}${randomBytes(2).toString('hex')}-${cleaned || 'file'}`;
-}
-
-/**
- * Moves the single `scratchpad.md` of earlier versions into `dir` as pad `scratchpad`, which
- * windows from before multiple pads existed still show.
- * @param {string} legacyFile @param {string} dir
- */
-export async function adoptLegacyScratchpad(legacyFile, dir) {
-  const target = join(dir, `${LEGACY_PAD}.md`);
-  if (!(await Bun.file(legacyFile).exists()) || (await Bun.file(target).exists())) return false;
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await rename(legacyFile, target);
-  return true;
 }
 
 /** @param {{ dir: string }} options */
