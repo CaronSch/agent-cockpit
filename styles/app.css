@@ -152,11 +152,19 @@ button {
   background: oklch(86% 0.15 75);
 }
 
+/* ── Popovers ────────────────────────────────────────── */
+/* Menus are popovers: in the top layer, placed beside the button that opens them (its
+   implicit anchor) and kept on screen by position-try-fallbacks. */
+[popover] {
+  inset: auto;
+  margin: 0;
+  color: inherit;
+}
+
 /* ── Palette ─────────────────────────────────────────── */
 .palette {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: var(--space-4);
+  position-area: bottom span-left;
+  margin-top: 6px;
   width: min(360px, calc(100vw - 32px));
   padding: var(--space-3);
   border: 1px solid var(--color-line-strong);

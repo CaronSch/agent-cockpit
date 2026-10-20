@@ -155,6 +155,43 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
   await expect(pane.locator('textarea')).toHaveValue('');
 });
 
+test('the toolbar menus open under their button, close on Esc or a click outside, and set what is picked', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const modelBtn = pane.getByRole('button', { name: 'Fake Model', exact: true });
+  const thinkingBtn = pane.getByTitle('Choose thinking level');
+  const menu = pane.locator('.omp-menu:popover-open');
+
+  await modelBtn.click();
+  await expect(menu.getByRole('button', { name: /Fake Large/ })).toBeVisible();
+  await expect(menu.getByRole('searchbox')).toBeFocused();
+  const [button, box] = [await modelBtn.boundingBox(), await menu.boundingBox()];
+  if (!button || !box) throw new Error('menu not laid out');
+  expect(Math.round(box.x)).toBe(Math.round(button.x));
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+  await menu.getByRole('searchbox').fill('large');
+  await expect(menu.locator('.omp-menu-item')).toHaveText([/Fake Large/]);
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(modelBtn).toBeFocused();
+
+  // Opening another menu closes the first; a click outside closes either.
+  await modelBtn.click();
+  await expect(menu.getByRole('button', { name: /Fake Large/ })).toBeVisible();
+  await thinkingBtn.click();
+  await expect(menu).toHaveCount(1);
+  await expect(menu.getByRole('button', { name: 'high', exact: true })).toBeVisible();
+  await pane.locator('.omp-transcript').click();
+  await expect(menu).toHaveCount(0);
+
+  await thinkingBtn.click();
+  const picked = page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'set_thinking_level');
+  await menu.getByRole('button', { name: 'high', exact: true }).click();
+  expect((await picked).postDataJSON().level).toBe('high');
+  await expect(menu).toHaveCount(0);
+  await expect(thinkingBtn).toHaveText(/high/);
+});
+
 test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

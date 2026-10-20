@@ -18,7 +18,6 @@
 /* ── pad switcher ── */
 
 .pad-bar {
-  position: relative;
   display: flex;
 }
 
@@ -38,7 +37,7 @@
 }
 
 .pad-switch:hover,
-.pad-switch[aria-expanded='true'] {
+.pad-switch:has(+ :popover-open) {
   border-color: var(--color-line-strong);
   background: var(--color-surface-raised);
 }
@@ -53,15 +52,14 @@
   color: var(--color-text-faint);
 }
 
-.pad-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 5;
+.pad-menu:popover-open {
+  position-area: bottom span-right;
+  position-try-fallbacks: flip-inline, flip-block;
+  margin-top: 4px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: min(360px, 100%);
+  width: min(360px, calc(100vw - 16px));
   max-height: 320px;
   padding: var(--space-1);
   overflow: auto;
@@ -69,10 +67,6 @@
   border-radius: var(--radius-m);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-lift);
-}
-
-.pad-menu[hidden] {
-  display: none;
 }
 
 .pad-menu-item {
