@@ -10,6 +10,7 @@ import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { SessionNotRunning } from './omp-session.js';
 import { PAD_ID } from './scratchpad.js';
+import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-files.js';
 /** @import { IncomingMessage, ServerResponse } from 'node:http' */
 /** @import { AddressInfo } from 'node:net' */
 /** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
@@ -18,16 +19,6 @@ import { PAD_ID } from './scratchpad.js';
 /** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
 /** @typedef {ReturnType<typeof import('./attachments.js').createAttachments>} Attachments */
 
-const STATIC_DIRS = ['src', 'styles'];
-const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-});
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const HEARTBEAT_MS = 15_000;
@@ -137,14 +128,17 @@ export const RPC_HOLD_MS = 2000;
  */
 export function createDaemonServer({ hub, history, scratchpads, attachments, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
   const rootDir = resolve(root);
-  const indexFile = resolve(rootDir, 'index.html');
+  const indexFile = resolve(rootDir, INDEX_FILE);
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
+  const uiVersion = createUiVersion(rootDir);
 
   /** @param {IncomingMessage} req @param {ServerResponse} res */
-  function stream(req, res) {
+  async function stream(req, res) {
+    const ui = await uiVersion.current();
+    if (req.destroyed) return; // gone while the version was worked out: nothing to clean up yet
     res.writeHead(200, { ...BASE_HEADERS, 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive' });
     res.write('retry: 1000\n\n');
-    res.write(`data: ${JSON.stringify({ kind: 'hello', bootId: hub.bootId, sessions: hub.list() })}\n\n`);
+    res.write(`data: ${JSON.stringify({ kind: 'hello', bootId: hub.bootId, sessions: hub.list(), ui })}\n\n`);
     const send = (/** @type {SessionEvent} */ event) =>
       res.write(`id: ${hub.bootId}:${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
     for (const event of hub.since(lastSeenSeq(req.headers['last-event-id'], hub.bootId))) send(event);
@@ -213,6 +207,7 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, tok
     const method = req.method ?? 'GET';
     if (pathname === '/api/stream' && method === 'GET') return stream(req, res);
     if (pathname === '/api/config' && method === 'GET') return sendJson(res, 200, config);
+    if (pathname === '/api/ui' && method === 'GET') return sendJson(res, 200, { version: await uiVersion.current() });
     if (pathname === '/api/history' && method === 'GET') {
       return sendJson(res, 200, { sessions: await history.list(url.searchParams.get('q') ?? '') });
     }

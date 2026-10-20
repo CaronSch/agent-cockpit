@@ -5,6 +5,7 @@
  * Routes (all same-origin, authenticated by the `ac_token` cookie; see `guard.js`):
  *
  *   GET    /api/config                 → DaemonConfig
+ *   GET    /api/ui                     → { version }: the UI files' version now (see `ui-files.js`)
  *   GET    /api/history?q=words        → { sessions: PastSession[] } (unordered; every word must match)
  *   GET    /api/sessions               → { sessions: SessionMeta[] }
  *   POST   /api/sessions               { cwd, resume? } → 201 { session: SessionMeta }
@@ -27,7 +28,7 @@
  *
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
  * `<bootId>:<seq>`, so a reconnect resumes after the last event it saw; the first message
- * on every connection is a `hello` carrying the current boot id and session list.
+ * on every connection is a `hello` carrying the current boot id, session list and UI version.
  * `scratchpad` events carry no id and are not replayed: a reconnecting page reads
  * GET /api/scratchpads/:id instead.
  */
@@ -82,7 +83,11 @@
  * ) & { seq: number, at: number, session: string }} SessionEvent
  */
 
-/** @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[] }} HelloEvent */
+/**
+ * `ui` is the version of the UI files being served (see `ui-files.js`): a page that loaded
+ * other files is running older code than the daemon now serves.
+ * @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[], ui: string }} HelloEvent
+ */
 
 /** A scratchpad's text; `rev` names this exact text (a hash of it). @typedef {{ text: string, rev: string }} Scratchpad */
 /** @typedef {{ id: string, title: string, modifiedAt: number, size: number }} ScratchpadSummary */

@@ -30,6 +30,9 @@ const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, sessionFi
 /** @param {string} session @param {number} seq @returns {SessionEvent} */
 const frame = (session, seq) => ({ kind: 'frame', frame: { type: 'agent_start' }, seq, at: 0, session });
 
+/** @param {string} bootId @param {SessionMeta[]} [sessions] @param {string} [ui] @returns {StreamEvent} */
+const hello = (bootId, sessions = [], ui = 'v1') => ({ kind: 'hello', bootId, sessions, ui });
+
 /** @param {number} [status] @param {(url: string) => Response | null} [route] */
 async function connectedClient(status = 200, route = () => null) {
   FakeSource.opened = [];
@@ -45,7 +48,7 @@ async function connectedClient(status = 200, route = () => null) {
 describe('daemon client', () => {
   test('a window that subscribes late first receives everything already seen for its session', async () => {
     const { client, source } = await connectedClient();
-    source.deliver({ kind: 'hello', bootId: 'b1', sessions: [meta('s1')] });
+    source.deliver(hello('b1', [meta('s1')]));
     source.deliver(frame('s1', 1));
     source.deliver(frame('s2', 2));
     source.deliver(frame('s1', 3));
@@ -59,7 +62,7 @@ describe('daemon client', () => {
 
   test('a daemon restart clears old history and tells listeners before the new daemon’s events arrive', async () => {
     const { client, source } = await connectedClient();
-    source.deliver({ kind: 'hello', bootId: 'b1', sessions: [meta('s1')] });
+    source.deliver(hello('b1', [meta('s1')]));
     source.deliver(frame('s1', 1));
 
     /** @type {string[]} */
@@ -68,7 +71,7 @@ describe('daemon client', () => {
     client.subscribe('s1', (e) => order.push(`event ${e.seq}`));
     order.length = 0; // drop the replayed backlog
 
-    source.deliver({ kind: 'hello', bootId: 'b2', sessions: [] });
+    source.deliver(hello('b2'));
     assert.deepEqual(order, ['reset, s1 known: false']);
     /** @type {number[]} */
     const late = [];
@@ -80,9 +83,9 @@ describe('daemon client', () => {
     const { client, source } = await connectedClient();
     let resets = 0;
     client.onReset(() => resets++);
-    source.deliver({ kind: 'hello', bootId: 'b1', sessions: [meta('s1')] });
+    source.deliver(hello('b1', [meta('s1')]));
     source.deliver(frame('s1', 1));
-    source.deliver({ kind: 'hello', bootId: 'b1', sessions: [meta('s1')] });
+    source.deliver(hello('b1', [meta('s1')]));
     /** @type {number[]} */
     const seen = [];
     client.subscribe('s1', (e) => seen.push(e.seq));
@@ -90,9 +93,25 @@ describe('daemon client', () => {
     assert.deepEqual(seen, [1]);
   });
 
+  test('a page hears when the UI files it loaded stop being the ones served, and when they are again', async () => {
+    let served = 'v1';
+    const { client, source } = await connectedClient(200, (url) => (url === '/api/ui' ? Response.json({ version: served }) : null));
+    /** @type {boolean[]} */
+    const heard = [];
+    client.onUiChange((outdated) => heard.push(outdated));
+    source.deliver(hello('b1', [], 'v1')); // the files this page loaded
+    source.deliver(hello('b1', [], 'v1')); // a reconnect: nothing changed
+    served = 'v2';
+    await client.checkUi(); // the files changed under the running daemon (a git pull)
+    await client.checkUi(); // asked again: said once
+    source.deliver(hello('b2', [], 'v3')); // a restart on newer files still
+    source.deliver(hello('b3', [], 'v1')); // back on the files this page loaded
+    assert.deepEqual(heard, [true, true, false]);
+  });
+
   test('session metadata follows the stream', async () => {
     const { client, source } = await connectedClient();
-    source.deliver({ kind: 'hello', bootId: 'b1', sessions: [meta('s1', 'starting')] });
+    source.deliver(hello('b1', [meta('s1', 'starting')]));
     assert.equal(client.meta('s1')?.status, 'starting');
     source.deliver({ kind: 'session', meta: meta('s1', 'exited'), seq: 1, at: 0, session: 's1' });
     assert.equal(client.meta('s1')?.status, 'exited');
@@ -107,7 +126,7 @@ describe('daemon client', () => {
   test('a request the daemon released resolves with omp’s answer from the stream', async () => {
     const pending = () => new Response(JSON.stringify({ pending: true, id: 'ac_7' }), { status: 202 });
     const { client, source } = await connectedClient(200, (url) => (url.endsWith('/rpc') ? pending() : null));
-    source.deliver({ kind: 'hello', bootId: 'b1', sessions: [meta('s1')] });
+    source.deliver(hello('b1', [meta('s1')]));
     const answer = client.rpc('s1', { type: 'bash', command: 'sleep 9' });
     await new Promise((r) => setImmediate(r));
     source.deliver({ kind: 'frame', frame: { type: 'response', id: 'ac_6', command: 'get_state', success: true }, seq: 1, at: 0, session: 's1' });
@@ -118,7 +137,7 @@ describe('daemon client', () => {
   test('a released request fails instead of hanging when omp exits first', async () => {
     const pending = () => new Response(JSON.stringify({ pending: true, id: 'ac_7' }), { status: 202 });
     const { client, source } = await connectedClient(200, (url) => (url.endsWith('/rpc') ? pending() : null));
-    source.deliver({ kind: 'hello', bootId: 'b1', sessions: [meta('s1')] });
+    source.deliver(hello('b1', [meta('s1')]));
     const answer = client.rpc('s1', { type: 'login', providerId: 'x' });
     await new Promise((r) => setImmediate(r));
     source.deliver({ kind: 'session', meta: meta('s1', 'exited'), seq: 1, at: 0, session: 's1' });

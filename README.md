@@ -31,7 +31,10 @@ from other sites. Pick **＋ Widget → omp**, choose a directory, and start
 chatting. To continue an earlier conversation, add **＋ Widget → Sessions**,
 search or sort, and drag a session onto the grid (or press **Resume**). The list
 comes from omp's session files (`~/.omp/agent/sessions`, or
-`$AGENT_COCKPIT_OMP_SESSIONS`).
+`$AGENT_COCKPIT_OMP_SESSIONS`). When the workbench's own files change under an
+open tab (a `git pull`, or a daemon restart on new code), the top bar says so;
+**Reload** picks up the new version. It never reloads by itself, so an unsent
+draft is never lost.
 
 In an omp pane, select text in a reply to **Comment** on it: the comment waits as
 a card above the message box and goes with your next prompt, quoting what it is

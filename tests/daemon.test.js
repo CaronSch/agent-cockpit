@@ -216,6 +216,13 @@ describe('sessions', () => {
     assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b));
   });
 
+  test('every stream connection opens with the version of the UI files served, as /api/ui reports it', async () => {
+    const { events } = await readStream({ done: (all) => all.length > 0 });
+    const { json } = await call({ path: '/api/ui' });
+    assert.match(json.version, /^[0-9a-f]{16}$/);
+    assert.deepEqual(events[0]?.kind === 'hello' && events[0].ui, json.version);
+  });
+
   test('a reconnect with the current boot id gets only what it missed; a stale boot id gets everything', async () => {
     const first = await readStream({ ms: 200 });
     const last = /** @type {string} */ (first.ids.at(-1));

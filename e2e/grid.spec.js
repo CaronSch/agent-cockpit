@@ -20,7 +20,9 @@ test.beforeEach(async ({ page }) => {
   problems = [];
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
   page.on('console', (msg) => {
-    if (msg.type() === 'error') problems.push(`console.error: ${msg.text()}`);
+    // These pages are signed out on purpose (the grid needs no daemon): the app's connection
+    // is refused with 401, and the browser logs that.
+    if (msg.type() === 'error' && !msg.text().includes('401')) problems.push(`console.error: ${msg.text()}`);
   });
   // Keep runs hermetic: the web-font stylesheet is the only off-origin request.
   await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
