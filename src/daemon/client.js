@@ -91,6 +91,8 @@ export function createDaemonClient(env = {}) {
   let loadedUi = null;
   /** The UI version served, as last heard. @type {string | null} */
   let servedUi = null;
+  /** @type {Promise<DaemonConfig> | null} */
+  let config = null;
   const sessionsChanged = () => {
     for (const fn of sessionListeners) fn();
   };
@@ -115,6 +117,7 @@ export function createDaemonClient(env = {}) {
     if (bootId !== null && hello.bootId !== bootId) {
       buffers.clear();
       metas.clear();
+      config = null;
       for (const fn of resetListeners) fn();
     }
     bootId = hello.bootId;
@@ -163,6 +166,15 @@ export function createDaemonClient(env = {}) {
     };
   }
 
+  /** The daemon's JSON answer, or null when it has none. @param {Response} res @returns {Promise<any>} */
+  const readJson = (res) => res.json().catch(() => null);
+
+  /** `body`, unless the daemon answered with an error: that throws. @param {Response} res @param {any} body */
+  function check(res, body) {
+    if (!res.ok) throw new DaemonError(res.status, body?.error ?? `daemon answered ${res.status}`);
+    return body;
+  }
+
   /** @param {string} path @param {RequestInit} [init] */
   async function request(path, init) {
     const res = await doFetch(path, {
@@ -170,9 +182,7 @@ export function createDaemonClient(env = {}) {
       headers: init?.body ? { 'content-type': 'application/json' } : undefined,
     });
     if (res.status === 204) return null;
-    const body = await res.json().catch(() => null);
-    if (!res.ok) throw new DaemonError(res.status, body?.error ?? `daemon answered ${res.status}`);
-    return body;
+    return check(res, await readJson(res));
   }
 
   /** Posts a file as the raw body; the daemon answers with where it stored it. @param {string} path @param {Blob} file @param {string} name @returns {Promise<string>} */
@@ -182,9 +192,7 @@ export function createDaemonClient(env = {}) {
       headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(name) },
       body: file,
     });
-    const answer = await res.json().catch(() => null);
-    if (!res.ok) throw new DaemonError(res.status, answer?.error ?? `daemon answered ${res.status}`);
-    return answer.path;
+    return check(res, await readJson(res)).path;
   }
 
   const sessionPath = (/** @type {string} */ session) => `/api/sessions/${encodeURIComponent(session)}`;
@@ -266,10 +274,9 @@ export function createDaemonClient(env = {}) {
         // Browsers refuse keepalive bodies over 64 KiB outright; a plain request may still land.
         keepalive: keepalive && new TextEncoder().encode(body).length <= KEEPALIVE_MAX_BYTES,
       });
-      const answer = await res.json().catch(() => null);
+      const answer = await readJson(res);
       if (res.status === 409 && answer?.current) return { ok: false, current: answer.current };
-      if (!res.ok) throw new DaemonError(res.status, answer?.error ?? `daemon answered ${res.status}`);
-      return { ok: true, rev: answer.rev };
+      return { ok: true, rev: check(res, answer).rev };
     },
     async deleteScratchpad(id) {
       await request(padPath(id), { method: 'DELETE' });
@@ -293,7 +300,14 @@ export function createDaemonClient(env = {}) {
       const body = await request('/api/ui').catch(() => null);
       noteUi(body?.version);
     },
-    config: () => request('/api/config'),
+    config() {
+      // Fixed for the daemon's lifetime: asked once, and again after a failure or a restart.
+      config ??= request('/api/config').catch((err) => {
+        config = null;
+        throw err;
+      });
+      return config;
+    },
     async createSession({ cwd, resume }) {
       const body = await request('/api/sessions', { method: 'POST', body: JSON.stringify({ cwd, resume }) });
       metas.set(body.session.id, body.session);

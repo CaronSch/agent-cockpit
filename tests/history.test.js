@@ -50,7 +50,6 @@ describe('session history', () => {
     assert.equal(a?.file, alpha);
     assert.equal(a?.prompts, 2, 'agent-authored user messages are not prompts');
     assert.equal(a?.firstPrompt, 'fix the login bug');
-    assert.equal(a?.lastPrompt, 'now add tests');
     assert.equal(a?.createdAt, Date.parse('2026-10-01T10:00:00.000Z'));
   });
 
@@ -74,7 +73,6 @@ describe('session history', () => {
     const [hit] = await history.list('rollback');
     assert.equal(hit?.id, 'aaa');
     assert.equal(hit?.prompts, 3);
-    assert.equal(hit?.lastPrompt, 'plan the rollback');
   });
 
   test('a torn last line (omp mid-write) does not lose the session', async () => {

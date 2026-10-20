@@ -2,7 +2,7 @@
  * Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask);
  * each one answers through a single `respond(payload)` call.
  */
-import { el } from '../ui/dom.js';
+import { button, el } from '../ui/dom.js';
 import { askAnswers } from './transcript.js';
 /** @import { Dialog } from './transcript.js' */
 
@@ -22,7 +22,7 @@ export function renderDialog(dialog, respond) {
   node.append(el('div', 'omp-dialog-title', title));
 
   const actions = el('div', 'omp-dialog-actions');
-  const cancel = button('Cancel', '', () => respond({ cancelled: true }));
+  const cancel = button('btn', 'Cancel', () => respond({ cancelled: true }));
 
   switch (dialog.method) {
     case 'select': {
@@ -30,7 +30,7 @@ export function renderDialog(dialog, respond) {
       const details = Array.isArray(dialog.optionDetails) ? dialog.optionDetails : [];
       const list = el('div', 'omp-options');
       options.forEach((label, i) => {
-        const option = button('', 'omp-option', () => respond({ value: String(label) }));
+        const option = button('btn omp-option', undefined, () => respond({ value: String(label) }));
         option.append(el('span', 'omp-option-label', String(label)));
         const description = details[i]?.description;
         if (typeof description === 'string' && description) option.append(el('span', 'omp-option-desc', description));
@@ -43,8 +43,8 @@ export function renderDialog(dialog, respond) {
     case 'confirm': {
       if (dialog.message) node.append(el('p', 'omp-dialog-message', String(dialog.message)));
       actions.append(
-        button('Yes', 'btn-accent', () => respond({ confirmed: true })),
-        button('No', '', () => respond({ confirmed: false })),
+        button('btn btn-accent', 'Yes', () => respond({ confirmed: true })),
+        button('btn', 'No', () => respond({ confirmed: false })),
         cancel,
       );
       break;
@@ -58,7 +58,7 @@ export function renderDialog(dialog, respond) {
         if (e.key === 'Enter' && !e.isComposing) submit();
       });
       node.append(input);
-      actions.append(button('Submit', 'btn-accent', submit), cancel);
+      actions.append(button('btn btn-accent', 'Submit', submit), cancel);
       break;
     }
     case 'editor': {
@@ -66,7 +66,7 @@ export function renderDialog(dialog, respond) {
       area.rows = 6;
       area.value = typeof dialog.prefill === 'string' ? dialog.prefill : '';
       node.append(area);
-      actions.append(button('Submit', 'btn-accent', () => respond({ value: area.value })), cancel);
+      actions.append(button('btn btn-accent', 'Submit', () => respond({ value: area.value })), cancel);
       break;
     }
     case 'ask': {
@@ -74,7 +74,7 @@ export function renderDialog(dialog, respond) {
       /** @type {Record<string, { selected: string[], custom: string }>} */
       const picks = {};
       for (const q of questions) node.append(askQuestion(q, (picks[q.id] = { selected: [], custom: '' })));
-      actions.append(button('Submit', 'btn-accent', () => respond({ answers: askAnswers(questions, picks) })), cancel);
+      actions.append(button('btn btn-accent', 'Submit', () => respond({ answers: askAnswers(questions, picks) })), cancel);
       break;
     }
   }
@@ -132,12 +132,4 @@ function askQuestion(q, pick) {
   });
   box.append(custom);
   return box;
-}
-
-/** @param {string} label @param {string} extra @param {() => void} onClick */
-function button(label, extra, onClick) {
-  const b = el('button', `btn ${extra}`.trim(), label || undefined);
-  b.type = 'button';
-  b.addEventListener('click', onClick);
-  return b;
 }

@@ -10,7 +10,6 @@ import { safeAssetName } from './scratchpad.js';
 /** @param {{ dir: string, now?: () => Date }} options */
 export function createAttachments({ dir, now = () => new Date() }) {
   return {
-    dir,
     /**
      * Stores `bytes` under a unique name that keeps `name` recognisable; returns its path.
      * @param {string} name @param {Uint8Array} bytes

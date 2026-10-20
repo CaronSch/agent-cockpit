@@ -7,7 +7,8 @@
  * draft. Files pasted into it or dropped anywhere on the pane are stored by the daemon as they
  * arrive, and go with the message as omp file mentions.
  */
-import { el } from '../ui/dom.js';
+import { button, carriesFiles, el } from '../ui/dom.js';
+import { errorMessage } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
 import { composeMessage, isLargePaste } from './message.js';
 /** @import { Attachment, QuoteComment } from './message.js' */
@@ -40,9 +41,6 @@ const extent = (text) => {
   return lines > 1 ? `+${lines} lines` : `${text.length} chars`;
 };
 
-/** @param {DragEvent} e */
-const carriesFiles = (e) => e.dataTransfer?.types.includes('Files') ?? false;
-
 /**
  * @param {{
  *   pane: HTMLElement,
@@ -61,8 +59,7 @@ export function createComposer({ pane, upload, onError }) {
   const draft = el('textarea', 'omp-draft');
   draft.rows = 2;
   draft.setAttribute('aria-label', 'Message omp');
-  const sendBtn = el('button', 'btn btn-accent', 'Send');
-  sendBtn.type = 'button';
+  const sendBtn = button('btn btn-accent', 'Send');
   row.append(draft, sendBtn);
   root.append(cards, editor, row);
 
@@ -132,7 +129,7 @@ export function createComposer({ pane, upload, onError }) {
         },
         (err) => {
           remove(card);
-          onError(`Could not attach ${name}: ${err instanceof Error ? err.message : String(err)}`);
+          onError(`Could not attach ${name}: ${errorMessage(err)}`);
         },
       );
       items = [...items, card];
@@ -162,9 +159,7 @@ export function createComposer({ pane, upload, onError }) {
   function cardView(card) {
     const view = el('div', `omp-card is-${card.kind}`);
     const main = el(card.kind === 'file' ? 'div' : 'button', 'omp-card-main');
-    const removeBtn = el('button', 'omp-card-remove', '×');
-    removeBtn.type = 'button';
-    removeBtn.addEventListener('click', () => remove(card));
+    const removeBtn = button('omp-card-remove', '×', () => remove(card));
     if (card.kind === 'comment') {
       main.title = 'Edit this comment';
       main.append(el('span', 'omp-card-quote', `“${excerpt(card.quote)}”`), el('span', 'omp-card-text', excerpt(card.comment)));
@@ -223,10 +218,8 @@ export function createComposer({ pane, upload, onError }) {
     const box = el('textarea', 'omp-card-input');
     box.value = value;
     box.setAttribute('aria-label', label);
-    const save = el('button', 'btn btn-accent', 'Save');
-    save.type = 'button';
-    const cancel = el('button', 'btn', 'Cancel');
-    cancel.type = 'button';
+    const save = button('btn btn-accent', 'Save');
+    const cancel = button('btn', 'Cancel');
     const actions = el('div', 'omp-row');
     actions.append(save, cancel);
     editor.replaceChildren(...(quote ? [el('blockquote', 'omp-quote-preview', quote)] : []), box, actions);

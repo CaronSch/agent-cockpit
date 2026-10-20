@@ -27,8 +27,6 @@
 
 /** @type {readonly Axis[]} */
 export const AXES = Object.freeze(['row', 'col']);
-/** @type {readonly Direction[]} */
-export const DIRECTIONS = Object.freeze(['left', 'right', 'up', 'down', 'center']);
 
 const MAX_DEPTH = 32;
 const SUM_TOLERANCE = 1e-6;

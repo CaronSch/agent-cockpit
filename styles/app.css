@@ -71,6 +71,7 @@ button {
 }
 
 .palette-hint {
+  margin: 0 0 var(--space-2);
   font: 500 var(--text-2xs) / 1.2 var(--font-mono);
   letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
@@ -172,10 +173,6 @@ button {
 .palette.is-dragged {
   opacity: 0;
   pointer-events: none;
-}
-
-.palette-hint {
-  margin: 0 0 var(--space-2);
 }
 
 .palette-list {

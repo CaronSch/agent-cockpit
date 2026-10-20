@@ -6,28 +6,22 @@
  * closing a window loses nothing. Pasted or dropped files are stored beside it and shown
  * inline between text blocks (see `scratchpad/blocks.js`).
  */
-import { el } from '../ui/dom.js';
+import { button, carriesFiles, el } from '../ui/dom.js';
+import { errorMessage, tildeHome } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
 import { getDaemon } from '../daemon/client.js';
 import { getScratchpad } from '../scratchpad/store.js';
-import { assetUrl, insertAsset, parseBlocks, serializeBlocks, titleOf, withGaps } from '../scratchpad/blocks.js';
+import { IMAGE_TYPES, LEGACY_PAD, PAD_ID, assetUrl, insertAsset, parseBlocks, serializeBlocks, titleOf, withGaps } from '../scratchpad/blocks.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { ScratchpadStore } from '../scratchpad/store.js' */
 /** @import { Block } from '../scratchpad/blocks.js' */
 /** @import { ScratchpadSummary } from '../../daemon/wire.js' */
 
-/** The pad windows from before there were several pads keep showing (the daemon's LEGACY_PAD). */
-const LEGACY_PAD = 'scratchpad';
-const PAD_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** Shown inline; the daemon serves these types as images (and anything else as a download). */
-const INLINE_IMAGES = /** @type {Record<string, string>} */ ({
-  'image/png': '.png',
-  'image/jpeg': '.jpg',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-  'image/avif': '.avif',
-});
+/** Image types shown inline, to the extension a file of that type is stored under (the first listed). */
+const INLINE_IMAGES = /** @type {Record<string, string>} */ (
+  Object.fromEntries(Object.entries(IMAGE_TYPES).reverse().map(([ext, type]) => [type, ext]))
+);
 
 const newPadId = () => crypto.randomUUID().slice(0, 8);
 
@@ -44,9 +38,6 @@ export default {
   },
 };
 
-/** @param {unknown} err */
-const message = (err) => (err instanceof Error ? err.message : String(err));
-
 /** A name the daemon will serve the way the file is meant to be shown. @param {File} file */
 function fileName(file) {
   const ext = INLINE_IMAGES[file.type];
@@ -62,8 +53,7 @@ function createScratchpadWindow(body, ctx, daemon) {
 
   // ── pad switcher ──
   const bar = el('div', 'pad-bar');
-  const switcher = el('button', 'pad-switch');
-  switcher.type = 'button';
+  const switcher = button('pad-switch');
   switcher.setAttribute('aria-haspopup', 'menu');
   switcher.setAttribute('aria-expanded', 'false');
   switcher.title = 'Switch scratchpad';
@@ -77,11 +67,9 @@ function createScratchpadWindow(body, ctx, daemon) {
   // ── conflict ──
   const conflict = el('div', 'scratchpad-conflict');
   conflict.setAttribute('role', 'alert');
-  const keepMine = el('button', 'btn btn-accent', 'Keep mine');
-  keepMine.type = 'button';
+  const keepMine = button('btn btn-accent', 'Keep mine');
   keepMine.title = 'Save this text over the other version';
-  const takeTheirs = el('button', 'btn', 'Use theirs');
-  takeTheirs.type = 'button';
+  const takeTheirs = button('btn', 'Use theirs');
   takeTheirs.title = 'Replace this text with the other version';
   const conflictActions = el('div', 'scratchpad-row');
   conflictActions.append(keepMine, takeTheirs);
@@ -155,8 +143,7 @@ function createScratchpadWindow(body, ctx, daemon) {
       link.textContent = block.name;
       link.title = `Download ${block.name}`;
     }
-    const remove = el('button', 'pad-remove', '×');
-    remove.type = 'button';
+    const remove = button('pad-remove', '×');
     remove.setAttribute('aria-label', `Remove ${block.name}`);
     box.append(link, remove);
     return box;
@@ -211,7 +198,7 @@ function createScratchpadWindow(body, ctx, daemon) {
       }[s.phase];
     if (paths) {
       const file = `${paths.dir}/${padId()}.md`;
-      where.textContent = file.startsWith(`${paths.home}/`) ? `~${file.slice(paths.home.length)}` : file;
+      where.textContent = tildeHome(file, paths.home);
       where.title = file;
     }
   }
@@ -249,7 +236,7 @@ function createScratchpadWindow(body, ctx, daemon) {
         busy = null;
         commit(blocks);
       } catch (err) {
-        busy = `Could not add ${name}: ${message(err)}`;
+        busy = `Could not add ${name}: ${errorMessage(err)}`;
         draw();
         return;
       }
@@ -304,7 +291,6 @@ function createScratchpadWindow(body, ctx, daemon) {
     }
   });
 
-  const carriesFiles = (/** @type {DragEvent} */ event) => event.dataTransfer?.types.includes('Files') ?? false;
   root.addEventListener('dragover', (event) => {
     if (!carriesFiles(event)) return;
     event.preventDefault();
@@ -328,8 +314,7 @@ function createScratchpadWindow(body, ctx, daemon) {
   // ── switcher menu ──
   /** @param {string} label @param {string} [detail] */
   function menuItem(label, detail) {
-    const item = el('button', 'pad-menu-item');
-    item.type = 'button';
+    const item = button('pad-menu-item');
     item.setAttribute('role', 'menuitem');
     item.append(el('span', 'pad-menu-label', label));
     if (detail) item.append(el('span', 'pad-menu-detail', detail));
@@ -366,10 +351,8 @@ function createScratchpadWindow(body, ctx, daemon) {
   function confirmDelete() {
     const id = padId();
     const title = titleOf(store.state().text) || 'Untitled';
-    const yes = el('button', 'btn btn-danger', 'Delete');
-    yes.type = 'button';
-    const no = el('button', 'btn', 'Cancel');
-    no.type = 'button';
+    const yes = button('btn btn-danger', 'Delete');
+    const no = button('btn', 'Cancel');
     const actions = el('div', 'scratchpad-row');
     actions.append(yes, no);
     menu.replaceChildren(el('p', 'pad-menu-confirm', `Delete “${title}” and its files, for every window showing it?`), actions);
@@ -379,7 +362,7 @@ function createScratchpadWindow(body, ctx, daemon) {
         .deleteScratchpad(id)
         .then(() => showPad(newPadId()))
         .catch((err) => {
-          busy = `Could not delete: ${message(err)}`;
+          busy = `Could not delete: ${errorMessage(err)}`;
           closeMenu();
           draw();
         });
@@ -398,7 +381,7 @@ function createScratchpadWindow(body, ctx, daemon) {
         fillMenu(pads);
         /** @type {HTMLElement | null} */ (menu.querySelector('[aria-current="true"]') ?? menu.querySelector('.pad-menu-item'))?.focus();
       })
-      .catch((err) => menu.replaceChildren(el('p', 'pad-menu-confirm', `Could not list scratchpads: ${message(err)}`)));
+      .catch((err) => menu.replaceChildren(el('p', 'pad-menu-confirm', `Could not list scratchpads: ${errorMessage(err)}`)));
   }
 
   function closeMenu() {

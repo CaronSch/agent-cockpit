@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 /** @import { PastSession } from './wire.js' */
 
-const SEARCH_CHARS = 16 * 1024; // per session; enough for every prompt of a long session
+const SEARCH_CHARS = 17 * 1024; // per session; enough for every prompt of a long session
 const PREVIEW_CHARS = 280;
 
 /** @typedef {PastSession & { search: string }} Summary */
@@ -47,7 +47,6 @@ async function summarise(file, info) {
   let header = null;
   /** @type {string[]} */
   const prompts = [];
-  let searchSize = 0;
 
   const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const line of lines) {
@@ -67,7 +66,6 @@ async function summarise(file, info) {
       const text = textOf(entry.message.content).trim();
       if (!text) continue;
       prompts.push(text);
-      searchSize += text.length;
     }
   }
   if (!header || typeof header.id !== 'string') return null;
@@ -75,7 +73,7 @@ async function summarise(file, info) {
   const created = Date.parse(header.timestamp);
   const search = [title ?? '', typeof header.cwd === 'string' ? header.cwd : '', header.id, ...prompts]
     .join('\n')
-    .slice(0, SEARCH_CHARS + 1024)
+    .slice(0, SEARCH_CHARS)
     .toLowerCase();
   return {
     file,
@@ -84,11 +82,9 @@ async function summarise(file, info) {
     cwd: typeof header.cwd === 'string' ? header.cwd : null,
     createdAt: Number.isFinite(created) ? created : null,
     modifiedAt: info.mtimeMs,
-    size: info.size,
     prompts: prompts.length,
     firstPrompt: prompts.length ? oneLine(prompts[0]) : null,
-    lastPrompt: prompts.length > 1 ? oneLine(prompts[prompts.length - 1]) : null,
-    search: searchSize > SEARCH_CHARS ? search.slice(0, SEARCH_CHARS) : search,
+    search,
   };
 }
 

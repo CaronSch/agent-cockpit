@@ -88,7 +88,7 @@ pointer events ──► rAF-coalesced controller ──► pure layout function
 - **Diffed rendering** (`src/render/grid-renderer.js`) — frames are keyed by leaf
   id and mounted once; only changed `transform` / `width` / `height` values are
   written. Structural changes animate with FLIP on `transform`.
-- **Atoms** (`src/state/atom.js`) — `get/set/subscribe` plus `lens` and `view`.
+- **Atoms** (`src/state/atom.js`) — `get/set/subscribe`.
 - **Pointer trick from VS Code** — widget bodies get `pointer-events:none` during a
   gesture, and each widget is `contain: strict`.
 - **Pointer events instead of native DnD** — no throttled `dragover`, full control
@@ -130,7 +130,7 @@ page's shared daemon connection (`getDaemon()` in `src/daemon/client.js`).
 
 ```
 src/
-├── layout/        pure: grid-model, compute-layout, drop-zone, snap, neighbors; new-leaf ids
+├── layout/        pure: grid-model, compute-layout, drop-zone, snap, neighbors
 ├── render/        grid-renderer (diffed DOM), drop-indicator (clip-path preview)
 ├── interaction/   drag-controller, sash-controller
 ├── state/         atom, persistence

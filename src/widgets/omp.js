@@ -5,7 +5,8 @@
  * Params (persisted with the layout): `session` (daemon session id), `cwd`, and
  * `sessionFile` (omp's transcript file, for resuming after the process is gone).
  */
-import { el } from '../ui/dom.js';
+import { button, el } from '../ui/dom.js';
+import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
 import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/transcript.js';
 import { renderItem } from '../omp/items-view.js';
@@ -30,6 +31,7 @@ const MAX_SUGGESTIONS = 8;
 const BOTTOM_SLACK_PX = 24;
 /** Seen-up-to is saved this long after it last moved, not on every streamed token. */
 const READ_SAVE_MS = 1000;
+const REFUSED = 'The daemon refused this page.';
 
 export default {
   type: 'omp',
@@ -189,7 +191,7 @@ function createPane(body, ctx, daemon) {
     const box = el('div', 'omp-center');
     if (status === 'unauthorized') {
       box.append(
-        el('p', 'omp-error', 'The daemon refused this page.'),
+        el('p', 'omp-error', REFUSED),
         el('p', 'omp-muted', 'Open the URL printed by `npm start` to authorise this browser.'),
       );
     } else if (status === 'down') {
@@ -242,7 +244,7 @@ function createPane(body, ctx, daemon) {
           schedule();
         })
         .catch((err) => {
-          error.textContent = message(err);
+          error.textContent = errorMessage(err);
           error.hidden = false;
         })
         .finally(() => {
@@ -259,7 +261,7 @@ function createPane(body, ctx, daemon) {
   function endedScreen() {
     const box = el('div', 'omp-center');
     box.append(el('p', '', 'This session ended when the daemon stopped.'));
-    box.append(sessionActions(null, (text) => box.append(el('p', 'omp-error', text))));
+    box.append(sessionActions(null));
     return [box];
   }
 
@@ -284,16 +286,12 @@ function createPane(body, ctx, daemon) {
         })
         .catch((err) => {
           status.className = 'omp-error';
-          status.textContent = `Could not resume: ${message(err)}`;
+          status.textContent = `Could not resume: ${errorMessage(err)}`;
           actions.hidden = false;
         });
     };
-    const retry = el('button', 'btn btn-accent', 'Try again');
-    retry.type = 'button';
-    retry.addEventListener('click', attempt);
-    const fresh = el('button', 'btn', 'New session');
-    fresh.type = 'button';
-    fresh.addEventListener('click', () => {
+    const retry = button('btn btn-accent', 'Try again', attempt);
+    const fresh = button('btn', 'New session', () => {
       ctx.setParams({ resume: null });
       schedule();
     });
@@ -304,46 +302,32 @@ function createPane(body, ctx, daemon) {
   }
 
   /**
-   * Resume / New session buttons.
-   * @param {SessionMeta | null} meta @param {(error: string) => void} onError
+   * Resume / New session buttons. Resume goes through `resumingScreen`.
+   * @param {SessionMeta | null} meta
    */
-  function sessionActions(meta, onError) {
+  function sessionActions(meta) {
     const row = el('div', 'omp-row');
-    const p = params();
-    if (p.sessionFile) {
-      const resume = el('button', 'btn btn-accent', 'Resume');
-      resume.type = 'button';
-      resume.addEventListener('click', () => {
-        const file = params().sessionFile;
-        const cwd = params().cwd ?? meta?.cwd;
-        if (!file || !cwd) return;
-        resume.disabled = true;
-        daemon
-          .createSession({ cwd, resume: file })
-          .then((next) => {
-            ctx.setParams({ session: next.id, cwd: next.cwd });
-            schedule();
-          })
-          .catch((err) => {
-            resume.disabled = false;
-            onError(message(err));
-          });
-      });
-      row.append(resume);
+    const { sessionFile, cwd } = params();
+    if (sessionFile) {
+      row.append(
+        button('btn btn-accent', 'Resume', () => {
+          ctx.setParams({ session: null, cwd: cwd ?? meta?.cwd ?? null, resume: sessionFile });
+          schedule();
+        }),
+      );
     }
-    const fresh = el('button', 'btn', 'New session');
-    fresh.type = 'button';
-    fresh.addEventListener('click', () => {
-      ctx.setParams({ session: null, sessionFile: null });
-      schedule();
-    });
-    row.append(fresh);
+    row.append(
+      button('btn', 'New session', () => {
+        ctx.setParams({ session: null, sessionFile: null });
+        schedule();
+      }),
+    );
     return row;
   }
 
   /** @param {string} cwd */
   function shortCwd(cwd) {
-    const display = home && (cwd === home || cwd.startsWith(`${home}/`)) ? `~${cwd.slice(home.length)}` : cwd;
+    const display = tildeHome(cwd, home);
     const parts = display.split('/').filter(Boolean);
     return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : display;
   }
@@ -437,7 +421,7 @@ function createPane(body, ctx, daemon) {
             const id = res.success ? res.data?.record?.id : null;
             return typeof id === 'string' ? { id } : { error: res.error ?? 'omp did not take the question.' };
           } catch (err) {
-            return { error: message(err) };
+            return { error: errorMessage(err) };
           }
         },
         answer: (id) => state.sideAnswers.get(id),
@@ -459,7 +443,7 @@ function createPane(body, ctx, daemon) {
       try {
         return await daemon.rpc(session, command);
       } catch (err) {
-        addNote(state, 'error', String(command.type), message(err));
+        addNote(state, 'error', String(command.type), errorMessage(err));
         schedule();
         return null;
       }
@@ -564,8 +548,7 @@ function createPane(body, ctx, daemon) {
               ...entries
                 .filter((e) => !q || e.label.toLowerCase().includes(q) || e.detail?.toLowerCase().includes(q))
                 .map((entry) => {
-                  const item = el('button', `omp-menu-item${entry.current ? ' is-current' : ''}`);
-                  item.type = 'button';
+                  const item = button(`omp-menu-item${entry.current ? ' is-current' : ''}`);
                   item.append(el('span', '', entry.label));
                   if (entry.detail) item.append(el('span', 'omp-muted', entry.detail));
                   item.addEventListener('click', () => {
@@ -589,7 +572,7 @@ function createPane(body, ctx, daemon) {
           menu.append(list, ...(options.footer?.() ?? []));
         })
         .catch((err) => {
-          if (menuAnchor === anchor) menu.replaceChildren(el('p', 'omp-error', message(err)));
+          if (menuAnchor === anchor) menu.replaceChildren(el('p', 'omp-error', errorMessage(err)));
         });
     }
 
@@ -652,7 +635,7 @@ function createPane(body, ctx, daemon) {
       daemon
         .closeSession(session)
         .catch((err) => {
-          addNote(state, 'error', 'close', message(err));
+          addNote(state, 'error', 'close', errorMessage(err));
           schedule();
         })
         .finally(() => {
@@ -683,8 +666,7 @@ function createPane(body, ctx, daemon) {
       suggest.hidden = false;
       suggest.replaceChildren(
         ...suggestions.map((c, i) => {
-          const row = el('button', `omp-suggestion${i === selected ? ' is-selected' : ''}`);
-          row.type = 'button';
+          const row = button(`omp-suggestion${i === selected ? ' is-selected' : ''}`);
           row.setAttribute('role', 'option');
           row.setAttribute('aria-selected', String(i === selected));
           row.append(el('span', 'omp-suggestion-name', `/${c.name}`));
@@ -792,7 +774,7 @@ function createPane(body, ctx, daemon) {
               schedule();
             })
             .catch((err) => {
-              addNote(state, 'error', 'dialog', message(err));
+              addNote(state, 'error', 'dialog', errorMessage(err));
               schedule();
             });
         });
@@ -810,8 +792,7 @@ function createPane(body, ctx, daemon) {
       const chip = (text, which) => {
         const c = el('span', `omp-chip is-${which}`);
         c.append(el('span', 'omp-chip-kind', which === 'steering' ? 'steer' : 'next'), el('span', 'omp-chip-text', text));
-        const remove = el('button', 'omp-chip-remove', '×');
-        remove.type = 'button';
+        const remove = button('omp-chip-remove', '×');
         remove.setAttribute('aria-label', `Remove queued message: ${text}`);
         remove.addEventListener('click', () => void rpc({ type: 'remove_queued_message', message: text, queue: which }));
         c.append(remove);
@@ -860,14 +841,14 @@ function createPane(body, ctx, daemon) {
       banner.replaceChildren();
       banner.className = 'omp-banner';
       if (connection !== 'open') {
-        banner.append(el('span', 'omp-error', connection === 'unauthorized' ? 'The daemon refused this page.' : 'Daemon not reachable; reconnecting…'));
+        banner.append(el('span', 'omp-error', connection === 'unauthorized' ? REFUSED : 'Daemon not reachable; reconnecting…'));
       } else if (!m || m.status === 'starting') {
         banner.append(el('span', 'omp-muted', 'starting omp…'));
       } else if (m.status === 'exited' || m.status === 'failed') {
         banner.classList.add('is-ended');
         const text = m.status === 'failed' ? `omp failed${m.error ? `: ${m.error}` : ''}` : `omp exited${m.exitCode !== null ? ` (code ${m.exitCode})` : ''}${m.error ? `: ${m.error}` : ''}`;
         banner.append(el('span', m.status === 'failed' || (m.exitCode ?? 0) !== 0 ? 'omp-error' : 'omp-muted', text));
-        banner.append(sessionActions(m, (err) => banner.append(el('span', 'omp-error', err))));
+        banner.append(sessionActions(m));
       }
       banner.hidden = banner.childElementCount === 0;
     }
@@ -953,8 +934,7 @@ function createPane(body, ctx, daemon) {
 
   /** @param {string} label @param {string} title */
   function toolButton(label, title) {
-    const b = el('button', 'omp-tool-btn', label);
-    b.type = 'button';
+    const b = button('omp-tool-btn', label);
     b.title = title;
     return b;
   }
@@ -976,9 +956,4 @@ function createPane(body, ctx, daemon) {
       root.remove();
     },
   };
-}
-
-/** @param {unknown} err */
-function message(err) {
-  return err instanceof Error ? err.message : String(err);
 }

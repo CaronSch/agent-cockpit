@@ -10,10 +10,8 @@ const session = (s) => ({
   cwd: null,
   createdAt: null,
   modifiedAt: 0,
-  size: 0,
   prompts: 1,
   firstPrompt: null,
-  lastPrompt: null,
   ...s,
 });
 

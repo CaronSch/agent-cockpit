@@ -15,25 +15,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-// Pure and shared with the browser, so a pad has one title wherever it is shown.
-import { titleOf } from '../src/scratchpad/blocks.js';
+// Pure and shared with the browser, so a pad has one title, and one set of ids and file rules, wherever it is used.
+import { ASSET_NAME, IMAGE_TYPES, LEGACY_PAD, PAD_ID, titleOf } from '../src/scratchpad/blocks.js';
 /** @import { Scratchpad, ScratchpadSummary } from './wire.js' */
 
-/** Pad ids are path segments; nothing else gets near the filesystem. */
-export const PAD_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** The id the single shared scratchpad of earlier versions became. */
-export const LEGACY_PAD = 'scratchpad';
-const ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-
-/** Shown inline by the browser; everything else is served as a download. */
-const IMAGE_TYPES = /** @type {Record<string, string>} */ ({
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-});
 
 /** @param {string} text */
 export const revOf = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
@@ -116,7 +101,6 @@ export function createScratchpads({ dir }) {
   }
 
   return {
-    dir,
     read,
     /** @param {string} id @param {string} text @param {string} base */
     write: (id, text, base) => serialized(() => write(id, text, base)),
