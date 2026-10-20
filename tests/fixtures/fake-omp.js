@@ -15,8 +15,16 @@
  * - `btw`: a side question, answered from the conversation and kept out of it as omp's is;
  *   the answer bolds the first quoted line, and a question containing "slow" waits 1.5 s
  * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
- * session already has a name.
+ * session already has a name; the fake never writes to a resumed file.
+ * Other sessions keep a journal in `$TMPDIR/fake-omp-sessions/`, written as omp does: a new
+ * session's only once the model has replied, then after every message. `--fork <file>`
+ * copies that file's title and messages into a new journal at once (omp's
+ * `SessionManager.forkFrom`), leaving the source alone; a missing source exits with omp's error.
  */
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
@@ -24,8 +32,29 @@ if (args.includes('--version')) {
   console.log('omp/fake');
   process.exit(0);
 }
-const resumeAt = args.indexOf('--resume');
-const resumed = resumeAt >= 0 ? args[resumeAt + 1] : null;
+/** @param {string} flag */
+const option = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : null);
+const resumed = option('--resume');
+const forkedFrom = option('--fork');
+
+/** The forked journal's lines (a missing file ends the process, as omp's `--fork` does). @type {Record<string, any>[]} */
+let source = [];
+if (forkedFrom) {
+  try {
+    source = readFileSync(forkedFrom, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch {
+    process.stderr.write(`Error: Session "${forkedFrom}" not found.\n`);
+    process.exit(1);
+  }
+}
+
+const sessionId = randomUUID();
+const startedAt = new Date().toISOString();
+const sessionsDir = join(tmpdir(), 'fake-omp-sessions');
+const sessionFile = resumed ?? join(sessionsDir, `${sessionId}.jsonl`);
 
 /** @type {Record<string, any>[]} */
 const messages = resumed
@@ -33,14 +62,29 @@ const messages = resumed
       { role: 'user', content: [{ type: 'text', text: 'earlier question' }], timestamp: 1 },
       { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }], stopReason: 'stop', timestamp: 2 },
     ]
-  : [];
+  : source.filter((entry) => entry.type === 'message').map((entry) => entry.message);
 let model = { provider: 'fake', id: 'fake-model', name: 'Fake Model' };
 let thinkingLevel = 'off';
 let msgCounter = 0;
 /** @type {string | null} */
-let sessionName = resumed ? 'Earlier work' : null;
+let sessionName = resumed ? 'Earlier work' : source.find((entry) => entry.type === 'title')?.title || null;
 /** @type {Map<string, (answer: Record<string, any>) => void>} */
 const dialogs = new Map();
+
+/** Rewrites this session's journal: a title line, the header, then one line per message. */
+function persist() {
+  if (resumed || (!forkedFrom && !messages.some((m) => m.role === 'assistant'))) return;
+  const header = { type: 'session', version: 3, id: sessionId, timestamp: startedAt, cwd: process.cwd() };
+  const parent = source.find((entry) => entry.type === 'session')?.id;
+  const lines = [
+    { type: 'title', v: 1, title: sessionName ?? '' },
+    parent ? { ...header, parentSession: parent } : header,
+    ...messages.map((message) => ({ type: 'message', message })),
+  ];
+  mkdirSync(sessionsDir, { recursive: true });
+  writeFileSync(sessionFile, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
+}
+persist();
 
 /** @param {Record<string, any>} frame */
 const out = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
@@ -52,6 +96,7 @@ const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 
 function record(message) {
   const messageId = `msg-${++msgCounter}`;
   messages.push(message);
+  persist();
   return messageId;
 }
 
@@ -140,7 +185,8 @@ function rename(id, title) {
   if (!name) out({ type: 'command_output', text: 'Could not generate a session title. Use /rename <title> to set one.' });
   else {
     sessionName = name;
-    out({ type: 'session_info_update', title: name, sessionId: 'fake-session' });
+    persist();
+    out({ type: 'session_info_update', title: name, sessionId });
     out({ type: 'command_output', text: `Session renamed to ${name}.` });
   }
   ok(id, 'prompt', { agentInvoked: false });
@@ -219,8 +265,8 @@ lines.on('line', (line) => {
         steeringMode: 'one-at-a-time',
         followUpMode: 'one-at-a-time',
         interruptMode: 'immediate',
-        sessionFile: resumed ?? '/tmp/fake-omp-session.jsonl',
-        sessionId: 'fake-session',
+        sessionFile,
+        sessionId,
         ...(sessionName ? { sessionName } : {}),
         autoCompactionEnabled: true,
         queuedMessageCount: 0,

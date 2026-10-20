@@ -691,17 +691,19 @@ function applyUpdate(state, frame) {
 }
 
 /**
- * Only a resumed process (which streams none of its earlier history) is seeded, once, and
- * only before any conversation has streamed: otherwise the history would show twice.
+ * Only a process started from a journal (resumed or forked: it streams none of its earlier
+ * history) is seeded, once, and only before any conversation has streamed: otherwise the
+ * history would show twice.
  * @param {Transcript} state
  */
 function canSeed(state) {
-  return !state.seeded && Boolean(state.meta?.resume) && !state.items.some((i) => i.kind === 'user' || i.kind === 'assistant');
+  const fromJournal = Boolean(state.meta?.resume || state.meta?.fork);
+  return !state.seeded && fromJournal && !state.items.some((i) => i.kind === 'user' || i.kind === 'assistant');
 }
 
 /**
- * Seeds a resumed session with its earlier history (from `get_messages`), ahead of the
- * notes the new process has already produced.
+ * Seeds a session started from a journal with its earlier history (from `get_messages`),
+ * ahead of the notes the new process has already produced.
  * @param {Transcript} state @param {any[]} messages
  */
 function seed(state, messages) {

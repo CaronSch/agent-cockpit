@@ -13,7 +13,7 @@ import { launchOmp } from './omp-session.js';
 /**
  * @typedef {{
  *   bootId: string,
- *   create(options: { cwd: string, resume: string | null }): SessionMeta,
+ *   create(options: { cwd: string, resume: string | null, fork: string | null }): SessionMeta,
  *   get(id: string): OmpSession | null,
  *   list(): SessionMeta[],
  *   since(seq: number): SessionEvent[],
@@ -44,9 +44,9 @@ export function createHub({ ompPath, now = Date.now, launch = launchOmp }) {
 
   return {
     bootId,
-    create({ cwd, resume }) {
+    create({ cwd, resume, fork }) {
       const id = `s_${randomBytes(4).toString('hex')}`;
-      const session = launch({ id, cwd, resume, ompPath, now, emit: (body) => emit(id, body) });
+      const session = launch({ id, cwd, resume, fork, ompPath, now, emit: (body) => emit(id, body) });
       sessions.set(id, session);
       return session.meta();
     },

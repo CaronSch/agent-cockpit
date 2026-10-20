@@ -256,8 +256,10 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, tok
         POST: async (req) => {
           const body = await readJson(req);
           const cwd = await existingPath(body?.cwd, 'directory', 'cwd');
+          if (body?.resume != null && body?.fork != null) throw new HttpError(400, 'resume and fork cannot be combined');
           const resume = body?.resume == null ? null : await existingPath(body.resume, 'file', 'resume');
-          return json({ session: hub.create({ cwd, resume }) }, 201);
+          const fork = body?.fork == null ? null : await existingPath(body.fork, 'file', 'fork');
+          return json({ session: hub.create({ cwd, resume, fork }) }, 201);
         },
       }),
       '/api/sessions/:id': api({

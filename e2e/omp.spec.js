@@ -36,19 +36,26 @@ test.afterEach(() => {
 });
 
 /**
- * Adds an omp pane through the palette and returns a locator pinned to that window
+ * Runs `open`, which adds one omp window, and returns a locator pinned to that window
  * (`.last()` would re-resolve to whichever pane was added most recently).
- * @param {Page} page
+ * @param {Page} page @param {() => Promise<void>} open
  */
-async function addOmpPane(page) {
+async function paneAddedBy(page, open) {
   const ids = () => page.locator('.widget[data-widget="omp"]').evaluateAll((els) => els.map((e) => /** @type {HTMLElement} */ (e).dataset.id));
   const before = await ids();
-  await page.locator('#palette-toggle').click();
-  await page.locator('#palette [data-type="omp"]').click();
-  await page.keyboard.press('Escape');
+  await open();
   await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(before.length + 1);
   const added = (await ids()).find((id) => !before.includes(id));
   return page.locator(`.widget[data-id="${added}"]`);
+}
+
+/** Adds an omp pane through the palette. @param {Page} page */
+async function addOmpPane(page) {
+  return paneAddedBy(page, async () => {
+    await page.locator('#palette-toggle').click();
+    await page.locator('#palette [data-type="omp"]').click();
+    await page.keyboard.press('Escape');
+  });
 }
 
 /** Starts omp in the test project and waits until it accepts prompts. @param {Page} page */
@@ -459,6 +466,43 @@ test('two panes run separate sessions side by side', async ({ page }) => {
   await expect(right.locator('.omp-assistant').last()).toContainText('You said: right only');
   await expect(left.getByText('right only')).toHaveCount(0);
   await expect(right.getByText('left only')).toHaveCount(0);
+});
+
+test('Fork continues a copy of the conversation in a new pane, as a session of its own', async ({ page }) => {
+  await openWorkbench(page);
+  const source = await startedPane(page);
+  const fork = source.getByRole('button', { name: 'Fork', exact: true });
+  await expect(fork, 'omp has saved nothing yet').toBeDisabled();
+  await send(source, 'shared start');
+  await expect(source.locator('.omp-assistant').last()).toContainText('You said: shared start');
+
+  const forked = await paneAddedBy(page, () => fork.click());
+  await expect(forked.locator('.omp-user')).toHaveText([/shared start$/]);
+  await expect(forked.locator('.omp-assistant')).toHaveText([/You said: shared start/]);
+  await expect(forked.getByText('Fake Model')).toBeVisible();
+
+  await send(forked, 'fork only');
+  await expect(forked.locator('.omp-assistant').last()).toContainText('You said: fork only');
+  await send(source, 'source only');
+  await expect(source.locator('.omp-assistant').last()).toContainText('You said: source only');
+  await expect(source.locator('.omp-user')).toHaveText([/shared start$/, /source only$/]);
+  await expect(forked.locator('.omp-user')).toHaveText([/shared start$/, /fork only$/]);
+
+  // The window saves its own journal, not the source's, and drops the fork request: after a
+  // daemon restart its Resume continues the fork instead of forking again.
+  const savedParams = async (/** @type {import('@playwright/test').Locator} */ pane) => {
+    const id = await pane.getAttribute('data-id');
+    return page.evaluate((leafId) => {
+      /** @param {any} node @returns {any} */
+      const find = (node) => (node?.id === leafId ? node : (node?.children ?? []).map(find).find(Boolean));
+      return find(JSON.parse(localStorage.getItem('cockpit.layout.v1') ?? 'null')?.tree)?.params;
+    }, id);
+  };
+  await expect.poll(async () => (await savedParams(forked))?.sessionFile).toMatch(/\.jsonl$/);
+  const [mine, theirs] = [await savedParams(forked), await savedParams(source)];
+  expect(theirs.sessionFile).toMatch(/\.jsonl$/);
+  expect(mine.sessionFile).not.toBe(theirs.sessionFile);
+  expect(mine.fork).toBeNull();
 });
 
 test('closing the window ends its omp session', async ({ page }) => {

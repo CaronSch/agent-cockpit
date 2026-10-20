@@ -48,15 +48,17 @@ export class SessionNotRunning extends Error {}
  */
 
 /**
+ * `resume` continues a journal; `fork` starts a new one from a copy of it (omp's `--fork`
+ * only reads the source). At most one of them is set.
  * @param {{
- *   id: string, cwd: string, resume: string | null, ompPath: string,
+ *   id: string, cwd: string, resume: string | null, fork: string | null, ompPath: string,
  *   emit: (body: SessionEventBody) => void, now?: () => number,
  * }} options
  * @returns {OmpSession}
  */
-export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
+export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now }) {
   /** @type {SessionMeta} */
-  let meta = { id, cwd, resume, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt: now() };
+  let meta = { id, cwd, resume, fork, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt: now() };
   /** @type {Map<string, PromiseWithResolvers<RpcResponse>>} */
   const pending = new Map();
   const decoder = createFrameDecoder();
@@ -77,7 +79,8 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
   /** @type {import('bun').Subprocess<'pipe', 'pipe', 'pipe'> | null} */
   let child = null;
   try {
-    child = Bun.spawn([ompPath, '--mode', 'rpc-ui', ...(resume ? ['--resume', resume] : [])], {
+    const from = resume ? ['--resume', resume] : fork ? ['--fork', fork] : [];
+    child = Bun.spawn([ompPath, '--mode', 'rpc-ui', ...from], {
       cwd,
       stdin: 'pipe',
       stdout: 'pipe',
