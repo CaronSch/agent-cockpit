@@ -12,7 +12,7 @@
   --color-line-strong: oklch(38% 0.012 270);
 
   /* Text */
-  --color-text: oklch(94% 0.006 85);
+  --color-text: oklch(100% 0 0);
   --color-text-dim: oklch(70% 0.012 270);
   --color-text-faint: oklch(54% 0.012 270);
 
