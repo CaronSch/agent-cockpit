@@ -8,6 +8,7 @@
  * the user picks one: neither side's text is ever dropped silently.
  */
 import { getDaemon } from '../daemon/client.js';
+import { errorMessage } from '../ui/format.js';
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { Scratchpad } from '../../daemon/wire.js' */
 
@@ -19,9 +20,6 @@ import { getDaemon } from '../daemon/client.js';
  */
 
 export const SAVE_DELAY_MS = 400;
-
-/** @param {unknown} err */
-const message = (err) => (err instanceof Error ? err.message : String(err));
 
 /** @param {{ daemon: DaemonClient, id: string, timers?: Timers, delayMs?: number }} options */
 export function createScratchpadStore({ daemon, id, timers = globalThis, delayMs = SAVE_DELAY_MS }) {
@@ -77,7 +75,7 @@ export function createScratchpadStore({ daemon, id, timers = globalThis, delayMs
       else theirs = result.current;
       retry = dirty && !theirs;
     } catch (err) {
-      error = message(err);
+      error = errorMessage(err);
     } finally {
       inflight = null;
       notify();
@@ -113,7 +111,7 @@ export function createScratchpadStore({ daemon, id, timers = globalThis, delayMs
       arrive(await daemon.scratchpad(id));
       error = null;
     } catch (err) {
-      error = message(err);
+      error = errorMessage(err);
     }
     notify();
     if (dirty) void save();

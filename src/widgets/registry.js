@@ -1,4 +1,4 @@
-import { newLeaf } from '../layout/new-leaf.js';
+import { leaf } from '../layout/grid-model.js';
 import pane from './pane.js';
 import omp from './omp.js';
 import sessions from './sessions.js';
@@ -44,6 +44,7 @@ export const WIDGETS = Object.freeze(Object.fromEntries(DEFS.map((def) => [def.t
  * @param {string} type @param {LeafParams} [params]
  */
 export function newWidgetLeaf(type, params) {
+  const fresh = leaf(`w_${crypto.randomUUID().slice(0, 8)}`, type);
   const start = params ?? WIDGETS[type]?.newParams?.();
-  return start ? { ...newLeaf(type), params: start } : newLeaf(type);
+  return start ? { ...fresh, params: start } : fresh;
 }

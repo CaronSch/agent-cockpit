@@ -4,33 +4,20 @@
  * while a drag is active so it never hides a drop target.
  */
 import { newWidgetLeaf } from '../widgets/registry.js';
+import { button, el } from './dom.js';
 /** @import { WidgetDef } from '../widgets/registry.js' */
 /** @import { DragController } from '../interaction/drag-controller.js' */
-/** @typedef {{ open(): void, close(): void, setDragging(dragging: boolean): void }} Palette */
+/** @typedef {{ setDragging(dragging: boolean): void }} Palette */
 
 /** @param {WidgetDef} def */
 function createItem(def) {
-  const li = document.createElement('li');
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'palette-item';
-  button.dataset.type = def.type;
-
-  const glyph = document.createElement('span');
-  glyph.className = 'palette-glyph';
+  const li = el('li');
+  const item = button('palette-item');
+  item.dataset.type = def.type;
+  const glyph = el('span', 'palette-glyph', def.glyph);
   glyph.setAttribute('aria-hidden', 'true');
-  glyph.textContent = def.glyph;
-
-  const name = document.createElement('span');
-  name.className = 'palette-name';
-  name.textContent = def.title;
-
-  const desc = document.createElement('span');
-  desc.className = 'palette-desc';
-  desc.textContent = def.description;
-
-  button.append(glyph, name, desc);
-  li.append(button);
+  item.append(glyph, el('span', 'palette-name', def.title), el('span', 'palette-desc', def.description));
+  li.append(item);
   return li;
 }
 
@@ -95,8 +82,6 @@ export function createPalette({ toggleButton, panel, widgets, drag, onAdd }) {
   });
 
   return {
-    open: () => setOpen(true),
-    close: () => setOpen(false),
     setDragging: (dragging) => panel.classList.toggle('is-dragged', dragging),
   };
 }

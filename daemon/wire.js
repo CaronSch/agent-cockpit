@@ -52,8 +52,8 @@
  */
 
 /**
- * A past omp conversation, summarised from its journal. `firstPrompt`/`lastPrompt` are
- * one-line previews; times are epoch milliseconds.
+ * A past omp conversation, summarised from its journal. `firstPrompt` is a one-line
+ * preview; times are epoch milliseconds.
  * @typedef {{
  *   file: string,
  *   id: string,
@@ -61,10 +61,8 @@
  *   cwd: string | null,
  *   createdAt: number | null,
  *   modifiedAt: number,
- *   size: number,
  *   prompts: number,
  *   firstPrompt: string | null,
- *   lastPrompt: string | null,
  * }} PastSession
  */
 
@@ -95,7 +93,7 @@
 
 /** @typedef {HelloEvent | ScratchpadEvent | SessionEvent} StreamEvent */
 
-/** @typedef {{ defaultCwd: string, home: string, ompVersion: string | null, scratchpadDir: string }} DaemonConfig */
+/** @typedef {{ defaultCwd: string, home: string, scratchpadDir: string }} DaemonConfig */
 
 /**
  * omp's reply to one command (see omp's rpc docs). `success: false` is a normal answer,

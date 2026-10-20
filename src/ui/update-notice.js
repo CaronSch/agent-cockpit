@@ -3,7 +3,7 @@
  * than this page loaded (see daemon/ui-files.js), so a tab left open never runs stale code
  * unknowingly. It never reloads by itself: a reload would drop an unsent draft.
  */
-import { el } from './dom.js';
+import { button, el } from './dom.js';
 /** @import { DaemonClient } from '../daemon/client.js' */
 
 /** @param {{ daemon: DaemonClient, reload?: () => void }} options */
@@ -11,16 +11,12 @@ export function createUpdateNotice({ daemon, reload = () => location.reload() })
   const root = el('div', 'update-notice');
   root.setAttribute('role', 'status');
   root.hidden = true;
-  const reloadBtn = el('button', 'btn btn-accent', 'Reload');
-  reloadBtn.type = 'button';
-  reloadBtn.addEventListener('click', () => reload());
-  const dismiss = el('button', 'update-notice-dismiss', '×');
-  dismiss.type = 'button';
-  dismiss.setAttribute('aria-label', 'Dismiss');
-  dismiss.title = 'Hide until the next update';
-  dismiss.addEventListener('click', () => {
+  const reloadBtn = button('btn btn-accent', 'Reload', () => reload());
+  const dismiss = button('update-notice-dismiss', '×', () => {
     root.hidden = true;
   });
+  dismiss.setAttribute('aria-label', 'Dismiss');
+  dismiss.title = 'Hide until the next update';
   root.append(el('span', 'update-notice-text', 'Cockpit was updated. Reload to use the new version.'), reloadBtn, dismiss);
 
   // A daemon restart reports its files on reconnect; a `git pull` under a running daemon

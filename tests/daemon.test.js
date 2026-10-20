@@ -121,7 +121,7 @@ before(async () => {
     attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
     token: TOKEN,
     root: ROOT,
-    config: { defaultCwd: cwd, home: cwd, ompVersion: 'omp/fake', scratchpadDir: join(cwd, 'state', 'scratchpads') },
+    config: { defaultCwd: cwd, home: cwd, scratchpadDir: join(cwd, 'state', 'scratchpads') },
     rpcHoldMs: 200,
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));

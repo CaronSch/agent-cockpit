@@ -325,8 +325,6 @@ describe('derived state', () => {
       model: { provider: 'acme', id: 'model-1', name: 'Model One' },
       thinkingLevel: 'medium',
       contextPercent: 1.5,
-      sessionFile: '/s/a.jsonl',
-      sessionName: null,
     });
   });
 });

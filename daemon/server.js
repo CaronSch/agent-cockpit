@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { SessionNotRunning } from './omp-session.js';
-import { PAD_ID } from './scratchpad.js';
+import { PAD_ID } from '../src/scratchpad/blocks.js';
 import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-files.js';
 /** @import { IncomingMessage, ServerResponse } from 'node:http' */
 /** @import { AddressInfo } from 'node:net' */

@@ -4,7 +4,7 @@
  * composer with the selected text as its quote. Ask opens a box for a side question about it,
  * whose short answer streams into the popup and never enters the chat (omp's `btw`).
  */
-import { el } from '../ui/dom.js';
+import { button, el } from '../ui/dom.js';
 import { autosize } from '../ui/autosize.js';
 import { renderMarkdown } from './markdown-dom.js';
 /** @import { SideAnswer } from './transcript.js' */
@@ -92,13 +92,11 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
 
   /** @param {string} label @param {string} title @param {() => void} onClick */
   function actionButton(label, title, onClick) {
-    const button = el('button', 'btn omp-quote-btn', label);
-    button.type = 'button';
-    button.title = title;
+    const action = button('btn omp-quote-btn', label, onClick);
+    action.title = title;
     // Keep the selection (and its highlight) while the button is pressed.
-    button.addEventListener('pointerdown', (e) => e.preventDefault());
-    button.addEventListener('click', onClick);
-    return button;
+    action.addEventListener('pointerdown', (e) => e.preventDefault());
+    return action;
   }
 
   function offerButtons() {
@@ -126,11 +124,9 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
     box.rows = 2;
     box.placeholder = words.placeholder;
     box.setAttribute('aria-label', words.label);
-    const submitBtn = el('button', 'btn btn-accent', words.submit);
-    submitBtn.type = 'button';
+    const submitBtn = button('btn btn-accent', words.submit);
     submitBtn.disabled = true;
-    const cancel = el('button', 'btn', 'Cancel');
-    cancel.type = 'button';
+    const cancel = button('btn', 'Cancel');
     const actions = el('div', 'omp-row');
     actions.append(submitBtn, cancel);
     pop.replaceChildren(preview, box, actions);
@@ -169,9 +165,7 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
     pop.classList.add('is-answer');
     const body = el('div', 'omp-ask-answer');
     body.setAttribute('aria-live', 'polite');
-    const closeBtn = el('button', 'btn', 'Close');
-    closeBtn.type = 'button';
-    closeBtn.addEventListener('click', close);
+    const closeBtn = button('btn', 'Close', close);
     const actions = el('div', 'omp-row');
     actions.append(closeBtn);
     pop.replaceChildren(el('blockquote', 'omp-quote-preview', quote), el('p', 'omp-ask-question', question), body, actions);

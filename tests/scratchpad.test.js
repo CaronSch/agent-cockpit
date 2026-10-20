@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LEGACY_PAD, adoptLegacyScratchpad, createScratchpads, revOf } from '../daemon/scratchpad.js';
+import { adoptLegacyScratchpad, createScratchpads, revOf } from '../daemon/scratchpad.js';
+import { LEGACY_PAD } from '../src/scratchpad/blocks.js';
 /** @import { Scratchpad } from '../daemon/wire.js' */
 
 let state = '';

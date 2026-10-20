@@ -13,7 +13,7 @@ import { attachSashController } from './interaction/sash-controller.js';
 import { createDragController } from './interaction/drag-controller.js';
 import { createPalette } from './ui/palette.js';
 import { createUpdateNotice } from './ui/update-notice.js';
-import { el } from './ui/dom.js';
+import { button, el } from './ui/dom.js';
 import { getDaemon } from './daemon/client.js';
 import { WIDGETS, newWidgetLeaf } from './widgets/registry.js';
 /** @import { Leaf, LeafParams, Tree } from './layout/grid-model.js' */
@@ -85,15 +85,13 @@ export function createApp(root) {
     frameEl.setAttribute('aria-labelledby', `title-${leaf.id}`);
 
     const head = el('header', 'widget-head');
-    const grip = el('button', 'widget-grip', '⠿');
-    grip.type = 'button';
+    const grip = button('widget-grip', '⠿');
     grip.setAttribute('aria-label', `Move ${title}: drag, or Alt+Shift+Arrow keys`);
     const glyph = el('span', 'widget-glyph', def?.glyph ?? '?');
     glyph.setAttribute('aria-hidden', 'true');
     const heading = el('h2', 'widget-title', title);
     heading.id = `title-${leaf.id}`;
-    const close = el('button', 'widget-close', '×');
-    close.type = 'button';
+    const close = button('widget-close', '×');
     close.setAttribute('aria-label', `Close ${title}`);
     head.append(grip, glyph, heading, close);
 

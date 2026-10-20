@@ -3,14 +3,15 @@
  * items plus derived session state, with no DOM.
  *
  * `applyEvent` mutates the state it is given (the stream is high-frequency; copying the
- * whole transcript per delta would be wasteful) and bumps `version`, and each changed
- * item's `rev`, so a view can redraw only what changed. Replaying the same events into a
+ * whole transcript per delta would be wasteful) and bumps each changed item's `rev`, so a
+ * view can redraw only what changed. Replaying the same events into a
  * fresh `createTranscript()` always yields the same state.
  *
  * Invariant: no frame is silently dropped. Every frame type, message role, assistant
  * stream event, content block and UI method is either handled, listed in a
  * `KNOWN_UNRENDERED` set with the reason, or surfaced as an `unrecognised` item.
  */
+import { json } from '../ui/format.js';
 /** @import { SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 
 /**
@@ -66,8 +67,6 @@
  *   model: { provider: string, id: string, name: string } | null,
  *   thinkingLevel: string | null,
  *   contextPercent: number | null,
- *   sessionFile: string | null,
- *   sessionName: string | null,
  * }} SessionInfo
  */
 
@@ -80,7 +79,6 @@
 
 /**
  * @typedef {{
- *   version: number,
  *   items: Item[],
  *   tools: Map<string, ToolRun>,
  *   meta: SessionMeta | null,
@@ -133,14 +131,16 @@ const REFRESH_TRIGGERS = new Set(['agent_end', 'model_changed', 'thinking_level_
 /** Successful responses that change what `get_state` reports. */
 const REFRESH_COMMANDS = new Set(['set_model', 'cycle_model', 'set_thinking_level', 'cycle_thinking_level', 'login', 'new_session', 'switch_session', 'fork', 'branch', 'compact']);
 
+/** @returns {Omit<AssistantItem, 'key' | 'rev'>} */
+const emptyAssistant = () => ({ kind: 'assistant', blocks: [], stopReason: null, errorMessage: null, model: null, ended: false });
+
 /** @returns {Transcript} */
 export function createTranscript() {
   return {
-    version: 0,
     items: [],
     tools: new Map(),
     meta: null,
-    session: { model: null, thinkingLevel: null, contextPercent: null, sessionFile: null, sessionName: null },
+    session: { model: null, thinkingLevel: null, contextPercent: null },
     dialogs: [],
     sideAnswers: new Map(),
     streaming: false,
@@ -168,7 +168,6 @@ export function createTranscript() {
  * @param {Transcript} state @param {SessionEvent} event @returns {Transcript}
  */
 export function applyEvent(state, event) {
-  state.version++;
   switch (event.kind) {
     case 'session':
       state.meta = event.meta;
@@ -203,7 +202,6 @@ export function applyEvent(state, event) {
  * @param {Transcript} state @param {NoteLevel} level @param {string} source @param {string} text
  */
 export function addNote(state, level, source, text) {
-  state.version++;
   note(state, level, source, text);
 }
 
@@ -212,9 +210,7 @@ export function addNote(state, level, source, text) {
  * @param {Transcript} state @param {string} id
  */
 export function removeDialog(state, id) {
-  const before = state.dialogs.length;
   state.dialogs = state.dialogs.filter((d) => d.id !== id);
-  if (state.dialogs.length !== before) state.version++;
 }
 
 /**
@@ -344,7 +340,7 @@ function applyFrame(state, frame) {
       return note(state, 'muted', 'todo', `Todo reminder (${frame.attempt}/${frame.maxAttempts}): ${open} open`);
     }
     case 'irc_message':
-      return note(state, 'info', `irc ${frame.message?.customType ?? ''}`.trim(), messageText(frame.message?.content));
+      return note(state, 'info', `irc ${frame.message?.customType ?? ''}`.trim(), contentText(frame.message?.content));
     case 'notice':
       return note(state, levelOf(frame.level), frame.source ?? 'notice', String(frame.message ?? ''));
     case 'goal_updated':
@@ -429,8 +425,6 @@ function applyState(state, data) {
     model: data.model && typeof data.model === 'object' ? modelInfo(data.model) : null,
     thinkingLevel: typeof data.thinkingLevel === 'string' ? data.thinkingLevel : null,
     contextPercent: typeof data.contextUsage?.percent === 'number' ? data.contextUsage.percent : null,
-    sessionFile: typeof data.sessionFile === 'string' ? data.sessionFile : null,
-    sessionName: typeof data.sessionName === 'string' ? data.sessionName : null,
   };
 }
 
@@ -535,13 +529,18 @@ function finishBash(state, id, result, error) {
     item.status = 'error';
     item.error = error;
   } else if (result) {
-    item.output = String(result.output ?? '');
-    item.exitCode = typeof result.exitCode === 'number' ? result.exitCode : null;
-    item.truncated = Boolean(result.truncated);
-    item.status = result.cancelled ? 'cancelled' : item.exitCode === null || item.exitCode === 0 ? 'ok' : 'error';
+    setBashResult(item, result);
   }
-  touch(state, item);
+  touch(item);
   return true;
+}
+
+/** Fills a bash item from omp's result (a `bash` reply or a bash/python message). @param {BashItem} item @param {Record<string, any>} result */
+function setBashResult(item, result) {
+  item.output = String(result.output ?? '');
+  item.exitCode = typeof result.exitCode === 'number' ? result.exitCode : null;
+  item.truncated = Boolean(result.truncated);
+  item.status = result.cancelled ? 'cancelled' : item.exitCode === null || item.exitCode === 0 ? 'ok' : 'error';
 }
 
 // ── Messages ────────────────────────────────────────────
@@ -564,7 +563,7 @@ function applyMessage(state, message, key, final) {
   if (key === null && !final) return;
   switch (role) {
     case 'assistant': {
-      const item = upsert(state, key, () => ({ kind: 'assistant', blocks: [], stopReason: null, errorMessage: null, model: null, ended: false }));
+      const item = upsert(state, key, emptyAssistant);
       if (item.kind !== 'assistant') return unrecognised(state, 'assistant (id clash)', message);
       item.blocks = Array.isArray(message.content) ? message.content.map(toBlock) : [];
       item.model = typeof message.model === 'string' ? message.model : null;
@@ -579,15 +578,15 @@ function applyMessage(state, message, key, final) {
         }
       }
       registerToolCalls(state, item);
-      return touch(state, item);
+      return touch(item);
     }
     case 'user': {
       const item = upsert(state, key, () => ({ kind: 'user', text: '', images: 0, byAgent: false }));
       if (item.kind !== 'user') return unrecognised(state, 'user (id clash)', message);
-      item.text = messageText(message.content);
+      item.text = contentText(message.content);
       item.images = Array.isArray(message.content) ? message.content.filter((/** @type {any} */ c) => c?.type === 'image').length : 0;
       item.byAgent = message.attribution === 'agent' || message.synthetic === true;
-      return touch(state, item);
+      return touch(item);
     }
     case 'toolResult': {
       // Folded into its tool card: never a transcript entry of its own.
@@ -609,33 +608,28 @@ function applyMessage(state, message, key, final) {
       if (item.kind !== 'bash') return unrecognised(state, `${role} (id clash)`, message);
       item.fromMessage = true;
       if (existing && key) state.index.set(key, existing); // pairs this message's end with the item
-      if (final || existing === undefined) {
-        item.output = String(message.output ?? '');
-        item.exitCode = typeof message.exitCode === 'number' ? message.exitCode : null;
-        item.truncated = Boolean(message.truncated);
-        item.status = message.cancelled ? 'cancelled' : item.exitCode === null || item.exitCode === 0 ? 'ok' : 'error';
-      }
-      return touch(state, item);
+      if (final || existing === undefined) setBashResult(item, message);
+      return touch(item);
     }
     case 'custom':
     case 'hookMessage':
-      return upsertNote(state, key, 'muted', String(message.customType ?? role), '', messageText(message.content), message.display === false);
+      return upsertNote(state, key, String(message.customType ?? role), '', contentText(message.content), message.display === false);
     case 'developer':
-      return upsertNote(state, key, 'muted', 'developer', '', messageText(message.content), false);
+      return upsertNote(state, key, 'developer', '', contentText(message.content), false);
     case 'branchSummary':
-      return upsertNote(state, key, 'muted', 'branch', 'Branch summary', String(message.summary ?? ''), false);
+      return upsertNote(state, key, 'branch', 'Branch summary', String(message.summary ?? ''), false);
     case 'compactionSummary':
-      return upsertNote(state, key, 'muted', 'compaction', String(message.shortSummary ?? 'Compaction summary'), String(message.summary ?? ''), false);
+      return upsertNote(state, key, 'compaction', String(message.shortSummary ?? 'Compaction summary'), String(message.summary ?? ''), false);
     case 'fileMention': {
       const files = Array.isArray(message.files) ? message.files.map((/** @type {any} */ f) => String(f?.path ?? '?')) : [];
-      return upsertNote(state, key, 'muted', 'files', `Attached ${files.join(', ')}`, null, false);
+      return upsertNote(state, key, 'files', `Attached ${files.join(', ')}`, null, false);
     }
     default: {
       const label = `message role ${role ?? '?'}`;
       if (key && state.index.has(key)) {
         const item = /** @type {UnrecognisedItem} */ (state.index.get(key));
         item.raw = json(message);
-        return touch(state, item);
+        return touch(item);
       }
       return void push(state, { kind: 'unrecognised', label, raw: json(message) }, key);
     }
@@ -648,7 +642,7 @@ function applyUpdate(state, frame) {
   const sub = typeof event?.type === 'string' ? event.type : '';
   if (KNOWN_STREAM_NOOPS.has(sub)) return;
   const key = messageKey(frame) ?? `msg:stream-${state.nextKey}`;
-  const item = upsert(state, key, () => ({ kind: 'assistant', blocks: [], stopReason: null, errorMessage: null, model: null, ended: false }));
+  const item = upsert(state, key, emptyAssistant);
   if (item.kind !== 'assistant') return unrecognised(state, `message_update ${sub}`, frame);
   const at = Number.isInteger(event.contentIndex) && event.contentIndex >= 0 ? event.contentIndex : item.blocks.length;
   while (item.blocks.length < at) item.blocks.push({ kind: 'text', text: '' });
@@ -693,7 +687,7 @@ function applyUpdate(state, frame) {
     default:
       return unrecognised(state, `message_update ${sub || '?'}`, frame);
   }
-  touch(state, item);
+  touch(item);
 }
 
 /**
@@ -767,7 +761,7 @@ function registerToolCalls(state, item) {
 function touchTool(state, id) {
   const owner = state.toolOwner.get(id);
   const item = owner ? state.index.get(owner) : undefined;
-  if (item) touch(state, item);
+  if (item) touch(item);
 }
 
 // ── Helpers ─────────────────────────────────────────────
@@ -811,14 +805,9 @@ function slashCommand(c) {
   };
 }
 
-/** Text of a message `content` (a string or content blocks). @param {unknown} content */
-function messageText(content) {
-  if (typeof content === 'string') return content;
-  return contentText(content);
-}
-
-/** @param {unknown} content @returns {string} */
+/** Text of a message `content` (a string or content blocks). @param {unknown} content @returns {string} */
 function contentText(content) {
+  if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content
     .map((c) => (c?.type === 'text' ? String(c.text ?? '') : c?.type === 'image' ? '[image]' : `[${c?.type ?? '?'}]`))
@@ -833,15 +822,6 @@ function strings(value) {
 /** @param {unknown} level @returns {NoteLevel} */
 function levelOf(level) {
   return level === 'warning' || level === 'error' ? level : 'info';
-}
-
-/** @param {unknown} value */
-function json(value) {
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
 }
 
 /**
@@ -870,8 +850,8 @@ function removeItem(state, key) {
   state.items = state.items.filter((i) => i.key !== key);
 }
 
-/** @param {Transcript} state @param {Item} item */
-function touch(state, item) {
+/** @param {Item} item */
+function touch(item) {
   item.rev++;
 }
 
@@ -884,14 +864,15 @@ function note(state, level, source, text, detail = null) {
 }
 
 /**
- * @param {Transcript} state @param {string | null} key @param {NoteLevel} level @param {string} source
+ * A muted note for a message that is context, not conversation.
+ * @param {Transcript} state @param {string | null} key @param {string} source
  * @param {string} text @param {string | null} detail @param {boolean} hidden
  */
-function upsertNote(state, key, level, source, text, detail, hidden) {
-  const item = upsert(state, key, () => ({ kind: 'note', level, source, text, detail, hidden }));
+function upsertNote(state, key, source, text, detail, hidden) {
+  const item = upsert(state, key, () => ({ kind: 'note', level: 'muted', source, text, detail, hidden }));
   if (item.kind !== 'note') return;
-  Object.assign(item, { level, source, text, detail, hidden });
-  touch(state, item);
+  Object.assign(item, { level: 'muted', source, text, detail, hidden });
+  touch(item);
 }
 
 /** stderr lines in a row share one note. @param {Transcript} state @param {string} line */
@@ -900,7 +881,7 @@ function addStderr(state, line) {
   if (last?.kind === 'note' && last.source === 'stderr') {
     last.detail = `${last.detail ?? last.text}\n${line}`;
     last.text = `stderr (${last.detail.split('\n').length} lines)`;
-    return touch(state, last);
+    return touch(last);
   }
   push(state, { kind: 'note', level: 'muted', source: 'stderr', text: line, detail: null, hidden: false });
 }

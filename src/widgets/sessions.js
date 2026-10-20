@@ -7,7 +7,8 @@
  * can show different slices. A session already open in a window is marked and cannot be
  * resumed a second time: omp would fork it rather than share it.
  */
-import { el } from '../ui/dom.js';
+import { button, el } from '../ui/dom.js';
+import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
 import { SORT_KEYS, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
 /** @import { WidgetContext } from './registry.js' */
@@ -29,9 +30,6 @@ export default {
     return createSessionsWindow(body, ctx, getDaemon());
   },
 };
-
-/** @param {unknown} err */
-const message = (err) => (err instanceof Error ? err.message : String(err));
 
 /** @param {HTMLElement} body @param {WidgetContext} ctx @param {DaemonClient} daemon */
 function createSessionsWindow(body, ctx, daemon) {
@@ -58,11 +56,9 @@ function createSessionsWindow(body, ctx, daemon) {
     option.value = key;
     sort.append(option);
   }
-  const direction = el('button', 'sessions-icon-btn');
-  direction.type = 'button';
+  const direction = button('sessions-icon-btn');
   direction.setAttribute('aria-label', 'Reverse sort order');
-  const refresh = el('button', 'sessions-icon-btn', '⟳');
-  refresh.type = 'button';
+  const refresh = button('sessions-icon-btn', '⟳');
   refresh.title = 'Refresh';
   refresh.setAttribute('aria-label', 'Refresh');
   bar.append(search, sort, direction, refresh);
@@ -116,7 +112,7 @@ function createSessionsWindow(body, ctx, daemon) {
       loaded = true;
     } catch (err) {
       if (seq !== requestSeq) return;
-      error = message(err);
+      error = errorMessage(err);
     } finally {
       if (seq === requestSeq) {
         loading = false;
@@ -128,7 +124,7 @@ function createSessionsWindow(body, ctx, daemon) {
   /** @param {string | null} cwd */
   function shortDir(cwd) {
     if (!cwd) return 'unknown directory';
-    return home && (cwd === home || cwd.startsWith(`${home}/`)) ? `~${cwd.slice(home.length)}` : cwd;
+    return tildeHome(cwd, home);
   }
 
   /** @param {PastSession} s */
@@ -162,9 +158,8 @@ function createSessionsWindow(body, ctx, daemon) {
     main.append(meta);
     row.append(main);
     if (!open) {
-      const button = el('button', 'btn sessions-resume', 'Resume');
-      button.type = 'button';
-      row.append(button);
+      const resume = button('btn sessions-resume', 'Resume');
+      row.append(resume);
     }
     return row;
   }

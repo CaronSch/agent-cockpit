@@ -15,7 +15,23 @@
  * @typedef {TextBlock | AssetBlock} Block
  */
 
-const ASSET_LINE = /^(!?)\[([^\]]*)\]\(([a-z0-9][a-z0-9-]*\.assets\/[A-Za-z0-9][A-Za-z0-9._-]*)\)$/;
+/** Pad ids are path segments on the daemon; nothing else gets near the filesystem. */
+export const PAD_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** The id the single shared scratchpad of earlier versions became; its old windows still show it. */
+export const LEGACY_PAD = 'scratchpad';
+/** A stored asset's file name. */
+export const ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+/** Shown inline by the browser, by extension; the daemon serves anything else as a download. */
+export const IMAGE_TYPES = /** @type {Record<string, string>} */ ({
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+});
+
+const ASSET_LINE = new RegExp(`^(!?)\\[([^\\]]*)\\]\\((${PAD_ID.source.slice(1, -1)}\\.assets/${ASSET_NAME.source.slice(1, -1)})\\)$`);
 
 const TITLE_CHARS = 80;
 

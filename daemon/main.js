@@ -64,7 +64,6 @@ const server = createDaemonServer({
   config: {
     defaultCwd: process.env.INIT_CWD ?? process.cwd(),
     home: homedir(),
-    ompVersion: version,
     scratchpadDir,
   },
 });

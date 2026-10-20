@@ -3,6 +3,7 @@
  * unrecognised frames), built from text nodes only.
  */
 import { el } from '../ui/dom.js';
+import { json } from '../ui/format.js';
 import { renderMarkdown } from './markdown-dom.js';
 /** @import { Block, Item, ToolRun } from './transcript.js' */
 
@@ -166,11 +167,3 @@ function argsSummary(args) {
 /** @param {string} text */
 const clip = (text) => (text.length > 120 ? `${text.slice(0, 119)}…` : text).replace(/\s+/g, ' ');
 
-/** @param {unknown} value */
-function json(value) {
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
-}
