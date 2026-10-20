@@ -19,7 +19,6 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   font: 400 var(--text-base) / 1.4 var(--font-ui);
-  -webkit-font-smoothing: antialiased;
 }
 
 button {

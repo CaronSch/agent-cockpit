@@ -34,7 +34,7 @@ const sameRect = (a, b) => a && b && a.x === b.x && a.y === b.y && a.w === b.w &
 function writeRect(el, prev, next) {
   if (sameRect(prev, next)) return;
   if (!prev || prev.x !== next.x || prev.y !== next.y) {
-    el.style.transform = `translate3d(${next.x}px, ${next.y}px, 0)`;
+    el.style.transform = `translate(${next.x}px, ${next.y}px)`;
   }
   if (!prev || prev.w !== next.w) el.style.width = `${next.w}px`;
   if (!prev || prev.h !== next.h) el.style.height = `${next.h}px`;
