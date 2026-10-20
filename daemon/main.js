@@ -17,9 +17,8 @@ import { createHistory } from './history.js';
 import { createHub } from './hub.js';
 import { OMP_ENV } from './omp-session.js';
 import { createAttachments } from './attachments.js';
-import { adoptLegacyScratchpad, createScratchpads } from './scratchpad.js';
+import { createScratchpads } from './scratchpad.js';
 import { createDaemonServer } from './server.js';
-import { adoptLegacyStateDir } from './state-dir.js';
 import { loadToken } from './token.js';
 
 const ROOT = resolve(import.meta.dir, '..');
@@ -40,18 +39,13 @@ const port = Number(values.port ?? process.env.COCKPIT_PORT ?? 4777);
 const ompOption = values.omp ?? process.env.COCKPIT_OMP ?? 'omp';
 // A path (not a bare command name) must not depend on each session's cwd.
 const ompPath = ompOption.includes('/') ? resolve(ompOption) : ompOption;
-const defaultStateDir = join(homedir(), '.cockpit');
-const stateDir = process.env.COCKPIT_STATE_DIR ?? defaultStateDir;
+const stateDir = process.env.COCKPIT_STATE_DIR ?? join(homedir(), '.cockpit');
 const ompSessions =
   process.env.COCKPIT_OMP_SESSIONS ?? join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.omp', 'agent'), 'sessions');
 
-if (stateDir === defaultStateDir && (await adoptLegacyStateDir(join(homedir(), '.agent-cockpit'), stateDir))) {
-  console.log(`[daemon] moved ~/.agent-cockpit to ${stateDir}`);
-}
 const token = await loadToken(stateDir);
 const hub = createHub({ ompPath });
 const scratchpadDir = join(stateDir, 'scratchpads');
-await adoptLegacyScratchpad(join(stateDir, 'scratchpad.md'), scratchpadDir);
 /** @type {ReturnType<typeof createDaemonServer>} */
 let server;
 try {

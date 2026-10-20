@@ -11,7 +11,7 @@ import { errorMessage, tildeHome } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
 import { getDaemon } from '../daemon/client.js';
 import { getScratchpad } from '../scratchpad/store.js';
-import { IMAGE_TYPES, LEGACY_PAD, PAD_ID, assetUrl, insertAsset, parseBlocks, serializeBlocks, titleOf, withGaps } from '../scratchpad/blocks.js';
+import { IMAGE_TYPES, DEFAULT_PAD, PAD_ID, assetUrl, insertAsset, parseBlocks, serializeBlocks, titleOf, withGaps } from '../scratchpad/blocks.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { ScratchpadStore } from '../scratchpad/store.js' */
@@ -47,7 +47,7 @@ function fileName(file) {
 
 /** @param {HTMLElement} body @param {WidgetContext} ctx @param {DaemonClient} daemon */
 function createScratchpadWindow(body, ctx, daemon) {
-  const padId = () => (typeof ctx.params.pad === 'string' && PAD_ID.test(ctx.params.pad) ? ctx.params.pad : LEGACY_PAD);
+  const padId = () => (typeof ctx.params.pad === 'string' && PAD_ID.test(ctx.params.pad) ? ctx.params.pad : DEFAULT_PAD);
 
   const root = el('div', 'scratchpad');
 

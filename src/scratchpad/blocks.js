@@ -17,8 +17,8 @@
 
 /** Pad ids are path segments on the daemon; nothing else gets near the filesystem. */
 export const PAD_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
-/** The id the single shared scratchpad of earlier versions became; its old windows still show it. */
-export const LEGACY_PAD = 'scratchpad';
+/** The pad a window shows when its params name no valid pad. */
+export const DEFAULT_PAD = 'scratchpad';
 /** A stored asset's file name. */
 export const ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 /** Shown inline by the browser, by extension; the daemon serves anything else as a download. */

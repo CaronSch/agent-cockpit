@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { adoptLegacyScratchpad, createScratchpads, revOf } from '../daemon/scratchpad.js';
-import { LEGACY_PAD } from '../src/scratchpad/blocks.js';
+import { createScratchpads, revOf } from '../daemon/scratchpad.js';
 /** @import { Scratchpad } from '../daemon/wire.js' */
 
 let state = '';
@@ -115,15 +114,4 @@ describe('scratchpad files', () => {
     assert.deepEqual(heard, [['gone', { text: '', rev: revOf('') }]]);
   });
 
-  test('the single scratchpad of earlier versions becomes a pad, once', async () => {
-    const legacy = join(state, 'scratchpad.md');
-    await writeFile(legacy, 'old notes');
-    assert.equal(await adoptLegacyScratchpad(legacy, dir), true);
-    assert.equal((await createScratchpads({ dir }).read(LEGACY_PAD)).text, 'old notes');
-    await writeFile(legacy, 'written by an old daemon later');
-    assert.equal(await adoptLegacyScratchpad(legacy, dir), false, 'never overwrites the adopted pad');
-    assert.equal(await readFile(join(dir, `${LEGACY_PAD}.md`), 'utf8'), 'old notes');
-    await mkdir(join(state, 'empty'));
-    assert.equal(await adoptLegacyScratchpad(join(state, 'none.md'), join(state, 'empty')), false);
-  });
 });
