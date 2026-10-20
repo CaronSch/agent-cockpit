@@ -11,8 +11,8 @@ import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/tran
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
-import { isCommand } from '../omp/message.js';
-import { attachSelectionComments } from '../omp/selection-comment.js';
+import { composeAsk, isCommand } from '../omp/message.js';
+import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { awaitsUser } from '../omp/activity.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
@@ -418,12 +418,27 @@ function createPane(body, ctx, daemon) {
       },
     });
     const { draft, sendBtn } = composer;
-    const quoteComments = attachSelectionComments({
+    const selectionPopup = attachSelectionPopup({
       host: node,
       transcript,
       onComment: (quote, comment) => {
         composer.addComment(quote, comment);
         draft.focus();
+      },
+      // Side questions go to omp's `btw`: answered from the session's context, never added to it.
+      ask: {
+        async send(quote, question) {
+          if (!ready()) return { error: 'omp is not running.' };
+          try {
+            const res = await daemon.rpc(session, { type: 'btw', question: composeAsk(quote, question) });
+            const id = res.success ? res.data?.record?.id : null;
+            return typeof id === 'string' ? { id } : { error: res.error ?? 'omp did not take the question.' };
+          } catch (err) {
+            return { error: message(err) };
+          }
+        },
+        answer: (id) => state.sideAnswers.get(id),
+        cancel: (id) => void daemon.rpc(session, { type: 'btw_cancel', recordId: id }).catch(() => {}),
       },
     });
     node.append(toolbar, menu, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
@@ -915,6 +930,7 @@ function createPane(body, ctx, daemon) {
       drawDialogs();
       drawQueue();
       drawComposer();
+      selectionPopup.refresh();
     }
 
     hideSuggestions();
@@ -927,7 +943,7 @@ function createPane(body, ctx, daemon) {
         closeMenu();
         resizes.disconnect();
         composer.destroy();
-        quoteComments.destroy();
+        selectionPopup.destroy();
       },
     };
   }

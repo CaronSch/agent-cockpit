@@ -275,6 +275,23 @@ describe('derived state', () => {
     assert.equal(output?.kind === 'note' ? output.detail : null, 'Session renamed to Fix the login flow.');
   });
 
+  test('a side question’s answer builds up beside the chat and never enters it', () => {
+    const record = { id: 'b1', leafId: null, question: 'why?', answer: '', status: 'running', createdAt: 1, updatedAt: 1 };
+    const state = run([
+      frame({ type: 'btw_record', record }),
+      frame({ type: 'btw_delta', recordId: 'b1', delta: 'Because ' }),
+      frame({ type: 'btw_delta', recordId: 'b1', delta: 'it was' }),
+    ]);
+    assert.deepEqual(state.sideAnswers.get('b1'), { answer: 'Because it was', status: 'running', error: null });
+    applyEvent(state, frame({ type: 'btw_record', record: { ...record, answer: 'Because it was.', status: 'complete' } }));
+    assert.deepEqual(state.sideAnswers.get('b1'), { answer: 'Because it was.', status: 'complete', error: null });
+    // A follow-up in the same topic answers in its last turn.
+    const followUp = { question: 'and?', answer: '', status: 'error', error: 'No model', createdAt: 2, updatedAt: 2 };
+    applyEvent(state, frame({ type: 'btw_record', record: { ...record, status: 'complete', followUps: [followUp] } }));
+    assert.deepEqual(state.sideAnswers.get('b1'), { answer: '', status: 'error', error: 'No model' });
+    assert.deepEqual(kinds(state), []);
+  });
+
   test('queue, commands, status strip, editor text and login URL', () => {
     const state = run([
       frame({ type: 'queue_update', steering: ['use the parser'], followUp: [] }),

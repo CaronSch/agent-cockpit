@@ -35,8 +35,12 @@ comes from omp's session files (`~/.omp/agent/sessions`, or
 
 In an omp pane, select text in a reply to **Comment** on it: the comment waits as
 a card above the message box and goes with your next prompt, quoting what it is
-about. A paste longer than 10 lines or 1000 characters becomes a card too (click
-it to edit) and is sent wrapped in `<attachment>` tags. Paste a screenshot or
+about. Or **Ask** about it: a quick side question that omp answers from the
+conversation so far (its `btw`), shown in the popup. Neither the question nor the
+answer is added to the chat; omp keeps them in its side-question history beside
+the session. Closing the popup stops an answer still coming. Like a comment, a
+paste longer than 10 lines or 1000 characters waits as a card above the message
+box (click it to edit); it is sent wrapped in `<attachment>` tags. Paste a screenshot or
 drop a file anywhere on the pane to attach it: the daemon stores it in
 `~/.agent-cockpit/attachments/<day>/` and the prompt mentions it as
 `@"<path>"`, which omp reads when the prompt starts a turn (images go to the

@@ -1,13 +1,13 @@
 /**
- * Builds the prompt the omp pane sends from what the composer holds: comments on quoted
- * parts of earlier replies, the draft, then attachments.
+ * Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted
+ * parts of earlier replies, the draft, then attachments) and side questions about a quote.
  *
  * A comment goes first as a Markdown quote of the text it is about, followed by the comment,
  * the way a reply quotes an email; the model and the transcript both read it naturally.
  * Pasted text goes after the draft wrapped in `<attachment>` tags, as omp's own "wrapped
  * block" paste does. A file goes as an `@"<path>"` mention: omp reads it when the prompt
  * starts a turn (images to the model, text inline); a steer keeps the path, which the model
- * can open itself.
+ * can open itself. A side question quotes its text the same way, for omp's `btw`.
  */
 
 /** A comment on a quoted part of the transcript. @typedef {{ quote: string, comment: string }} QuoteComment */
@@ -51,3 +51,10 @@ export function composeMessage(draft, comments, attachments = []) {
 
 /** Commands (`/model`, `!ls`) go to omp as typed; comments and attachments wait for the next prompt. @param {string} draft */
 export const isCommand = (draft) => /^[/!]/.test(draft.trim());
+
+/**
+ * A side question about `quote`, for omp's `btw`: answered from the session's context, kept
+ * out of it. omp's own side-question prompt already asks for a brief, direct answer.
+ * @param {string} quote @param {string} question
+ */
+export const composeAsk = (quote, question) => `About this part of our conversation:\n\n${asQuote(quote)}\n\n${question.trim()}`;

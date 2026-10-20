@@ -78,8 +78,9 @@ What runs today:
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
   a running turn, and resume the conversation after a daemon restart. Several
   panes can run side by side, each bound to its own session. The message box
-  grows with the prompt; selected reply text can be commented on and goes quoted
-  with the next prompt; long pastes become editable cards and pasted or dropped
+  grows with the prompt; selected reply text can be commented on (the comment goes
+  quoted with the next prompt) or asked about (omp's `btw` answers in the popup,
+  outside the chat); long pastes become editable cards and pasted or dropped
   files are stored in `~/.agent-cockpit/attachments/` and sent as omp `@"<path>"`
   mentions. A pane whose agent finished its turn (or asks something) while its
   user was not looking gets an electric-blue border until it is hovered,
@@ -200,8 +201,8 @@ particular, move a capability into "Current state" when it ships.
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
-- `src/omp/message.js` — Builds the prompt the omp pane sends from what the composer holds: comments on quoted parts of earlier replies, the draft, then attachments.
-- `src/omp/selection-comment.js` — Comments on highlighted transcript text: select part of a reply and a small Comment button appears at the end of the selection; it opens a box for the comment, which is handed to the composer with the selected text as its quote.
+- `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then attachments) and side questions about a quote.
+- `src/omp/selection-popup.js` — Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons appear at the end of the selection.
 - `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
 - `src/render/drop-indicator.js` — Landing preview for drag & drop, plus the sash snap guide.
 - `src/render/grid-renderer.js` — Imperative, diffed DOM writer for the grid.

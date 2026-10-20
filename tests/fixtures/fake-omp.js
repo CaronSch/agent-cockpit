@@ -12,6 +12,8 @@
  * - contains "slow": an intermediate reply and a tool run, then 1.5 s before the final reply
  * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
  *   prompt that says something: "hi" alone is too little to name a session by)
+ * - `btw`: a side question, answered from the conversation and kept out of it as omp's is;
+ *   the answer bolds the first quoted line, and a question containing "slow" waits 1.5 s
  * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
  * session already has a name.
  */
@@ -140,6 +142,36 @@ function rename(id, title) {
   out({ type: 'command_output', text: `Session renamed to ${name}.` });
 }
 
+/** The side question being answered, as omp runs one at a time. @type {{ record: Record<string, any>, timer?: ReturnType<typeof setTimeout> } | null} */
+let sideQuestion = null;
+
+/** @param {string | undefined} id @param {string} question */
+function btw(id, question) {
+  if (sideQuestion) {
+    return out({ id, type: 'response', command: 'btw', success: false, error: 'A /btw question is still running; cancel it first' });
+  }
+  const now = Date.now();
+  const record = { id: `btw-${now}`, leafId: null, question, answer: '', status: 'running', createdAt: now, updatedAt: now };
+  const current = { record, timer: /** @type {ReturnType<typeof setTimeout> | undefined} */ (undefined) };
+  sideQuestion = current;
+  ok(id, 'btw', { record });
+  out({ type: 'btw_record', record });
+  const quoted = /^> (.*)$/m.exec(question)?.[1] ?? 'that';
+  const answer = `**${quoted}** is what the conversation said.`;
+  current.timer = setTimeout(() => {
+    for (const delta of answer.match(/.{1,8}/gs) ?? []) out({ type: 'btw_delta', recordId: record.id, delta });
+    finishSideQuestion({ answer, status: 'complete' });
+  }, /slow/.test(question) ? 1500 : 0);
+}
+
+/** @param {Record<string, any>} patch */
+function finishSideQuestion(patch) {
+  if (!sideQuestion) return;
+  clearTimeout(sideQuestion.timer);
+  out({ type: 'btw_record', record: { ...sideQuestion.record, ...patch, updatedAt: Date.now() } });
+  sideQuestion = null;
+}
+
 out({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
 out({
   type: 'available_commands_update',
@@ -203,6 +235,13 @@ lines.on('line', (line) => {
     }
     case 'abort':
       return ok(id, type);
+    case 'btw':
+      return btw(id, String(cmd.question ?? ''));
+    case 'btw_cancel': {
+      const cancelled = sideQuestion !== null && (cmd.recordId === undefined || sideQuestion.record.id === cmd.recordId);
+      if (cancelled) finishSideQuestion({ status: 'cancelled' });
+      return ok(id, type, { cancelled });
+    }
     case 'abort_and_restore_queue':
       return ok(id, type, { steering: [], followUp: [] });
     case 'prompt':
