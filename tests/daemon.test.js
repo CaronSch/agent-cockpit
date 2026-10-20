@@ -87,7 +87,7 @@ async function waitForStatus(id, status) {
     const { json } = await call({ path: '/api/sessions' });
     const meta = json.sessions.find((/** @type {SessionMeta} */ s) => s.id === id);
     if (meta?.status === status) return meta;
-    await new Promise((r) => setTimeout(r, 50));
+    await Bun.sleep(50);
   }
   throw new Error(`session ${id} never became ${status}`);
 }
@@ -294,7 +294,7 @@ describe('sessions', () => {
     const settled = (/** @type {SessionEvent[]} */ log) => log.filter((e) => e.kind === 'frame' && e.frame.type === 'session_settled').length;
     await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'prompt', message } });
     await readStream({ done: (all) => settled(forSession(all, id)) > settled(before) });
-    await new Promise((r) => setTimeout(r, 150)); // a /rename, if the daemon sends one, and omp's answer
+    await Bun.sleep(150); // a /rename, if the daemon sends one, and omp's answer
     return forSession((await readStream({ ms: 100 })).events, id);
   }
   /** @param {SessionEvent[]} log */
@@ -331,7 +331,7 @@ describe('sessions', () => {
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {
     const missing = createHub({ ompPath: join(cwd, 'no-such-omp') });
     const meta = missing.create({ cwd, resume: null });
-    for (let i = 0; i < 100 && missing.list()[0].status === 'starting'; i++) await new Promise((r) => setTimeout(r, 20));
+    for (let i = 0; i < 100 && missing.list()[0].status === 'starting'; i++) await Bun.sleep(20);
     const [after] = missing.list();
     assert.equal(after.id, meta.id);
     assert.equal(after.status, 'failed');
@@ -351,7 +351,7 @@ describe('scratchpads', () => {
     const before = await call({ path: '/api/scratchpads/notes' });
     assert.equal(before.status, 200);
     const reading = readStream({ done: (events) => events.some((e) => e.kind === 'scratchpad') });
-    await new Promise((r) => setTimeout(r, 150)); // let the stream connect before the write
+    await Bun.sleep(150); // let the stream connect before the write
     const saved = await call({ method: 'PUT', path: '/api/scratchpads/notes', body: { text: 'remember the milk', base: before.json.rev } });
     assert.equal(saved.status, 200);
 

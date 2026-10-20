@@ -50,13 +50,8 @@ export function safeHref(raw) {
   const href = raw.trim();
   // Control characters and whitespace inside a URL are never legitimate here.
   if (!href || /[\u0000-\u0020\u007f]/.test(href)) return null;
-  let url;
-  try {
-    url = new URL(href);
-  } catch {
-    return null;
-  }
-  return SAFE_SCHEMES.has(url.protocol) ? href : null;
+  const url = URL.parse(href);
+  return url && SAFE_SCHEMES.has(url.protocol) ? href : null;
 }
 
 /** @param {string} source @returns {Block[]} */

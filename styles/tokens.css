@@ -19,7 +19,7 @@
   /* Semantic */
   --color-accent: oklch(81% 0.155 72);
   --color-accent-ink: oklch(22% 0.04 72);
-  --color-accent-glow: oklch(81% 0.155 72 / 0.18);
+  --color-accent-glow: color-mix(in oklch, var(--color-accent) 18%, transparent);
   --color-danger: oklch(69% 0.19 27);
   /* A window with news its user has not seen: electric blue, unlike anything else here. */
   --color-unread: oklch(80% 0.16 225);
