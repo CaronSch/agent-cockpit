@@ -55,13 +55,13 @@ function createScratchpadWindow(body, ctx, daemon) {
   const bar = el('div', 'pad-bar');
   const switcher = button('pad-switch');
   switcher.setAttribute('aria-haspopup', 'menu');
-  switcher.setAttribute('aria-expanded', 'false');
   switcher.title = 'Switch scratchpad';
   const switchTitle = el('span', 'pad-title');
   switcher.append(switchTitle, el('span', 'pad-caret', '▾'));
   const menu = el('div', 'pad-menu');
   menu.setAttribute('role', 'menu');
-  menu.hidden = true;
+  menu.popover = 'auto';
+  switcher.popoverTargetElement = menu;
   bar.append(switcher, menu);
 
   // ── conflict ──
@@ -205,7 +205,7 @@ function createScratchpadWindow(body, ctx, daemon) {
 
   /** Shows pad `id` in this window. @param {string} id */
   function showPad(id) {
-    closeMenu();
+    menu.hidePopover();
     if (id === padId()) return;
     ctx.setParams({ pad: id });
     off();
@@ -356,58 +356,39 @@ function createScratchpadWindow(body, ctx, daemon) {
     const actions = el('div', 'scratchpad-row');
     actions.append(yes, no);
     menu.replaceChildren(el('p', 'pad-menu-confirm', `Delete “${title}” and its files, for every window showing it?`), actions);
-    no.addEventListener('click', closeMenu);
+    no.addEventListener('click', () => menu.hidePopover());
     yes.addEventListener('click', () => {
       daemon
         .deleteScratchpad(id)
         .then(() => showPad(newPadId()))
         .catch((err) => {
           busy = `Could not delete: ${errorMessage(err)}`;
-          closeMenu();
+          menu.hidePopover();
           draw();
         });
     });
     yes.focus();
   }
 
-  function openMenu() {
-    menu.hidden = false;
-    switcher.setAttribute('aria-expanded', 'true');
+  menu.addEventListener('toggle', (event) => {
+    if (/** @type {ToggleEvent} */ (event).newState !== 'open') return;
     menu.replaceChildren(el('p', 'pad-menu-confirm', 'Loading…'));
     daemon
       .scratchpads()
       .then((pads) => {
-        if (menu.hidden) return;
+        if (!menu.matches(':popover-open')) return;
         fillMenu(pads);
         /** @type {HTMLElement | null} */ (menu.querySelector('[aria-current="true"]') ?? menu.querySelector('.pad-menu-item'))?.focus();
       })
       .catch((err) => menu.replaceChildren(el('p', 'pad-menu-confirm', `Could not list scratchpads: ${errorMessage(err)}`)));
-  }
-
-  function closeMenu() {
-    if (menu.hidden) return;
-    menu.hidden = true;
-    switcher.setAttribute('aria-expanded', 'false');
-  }
-
-  switcher.addEventListener('click', () => (menu.hidden ? openMenu() : closeMenu()));
+  });
   menu.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
     const items = /** @type {HTMLElement[]} */ ([...menu.querySelectorAll('button')]);
     const at = items.indexOf(/** @type {HTMLElement} */ (document.activeElement));
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      closeMenu();
-      switcher.focus();
-    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
-    }
+    items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
   });
-  /** @param {PointerEvent} event */
-  const outside = (event) => {
-    if (!bar.contains(/** @type {Node} */ (event.target))) closeMenu();
-  };
-  document.addEventListener('pointerdown', outside);
 
   const resize = new ResizeObserver(sizeAll);
   resize.observe(doc);
@@ -418,7 +399,6 @@ function createScratchpadWindow(body, ctx, daemon) {
       // The store is the page's, not this window's: it still saves anything typed here.
       off();
       resize.disconnect();
-      document.removeEventListener('pointerdown', outside);
       root.remove();
     },
   };

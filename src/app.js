@@ -254,7 +254,6 @@ export function createApp(root) {
   });
 
   palette = createPalette({
-    toggleButton: query(root, '#palette-toggle'),
     panel: query(root, '#palette'),
     widgets: WIDGETS,
     drag,

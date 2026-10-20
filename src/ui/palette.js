@@ -22,24 +22,30 @@ function createItem(def) {
 }
 
 /**
- * @param {{ toggleButton: HTMLElement, panel: HTMLElement, widgets: Readonly<Record<string, WidgetDef>>,
+ * `panel` is a popover with a `popovertarget` button: the platform opens and closes it, on
+ * Esc or a click outside too, and hands focus back.
+ * @param {{ panel: HTMLElement, widgets: Readonly<Record<string, WidgetDef>>,
  *   drag: DragController, onAdd: (type: string) => void }} options
  * @returns {Palette}
  */
-export function createPalette({ toggleButton, panel, widgets, drag, onAdd }) {
+export function createPalette({ panel, widgets, drag, onAdd }) {
   const list = /** @type {HTMLElement} */ (panel.querySelector('.palette-list'));
   list.replaceChildren(...Object.values(widgets).map(createItem));
 
   let suppressClick = false;
 
-  const isOpen = () => !panel.hidden;
-
-  /** @param {boolean} open */
-  function setOpen(open) {
-    panel.hidden = !open;
-    toggleButton.setAttribute('aria-expanded', String(open));
-    if (open) /** @type {HTMLElement | null} */ (list.querySelector('.palette-item'))?.focus();
-  }
+  panel.addEventListener('toggle', (event) => {
+    if (/** @type {ToggleEvent} */ (event).newState !== 'open') return;
+    /** @type {HTMLElement | null} */ (list.querySelector('.palette-item'))?.focus();
+  });
+  // Esc during a drag cancels the drag only: a cancelled keydown is no close request.
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (event.key === 'Escape' && drag.isDragging()) event.preventDefault();
+    },
+    true,
+  );
 
   list.addEventListener('pointerdown', (event) => {
     const button = /** @type {HTMLElement | null} */ (/** @type {Element} */ (event.target).closest('.palette-item'));
@@ -63,22 +69,6 @@ export function createPalette({ toggleButton, panel, widgets, drag, onAdd }) {
       return;
     }
     onAdd(/** @type {string} */ (button.dataset.type));
-  });
-
-  toggleButton.addEventListener('click', () => setOpen(!isOpen()));
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && isOpen() && !drag.isDragging()) {
-      setOpen(false);
-      toggleButton.focus();
-    }
-  });
-
-  document.addEventListener('pointerdown', (event) => {
-    if (!isOpen() || drag.isDragging()) return;
-    const target = /** @type {Node | null} */ (event.target);
-    if (panel.contains(target) || toggleButton.contains(target)) return;
-    setOpen(false);
   });
 
   return {

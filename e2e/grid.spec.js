@@ -216,6 +216,40 @@ test.describe('adding panes', () => {
     expect(Object.keys(r)).toHaveLength(4);
     expectTiling(r, g);
   });
+
+  test('the palette opens under its button and closes on Esc or a click outside, but not during a drag', async ({ page }) => {
+    const toggle = page.locator('#palette-toggle');
+    const palette = page.locator('#palette');
+    await toggle.click();
+    await expect(palette.locator('.palette-item').first()).toBeFocused();
+    const [button, panel] = [await toggle.boundingBox(), await palette.boundingBox()];
+    if (!button || !panel) throw new Error('palette not laid out');
+    expect(panel.y).toBeGreaterThanOrEqual(button.y + button.height);
+    expect(Math.round(panel.x + panel.width)).toBe(Math.round(button.x + button.width));
+
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await expect(toggle).toBeFocused();
+
+    await toggle.click();
+    await page.locator('#grid').click({ position: { x: 20, y: 20 } });
+    await expect(palette).toBeHidden();
+
+    // A drag out of the palette and an Esc that cancels it leave the palette open.
+    await toggle.click();
+    const item = await palette.locator('.palette-item').first().boundingBox();
+    const g = await gridBox(page);
+    if (!item) throw new Error('nothing to drag');
+    await page.mouse.move(item.x + item.width / 2, item.y + item.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.left + g.w / 2, g.top + g.h / 2, { steps: 8 });
+    await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await expect(page.locator('.widget')).toHaveCount(0);
+    await expect(palette).toBeVisible();
+    await expect(palette).not.toHaveClass(/is-dragged/);
+  });
 });
 
 test.describe('drag and drop', () => {

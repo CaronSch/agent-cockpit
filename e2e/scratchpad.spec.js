@@ -177,6 +177,33 @@ test('a dropped file that is not an image becomes a download link', async ({ pag
   expect(response.headers()['content-disposition']).toBe('attachment');
 });
 
+test('the pad switcher opens under its button, follows arrow keys, and closes on Esc or a click outside', async ({ page }) => {
+  await openWorkbench(page);
+  const window = await addScratchpad(page);
+  const switcher = window.locator('.pad-switch');
+  const menu = window.locator('.pad-menu');
+  await switcher.click();
+  const current = window.getByRole('menuitem', { name: /Untitled/ });
+  await expect(current).toBeFocused();
+  const [button, box] = [await switcher.boundingBox(), await menu.boundingBox()];
+  if (!button || !box) throw new Error('switcher not laid out');
+  expect(Math.round(box.x)).toBe(Math.round(button.x));
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+
+  await page.keyboard.press('ArrowDown');
+  await expect(window.getByRole('menuitem', { name: 'New scratchpad' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(current).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(switcher).toBeFocused();
+
+  await switcher.click();
+  await expect(current).toBeFocused();
+  await window.locator('.pad-text').first().click();
+  await expect(menu).toBeHidden();
+});
+
 test('deleting a pad removes its file, and the window moves on to a fresh pad', async ({ page }) => {
   await openWorkbench(page);
   const window = await addScratchpad(page);

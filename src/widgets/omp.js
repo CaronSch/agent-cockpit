@@ -372,8 +372,6 @@ function createPane(body, ctx, daemon) {
     const closeBtn = toolButton('Close', 'End this omp session');
     toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, contextEl, costEl, errorBadge, spacer, loginBtn, stopBtn, closeBtn);
 
-    const menu = el('div', 'omp-menu');
-    menu.hidden = true;
     const strip = el('div', 'omp-strip');
     const loginStrip = el('div', 'omp-login');
     const banner = el('div', 'omp-banner');
@@ -428,7 +426,7 @@ function createPane(body, ctx, daemon) {
         cancel: (id) => void daemon.rpc(session, { type: 'btw_cancel', recordId: id }).catch(() => {}),
       },
     });
-    node.append(toolbar, menu, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
+    node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
@@ -505,75 +503,61 @@ function createPane(body, ctx, daemon) {
     }
 
     // ── menus (model, thinking, login) ──
-    /** @type {HTMLElement | null} */
-    let menuAnchor = null;
-
-    /** @param {PointerEvent} e */
-    const onOutside = (e) => {
-      if (!(e.target instanceof Node) || menu.contains(e.target) || menuAnchor?.contains(e.target)) return;
-      closeMenu();
-    };
-
-    function closeMenu() {
-      menu.hidden = true;
-      menu.replaceChildren();
-      menuAnchor?.setAttribute('aria-expanded', 'false');
-      menuAnchor = null;
-      document.removeEventListener('pointerdown', onOutside, true);
-    }
-
     /**
-     * @param {HTMLElement} anchor @param {() => Promise<MenuEntry[]>} load @param {{ filter?: boolean, footer?: () => Node[] }} [options]
+     * Gives `anchor` a popover menu of what `load` lists, loaded afresh each time it opens.
+     * @param {HTMLButtonElement} anchor @param {() => Promise<MenuEntry[]>} load @param {{ filter?: boolean }} [options]
      */
-    function openMenu(anchor, load, options = {}) {
-      if (menuAnchor === anchor) return closeMenu();
-      closeMenu();
-      menuAnchor = anchor;
-      anchor.setAttribute('aria-expanded', 'true');
-      menu.style.top = `${anchor.offsetTop + anchor.offsetHeight + 4}px`;
-      menu.hidden = false;
-      // Keep the menu inside the pane: overflowing the right edge scrolls the whole window.
-      const room = (menu.offsetParent?.clientWidth ?? Infinity) - menu.offsetWidth - 4;
-      menu.style.left = `${Math.max(0, Math.min(anchor.offsetLeft, room))}px`;
-      menu.replaceChildren(el('p', 'omp-muted', 'Loading…'));
-      document.addEventListener('pointerdown', onOutside, true);
-      load()
-        .then((entries) => {
-          if (menuAnchor !== anchor) return;
-          const list = el('div', 'omp-menu-list');
-          const filter = el('input', 'omp-field');
-          const fill = () => {
-            const q = filter.value.trim().toLowerCase();
-            list.replaceChildren(
-              ...entries
-                .filter((e) => !q || e.label.toLowerCase().includes(q) || e.detail?.toLowerCase().includes(q))
-                .map((entry) => {
-                  const item = button(`omp-menu-item${entry.current ? ' is-current' : ''}`);
-                  item.append(el('span', '', entry.label));
-                  if (entry.detail) item.append(el('span', 'omp-muted', entry.detail));
-                  item.addEventListener('click', () => {
-                    closeMenu();
-                    entry.pick();
-                  });
-                  return item;
-                }),
-            );
-            if (!list.childElementCount) list.append(el('p', 'omp-muted', 'Nothing to choose.'));
-          };
-          menu.replaceChildren();
-          if (options.filter) {
-            filter.type = 'search';
-            filter.placeholder = 'Filter';
-            filter.addEventListener('input', fill);
-            menu.append(filter);
-            queueMicrotask(() => filter.focus());
-          }
-          fill();
-          menu.append(list, ...(options.footer?.() ?? []));
-        })
-        .catch((err) => {
-          if (menuAnchor === anchor) menu.replaceChildren(el('p', 'omp-error', errorMessage(err)));
-        });
+    function attachMenu(anchor, load, options = {}) {
+      const menu = el('div', 'omp-menu');
+      menu.popover = 'auto';
+      anchor.popoverTargetElement = menu;
+      const isOpen = () => menu.matches(':popover-open');
+      menu.addEventListener('toggle', (event) => {
+        if (/** @type {ToggleEvent} */ (event).newState !== 'open') return menu.replaceChildren();
+        menu.replaceChildren(el('p', 'omp-muted', 'Loading…'));
+        load()
+          .then((entries) => {
+            if (!isOpen()) return;
+            const list = el('div', 'omp-menu-list');
+            const filter = el('input', 'omp-field');
+            const fill = () => {
+              const q = filter.value.trim().toLowerCase();
+              list.replaceChildren(
+                ...entries
+                  .filter((e) => !q || e.label.toLowerCase().includes(q) || e.detail?.toLowerCase().includes(q))
+                  .map((entry) => {
+                    const item = button(`omp-menu-item${entry.current ? ' is-current' : ''}`);
+                    item.append(el('span', '', entry.label));
+                    if (entry.detail) item.append(el('span', 'omp-muted', entry.detail));
+                    item.addEventListener('click', () => {
+                      menu.hidePopover();
+                      entry.pick();
+                    });
+                    return item;
+                  }),
+              );
+              if (!list.childElementCount) list.append(el('p', 'omp-muted', 'Nothing to choose.'));
+            };
+            menu.replaceChildren();
+            if (options.filter) {
+              filter.type = 'search';
+              filter.placeholder = 'Filter';
+              filter.addEventListener('input', fill);
+              // Esc closes the menu at once, where a search field would first clear itself.
+              filter.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') menu.hidePopover();
+              });
+              menu.append(filter);
+              filter.focus();
+            }
+            fill();
+            menu.append(list);
+          })
+          .catch((err) => {
+            if (isOpen()) menu.replaceChildren(el('p', 'omp-error', errorMessage(err)));
+          });
+      });
+      anchor.after(menu);
     }
 
     /** @param {Record<string, unknown>} command @param {string} key */
@@ -585,48 +569,42 @@ function createPane(body, ctx, daemon) {
       return Array.isArray(list) ? list : [];
     }
 
-    modelBtn.addEventListener('click', () =>
-      openMenu(
-        modelBtn,
-        async () =>
-          (await listFrom({ type: 'get_available_models' }, 'models')).map((m) => ({
-            label: String(m?.name ?? m?.id ?? '?'),
-            detail: `${m?.provider}/${m?.id}`,
-            current: m?.provider === state.session.model?.provider && m?.id === state.session.model?.id,
-            pick: () => void rpc({ type: 'set_model', provider: m?.provider, modelId: m?.id }),
-          })),
-        { filter: true },
-      ),
-    );
-
-    thinkingBtn.addEventListener('click', () =>
-      openMenu(thinkingBtn, async () =>
-        (await listFrom({ type: 'get_available_thinking_levels' }, 'levels')).map((level) => ({
-          label: String(level),
-          current: level === state.session.thinkingLevel,
-          pick: () => void rpc({ type: 'set_thinking_level', level }),
+    attachMenu(
+      modelBtn,
+      async () =>
+        (await listFrom({ type: 'get_available_models' }, 'models')).map((m) => ({
+          label: String(m?.name ?? m?.id ?? '?'),
+          detail: `${m?.provider}/${m?.id}`,
+          current: m?.provider === state.session.model?.provider && m?.id === state.session.model?.id,
+          pick: () => void rpc({ type: 'set_model', provider: m?.provider, modelId: m?.id }),
         })),
-      ),
+      { filter: true },
     );
 
-    loginBtn.addEventListener('click', () =>
-      openMenu(
-        loginBtn,
-        async () =>
-          (await listFrom({ type: 'get_login_providers' }, 'providers'))
-            .filter((p) => p?.available !== false)
-            .map((p) => ({
-              label: String(p?.name ?? p?.id),
-              detail: p?.authenticated ? '✓ logged in' : undefined,
-              current: Boolean(p?.authenticated),
-              pick: () => {
-                addNote(state, 'muted', 'login', `Logging in to ${p?.name ?? p?.id}…`);
-                schedule();
-                void rpc({ type: 'login', providerId: p?.id });
-              },
-            })),
-        { filter: true },
-      ),
+    attachMenu(thinkingBtn, async () =>
+      (await listFrom({ type: 'get_available_thinking_levels' }, 'levels')).map((level) => ({
+        label: String(level),
+        current: level === state.session.thinkingLevel,
+        pick: () => void rpc({ type: 'set_thinking_level', level }),
+      })),
+    );
+
+    attachMenu(
+      loginBtn,
+      async () =>
+        (await listFrom({ type: 'get_login_providers' }, 'providers'))
+          .filter((p) => p?.available !== false)
+          .map((p) => ({
+            label: String(p?.name ?? p?.id),
+            detail: p?.authenticated ? '✓ logged in' : undefined,
+            current: Boolean(p?.authenticated),
+            pick: () => {
+              addNote(state, 'muted', 'login', `Logging in to ${p?.name ?? p?.id}…`);
+              schedule();
+              void rpc({ type: 'login', providerId: p?.id });
+            },
+          })),
+      { filter: true },
     );
 
     stopBtn.addEventListener('click', () => void stop());
@@ -713,9 +691,6 @@ function createPane(body, ctx, daemon) {
       }
     });
     sendBtn.addEventListener('click', () => void send());
-    node.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && menuAnchor) closeMenu();
-    });
 
     // ── drawing ──
     /** @type {Map<string, { rev: number, node: HTMLElement }>} */
@@ -924,7 +899,6 @@ function createPane(body, ctx, daemon) {
       update,
       destroy() {
         subscription();
-        closeMenu();
         resizes.disconnect();
         composer.destroy();
         selectionPopup.destroy();
