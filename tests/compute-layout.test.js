@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { leaf, branch } from '../src/layout/grid-model.js';
 import { computeLayout, minSize } from '../src/layout/compute-layout.js';

@@ -1,7 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Scripted stand-in for `omp --mode rpc-ui`, for daemon and browser tests: it speaks omp's
- * JSONL protocol with frame shapes recorded from omp 18.10.3, and answers prompts by keyword.
+ * JSONL protocol with frame shapes recorded from omp 18.12.3, and answers prompts by keyword.
  *
  * - default: streams "You said: <prompt>" (assistant message_start arrives pre-filled, as omp's does)
  * - contains "tool": a bash tool call with live output, then a reply
@@ -100,6 +100,7 @@ function askDialog() {
 
 /** @param {string | undefined} id @param {string} text */
 async function runPrompt(id, text) {
+  const firstMessage = messages.length;
   out({ type: 'agent_start' });
   out({ type: 'turn_start' });
   const user = { role: 'user', content: [{ type: 'text', text }], attribution: 'user', timestamp: Date.now() };
@@ -124,22 +125,25 @@ async function runPrompt(id, text) {
   } else {
     streamAssistant(`You said: **${text}**\n\n- one\n- two`);
   }
-  out({ type: 'turn_end' });
-  out({ type: 'agent_end', messages: [], isTerminal: true, yielded: true });
+  out({ type: 'turn_end', message: messages.at(-1), toolResults: [] });
+  out({ type: 'extension_ui_request', id: `ui-${Date.now()}-w`, method: 'setWidget', widgetKey: 'autoresearch' }); // omp clears it every turn
+  out({ type: 'agent_end', messages: messages.slice(firstMessage), isTerminal: true, yielded: true });
   out({ type: 'prompt_result', id, agentInvoked: true, status: 'completed', sessionSettled: true });
   out({ type: 'session_settled' });
 }
 
-/** @param {string | undefined} id @param {string} title */
+/** Like omp's builtin: output first, then the answer with `agentInvoked: false` and no `prompt_result`. @param {string | undefined} id @param {string} title */
 function rename(id, title) {
-  out({ type: 'prompt_result', id, agentInvoked: false, status: 'completed', sessionSettled: true });
   const said = messages.filter((m) => m.role === 'user').map((m) => String(m.content?.[0]?.text ?? ''));
   const topic = said.find((text) => !/^\s*hi\s*$/i.test(text));
   const name = title || (topic ? `About ${topic.split(/\s+/).slice(0, 4).join(' ')}` : null);
-  if (!name) return out({ type: 'command_output', text: 'Could not generate a session title. Use /rename <title> to set one.' });
-  sessionName = name;
-  out({ type: 'session_info_update', title: name, sessionId: 'fake-session' });
-  out({ type: 'command_output', text: `Session renamed to ${name}.` });
+  if (!name) out({ type: 'command_output', text: 'Could not generate a session title. Use /rename <title> to set one.' });
+  else {
+    sessionName = name;
+    out({ type: 'session_info_update', title: name, sessionId: 'fake-session' });
+    out({ type: 'command_output', text: `Session renamed to ${name}.` });
+  }
+  ok(id, 'prompt', { agentInvoked: false });
 }
 
 /** The side question being answered, as omp runs one at a time. @type {{ record: Record<string, any>, timer?: ReturnType<typeof setTimeout> } | null} */
@@ -151,11 +155,11 @@ function btw(id, question) {
     return out({ id, type: 'response', command: 'btw', success: false, error: 'A /btw question is still running; cancel it first' });
   }
   const now = Date.now();
-  const record = { id: `btw-${now}`, leafId: null, question, answer: '', status: 'running', createdAt: now, updatedAt: now };
+  const record = { question, answer: '', status: 'running', createdAt: now, updatedAt: now, id: `btw-${now}`, leafId: 'leaf-1' };
   const current = { record, timer: /** @type {ReturnType<typeof setTimeout> | undefined} */ (undefined) };
   sideQuestion = current;
-  ok(id, 'btw', { record });
   out({ type: 'btw_record', record });
+  ok(id, 'btw', { record });
   const quoted = /^> (.*)$/m.exec(question)?.[1] ?? 'that';
   const answer = `**${quoted}** is what the conversation said.`;
   current.timer = setTimeout(() => {
@@ -173,11 +177,20 @@ function finishSideQuestion(patch) {
 }
 
 out({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2], maxFrameBytes: 1048576, maxReassembledFrameBytes: 67108864 });
+out({ type: 'extension_ui_request', id: 'ui-start-w', method: 'setWidget', widgetKey: 'autoresearch' });
+out({ type: 'advisor_cost_changed' });
 out({
   type: 'available_commands_update',
   commands: [
-    { name: 'model', source: 'builtin', description: 'Select model' },
-    { name: 'compact', source: 'builtin', description: 'Compact the context', input: { hint: '[instructions]' } },
+    { name: 'model', aliases: ['models'], description: 'Show current model selection', source: 'builtin' },
+    {
+      name: 'compact',
+      description: 'Compact the conversation',
+      input: { hint: '[soft|remote|snapcompact] [focus]' },
+      subcommands: [{ name: 'soft', description: 'Summarize locally with the active model (skip server compaction)', usage: '[focus]' }],
+      source: 'builtin',
+    },
+    { name: 'rename', description: 'Rename the current session (omit title to generate)', input: { hint: '[title]' }, source: 'builtin' },
   ],
 });
 
@@ -203,14 +216,20 @@ lines.on('line', (line) => {
         thinkingLevel,
         isStreaming: false,
         isCompacting: false,
+        steeringMode: 'one-at-a-time',
+        followUpMode: 'one-at-a-time',
+        interruptMode: 'immediate',
         sessionFile: resumed ?? '/tmp/fake-omp-session.jsonl',
         sessionId: 'fake-session',
-        messageCount: messages.length,
-        queuedMessageCount: 0,
-        isSettled: true,
-        queuedMessages: { steering: [], followUp: [] },
-        contextUsage: { tokens: 120, contextWindow: 1000, percent: 12 },
         ...(sessionName ? { sessionName } : {}),
+        autoCompactionEnabled: true,
+        queuedMessageCount: 0,
+        hasPendingAsyncWork: false,
+        isSettled: true,
+        queuedMessages: { steering: [], followUp: [], liveSteered: 0 },
+        messageCount: messages.length,
+        contextUsage: { tokens: 120, contextWindow: 1000, percent: 12 },
+        goal: null,
       });
     case 'get_messages':
       return ok(id, type, { messages });
@@ -218,19 +237,19 @@ lines.on('line', (line) => {
       return ok(id, type, { models: [model, { provider: 'fake', id: 'fake-large', name: 'Fake Large' }] });
     case 'set_model':
       model = { provider: cmd.provider, id: cmd.modelId, name: cmd.modelId };
-      ok(id, type, model);
-      return out({ type: 'model_changed', model });
+      out({ type: 'model_changed' }); // no payload, emitted while the model is set
+      return ok(id, type, model);
     case 'get_available_thinking_levels':
-      return ok(id, type, { levels: ['off', 'low', 'high'] });
+      return ok(id, type, { levels: ['off', 'low', 'medium', 'high', 'xhigh', 'max'] });
     case 'set_thinking_level':
       thinkingLevel = cmd.level;
-      ok(id, type);
-      return out({ type: 'thinking_level_changed', level: cmd.level });
+      out({ type: 'thinking_level_changed', thinkingLevel });
+      return ok(id, type);
     case 'get_login_providers':
       return ok(id, type, { providers: [{ id: 'fake', name: 'Fake Provider', available: true, authenticated: false }] });
     case 'bash': {
       // Like omp, answer only when the command finishes; "sleep" makes it take a while.
-      const result = { output: 'hi\n', exitCode: 0, cancelled: false, truncated: false, totalLines: 1, totalBytes: 3, outputLines: 1, outputBytes: 3 };
+      const result = { exitCode: 0, cancelled: false, workingDir: process.cwd(), output: 'hi\n', truncated: false, totalLines: 2, totalBytes: 3, outputLines: 2, outputBytes: 3 };
       return void setTimeout(() => ok(id, type, result), /sleep/.test(cmd.command) ? 600 : 0);
     }
     case 'abort':
@@ -243,10 +262,11 @@ lines.on('line', (line) => {
       return ok(id, type, { cancelled });
     }
     case 'abort_and_restore_queue':
+      out({ type: 'queue_update', steering: [], followUp: [], liveSteered: 0 });
       return ok(id, type, { steering: [], followUp: [] });
     case 'prompt':
-      ok(id, type);
       if (/^\/rename(\s|$)/.test(cmd.message)) return rename(id, cmd.message.slice('/rename'.length).trim());
+      ok(id, type);
       return void runPrompt(id, cmd.message);
     default:
       return out({ id, type: 'response', command: type, success: false, error: `Unknown command: ${type}` });

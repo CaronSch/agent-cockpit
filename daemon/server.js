@@ -2,25 +2,22 @@
  * HTTP face of the daemon: the workbench's static files, the JSON API and the event stream
  * (routes in `wire.js`), all behind the loopback guard.
  */
-import { createServer } from 'node:http';
-import { createReadStream } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { SessionNotRunning } from './omp-session.js';
 import { PAD_ID } from '../src/scratchpad/blocks.js';
 import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-files.js';
-/** @import { IncomingMessage, ServerResponse } from 'node:http' */
-/** @import { AddressInfo } from 'node:net' */
+/** @import { BunRequest, Server } from 'bun' */
 /** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
 /** @import { Hub } from './hub.js' */
 /** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
 /** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
 /** @typedef {ReturnType<typeof import('./attachments.js').createAttachments>} Attachments */
+/** @typedef {(req: BunRequest, server: Server<undefined>) => Response | Promise<Response>} Handler */
 
-const MAX_BODY_BYTES = 8 * 1024 * 1024;
-const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+/** Bun refuses (413) any request body larger than this; uploads are the largest. */
+const MAX_BODY_BYTES = 25 * 1024 * 1024;
 const HEARTBEAT_MS = 15_000;
 const COOKIE_MAX_AGE_S = 365 * 24 * 60 * 60;
 const BASE_HEADERS = {
@@ -48,41 +45,20 @@ class HttpError extends Error {
   }
 }
 
-/** @param {ServerResponse} res @param {number} status @param {unknown} body */
-function sendJson(res, status, body) {
-  res.writeHead(status, { ...BASE_HEADERS, 'content-type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(body));
-}
+/** @param {unknown} body @param {number} [status] */
+const json = (body, status = 200) => Response.json(body, { status, headers: BASE_HEADERS });
+/** @param {string} text @param {number} status */
+const text = (text, status) => new Response(text, { status, headers: { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8' } });
+const noContent = () => new Response(null, { status: 204, headers: BASE_HEADERS });
 
-/** @param {ServerResponse} res @param {number} status @param {string} text */
-function sendText(res, status, text) {
-  res.writeHead(status, { ...BASE_HEADERS, 'content-type': 'text/plain; charset=utf-8' });
-  res.end(text);
-}
-
-/** @param {IncomingMessage} req @param {number} limit @returns {Promise<Buffer>} */
-async function readBody(req, limit) {
-  if (Number(req.headers['content-length'] ?? 0) > limit) throw new HttpError(413, 'request body too large');
-  /** @type {Buffer[]} */
-  const parts = [];
-  let size = 0;
-  for await (const part of req) {
-    size += part.length;
-    if (size > limit) throw new HttpError(413, 'request body too large');
-    parts.push(part);
-  }
-  return Buffer.concat(parts);
-}
-
-/** @param {IncomingMessage} req @returns {Promise<any>} parsed untrusted JSON */
-async function readJson(req) {
-  const body = await readBody(req, MAX_BODY_BYTES);
-  try {
-    return JSON.parse(body.toString('utf8') || 'null');
-  } catch {
+/** @param {Request} req @returns {Promise<any>} parsed untrusted JSON */
+const readJson = (req) =>
+  req.json().catch(() => {
     throw new HttpError(400, 'request body is not JSON');
-  }
-}
+  });
+
+/** @param {Request} req */
+const fileName = (req) => decodeURIComponent(req.headers.get('x-file-name') ?? 'file');
 
 /** @param {string} input */
 const expandHome = (input) => (input === '~' || input.startsWith('~/') ? homedir() + input.slice(1) : input);
@@ -91,7 +67,7 @@ const expandHome = (input) => (input === '~' || input.startsWith('~/') ? homedir
 async function existingPath(input, kind, field) {
   if (typeof input !== 'string' || !input.trim()) throw new HttpError(400, `${field} is required`);
   const path = resolve(expandHome(input.trim()));
-  const info = await stat(path).catch(() => null);
+  const info = await Bun.file(path).stat().catch(() => null);
   const ok = kind === 'directory' ? info?.isDirectory() : info?.isFile();
   if (!ok) throw new HttpError(400, `${field} is not an existing ${kind}: ${path}`);
   return path;
@@ -106,14 +82,20 @@ function asCommand(body) {
 }
 
 /**
- * @param {string | string[] | undefined} header @param {string} bootId
+ * @param {string | null} header @param {string} bootId
  * @returns {number} the last sequence number this client saw in the current boot, else 0
  */
 function lastSeenSeq(header, bootId) {
-  const value = Array.isArray(header) ? header[0] : header;
-  const [boot, seq] = (value ?? '').split(':');
+  const [boot, seq] = (header ?? '').split(':');
   const n = Number(seq);
   return boot === bootId && Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+/** @param {unknown} err */
+function errorResponse(err) {
+  const status = err instanceof HttpError ? err.status : err instanceof SessionNotRunning ? 409 : 500;
+  if (status === 500) console.error('[daemon]', err);
+  return json({ error: err instanceof Error ? err.message : String(err) }, status);
 }
 
 /**
@@ -124,194 +106,195 @@ function lastSeenSeq(header, bootId) {
 export const RPC_HOLD_MS = 2000;
 
 /**
- * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, token: string, root: string, config: DaemonConfig, rpcHoldMs?: number }} options
+ * Starts serving on `127.0.0.1:port` (0 picks a free port); throws if the port is taken.
+ * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, token: string, root: string, config: DaemonConfig, port: number, rpcHoldMs?: number }} options
  */
-export function createDaemonServer({ hub, history, scratchpads, attachments, token, root, config, rpcHoldMs = RPC_HOLD_MS }) {
+export function createDaemonServer({ hub, history, scratchpads, attachments, token, root, config, port, rpcHoldMs = RPC_HOLD_MS }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, INDEX_FILE);
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
   const uiVersion = createUiVersion(rootDir);
 
-  /** @param {IncomingMessage} req @param {ServerResponse} res */
-  async function stream(req, res) {
-    const ui = await uiVersion.current();
-    if (req.destroyed) return; // gone while the version was worked out: nothing to clean up yet
-    res.writeHead(200, { ...BASE_HEADERS, 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive' });
-    res.write('retry: 1000\n\n');
-    res.write(`data: ${JSON.stringify({ kind: 'hello', bootId: hub.bootId, sessions: hub.list(), ui })}\n\n`);
-    const send = (/** @type {SessionEvent} */ event) =>
-      res.write(`id: ${hub.bootId}:${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
-    for (const event of hub.since(lastSeenSeq(req.headers['last-event-id'], hub.bootId))) send(event);
-    const unsubscribe = hub.subscribe(send);
-    // No id: scratchpad events are not part of the replayable log (see wire.js).
-    const offScratchpad = scratchpads.subscribe((/** @type {string} */ id, /** @type {Scratchpad} */ pad) =>
-      res.write(`data: ${JSON.stringify({ kind: 'scratchpad', id, ...pad })}\n\n`),
-    );
-    const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS);
-    req.on('close', () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-      offScratchpad();
-    });
-  }
-
   /**
-   * The `/api/scratchpads` routes (see wire.js).
-   * @param {IncomingMessage} req @param {ServerResponse} res @param {string} method @param {string[]} path
+   * An API route: the guard first, then the handler for the request's method.
+   * @param {Partial<Record<string, Handler>> | Handler} methods @returns {Handler}
    */
-  async function scratchpadRoute(req, res, method, [rawId, sub, rawName]) {
-    if (rawId === undefined) {
-      if (method === 'GET') return sendJson(res, 200, { pads: await scratchpads.list() });
-      throw new HttpError(405, 'method not allowed');
+  const api = (methods) => async (req, srv) => {
+    const verdict = checkApiRequest({ method: req.method, headers: req.headers, port: srv.port ?? port, token });
+    if (!verdict.ok) return json({ error: verdict.error }, verdict.status);
+    const handler = typeof methods === 'function' ? methods : methods[req.method];
+    if (!handler) return json({ error: 'method not allowed' }, 405);
+    try {
+      return await handler(req, srv);
+    } catch (err) {
+      return errorResponse(err);
     }
-    const id = decodeURIComponent(rawId);
-    if (!PAD_ID.test(id)) throw new HttpError(404, 'no such scratchpad');
-    if (sub === undefined) {
-      if (method === 'GET') return sendJson(res, 200, await scratchpads.read(id));
-      if (method === 'DELETE') {
-        await scratchpads.remove(id);
-        return void res.writeHead(204, BASE_HEADERS).end();
-      }
-      if (method !== 'PUT') throw new HttpError(405, 'method not allowed');
-      const body = await readJson(req);
-      if (typeof body?.text !== 'string' || typeof body?.base !== 'string') {
-        throw new HttpError(400, 'expected { text: string, base: string }');
-      }
-      const result = await scratchpads.write(id, body.text, body.base);
-      if (!result.ok) return sendJson(res, 409, { error: 'the scratchpad changed since this edit began', current: result.current });
-      return sendJson(res, 200, { rev: result.rev });
-    }
-    if (sub !== 'assets') throw new HttpError(404, 'no such route');
-    if (rawName === undefined) {
-      if (method !== 'POST') throw new HttpError(405, 'method not allowed');
-      const name = decodeURIComponent(String(req.headers['x-file-name'] ?? 'file'));
-      const bytes = await readBody(req, MAX_UPLOAD_BYTES);
-      return sendJson(res, 201, { path: await scratchpads.saveAsset(id, name, bytes) });
-    }
-    if (method !== 'GET') throw new HttpError(405, 'method not allowed');
-    const asset = scratchpads.asset(id, decodeURIComponent(rawName));
-    const info = asset && (await stat(asset.path).catch(() => null));
-    if (!asset || !info?.isFile()) throw new HttpError(404, 'no such file');
-    res.writeHead(200, {
-      ...ASSET_HEADERS,
-      'content-type': asset.type,
-      'content-length': info.size,
-      ...(asset.inline ? {} : { 'content-disposition': 'attachment' }),
+  };
+
+  /** @type {Handler} */
+  async function stream(req, srv) {
+    srv.timeout(req, 0); // an event stream is idle between events; Bun would close it after 10 s
+    const ui = await uiVersion.current();
+    /** @type {() => void} */
+    let stop = () => {};
+    const body = new ReadableStream({
+      start(controller) {
+        const write = (/** @type {string} */ chunk) => controller.enqueue(chunk);
+        write('retry: 1000\n\n');
+        write(`data: ${JSON.stringify({ kind: 'hello', bootId: hub.bootId, sessions: hub.list(), ui })}\n\n`);
+        const send = (/** @type {SessionEvent} */ event) => write(`id: ${hub.bootId}:${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
+        for (const event of hub.since(lastSeenSeq(req.headers.get('last-event-id'), hub.bootId))) send(event);
+        const unsubscribe = hub.subscribe(send);
+        // No id: scratchpad events are not part of the replayable log (see wire.js).
+        const offScratchpad = scratchpads.subscribe((/** @type {string} */ id, /** @type {Scratchpad} */ pad) =>
+          write(`data: ${JSON.stringify({ kind: 'scratchpad', id, ...pad })}\n\n`),
+        );
+        const heartbeat = setInterval(() => write(': ping\n\n'), HEARTBEAT_MS);
+        stop = () => {
+          clearInterval(heartbeat);
+          unsubscribe();
+          offScratchpad();
+        };
+      },
+      cancel: () => stop(),
     });
-    createReadStream(asset.path).pipe(res);
+    return new Response(body, { headers: { ...BASE_HEADERS, 'content-type': 'text/event-stream; charset=utf-8' } });
   }
 
-  /** @param {IncomingMessage} req @param {ServerResponse} res @param {URL} url */
-  async function api(req, res, url) {
-    const { pathname } = url;
-    const method = req.method ?? 'GET';
-    if (pathname === '/api/stream' && method === 'GET') return stream(req, res);
-    if (pathname === '/api/config' && method === 'GET') return sendJson(res, 200, config);
-    if (pathname === '/api/ui' && method === 'GET') return sendJson(res, 200, { version: await uiVersion.current() });
-    if (pathname === '/api/history' && method === 'GET') {
-      return sendJson(res, 200, { sessions: await history.list(url.searchParams.get('q') ?? '') });
-    }
-    const pads = /^\/api\/scratchpads(?:\/([^/]+)(?:\/([^/]+)(?:\/([^/]+))?)?)?$/.exec(pathname);
-    if (pads) return scratchpadRoute(req, res, method, pads.slice(1));
-    if (pathname === '/api/attachments') {
-      if (method !== 'POST') throw new HttpError(405, 'method not allowed');
-      const name = decodeURIComponent(String(req.headers['x-file-name'] ?? 'file'));
-      return sendJson(res, 201, { path: await attachments.save(name, await readBody(req, MAX_UPLOAD_BYTES)) });
-    }
-    if (pathname === '/api/sessions' && method === 'GET') return sendJson(res, 200, { sessions: hub.list() });
-    if (pathname === '/api/sessions' && method === 'POST') {
-      const body = await readJson(req);
-      const cwd = await existingPath(body?.cwd, 'directory', 'cwd');
-      const resume = body?.resume == null ? null : await existingPath(body.resume, 'file', 'resume');
-      return sendJson(res, 201, { session: hub.create({ cwd, resume }) });
-    }
-
-    const match = /^\/api\/sessions\/([^/]+)(?:\/(rpc|ui))?$/.exec(pathname);
-    if (!match) throw new HttpError(404, 'no such route');
-    const session = hub.get(decodeURIComponent(match[1]));
+  /** @param {BunRequest} req */
+  function sessionOf(req) {
+    const session = hub.get(req.params.id);
     if (!session) throw new HttpError(404, 'no such session');
-    const action = match[2] ?? null;
-
-    if (action === null && method === 'DELETE') {
-      await session.close();
-      res.writeHead(204, BASE_HEADERS).end();
-      return;
-    }
-    if (action === 'rpc' && method === 'POST') {
-      const command = asCommand(await readJson(req));
-      if (command.type === 'extension_ui_response') throw new HttpError(400, 'send dialog answers to /ui');
-      const { id, response } = session.command(command);
-      response.catch(() => {}); // after the hold, the outcome travels on the stream
-      /** @type {ReturnType<typeof setTimeout> | undefined} */
-      let timer;
-      const held = new Promise((resolve) => (timer = setTimeout(() => resolve(null), rpcHoldMs)));
-      const answer = await Promise.race([response, held]).finally(() => clearTimeout(timer));
-      return answer ? sendJson(res, 200, answer) : sendJson(res, 202, { pending: true, id });
-    }
-    if (action === 'ui' && method === 'POST') {
-      const response = asCommand({ type: 'extension_ui_response', ...(await readJson(req)) });
-      if (typeof response.id !== 'string') throw new HttpError(400, 'a dialog answer needs the request `id`');
-      session.respondUi(response);
-      res.writeHead(204, BASE_HEADERS).end();
-      return;
-    }
-    throw new HttpError(405, 'method not allowed');
+    return session;
   }
 
-  /** @param {ServerResponse} res @param {URL} url */
-  function bootstrap(res, url) {
+  /** @param {BunRequest} req */
+  function padOf(req) {
+    if (!PAD_ID.test(req.params.id)) throw new HttpError(404, 'no such scratchpad');
+    return req.params.id;
+  }
+
+  /** @param {URL} url */
+  function bootstrap(url) {
     if (!tokensMatch(url.searchParams.get('token') ?? undefined, token)) {
-      return sendText(res, 403, 'This link does not match the running daemon. Use the URL it printed.');
+      return text('This link does not match the running daemon. Use the URL it printed.', 403);
     }
     url.searchParams.delete('token');
-    res.writeHead(302, {
-      ...BASE_HEADERS,
-      'set-cookie': `${TOKEN_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${COOKIE_MAX_AGE_S}`,
-      location: url.pathname + url.search,
+    return new Response(null, {
+      status: 302,
+      headers: {
+        ...BASE_HEADERS,
+        'set-cookie': `${TOKEN_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${COOKIE_MAX_AGE_S}`,
+        location: url.pathname + url.search,
+      },
     });
-    res.end();
   }
 
-  /** @param {ServerResponse} res @param {string} pathname */
-  async function serveStatic(res, pathname) {
+  /** @param {string} pathname */
+  async function serveStatic(pathname) {
     let decoded;
     try {
       decoded = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
     } catch {
-      return sendText(res, 400, 'bad path');
+      return text('bad path', 400);
     }
     // Check the allowlist on the resolved file, never the raw path: `/src/..%2f…` passes a
     // prefix test and decodes to a file outside `src/`.
-    const file = resolve(rootDir, `.${decoded}`);
-    const allowed = file === indexFile || staticDirs.some((dir) => file.startsWith(dir + sep));
-    const type = CONTENT_TYPES[extname(file)];
-    if (!allowed || !type) return sendText(res, 404, 'not found');
-    const body = await readFile(file).catch(() => null);
-    if (!body) return sendText(res, 404, 'not found');
-    res.writeHead(200, { ...BASE_HEADERS, 'content-type': type });
-    res.end(body);
+    const path = resolve(rootDir, `.${decoded}`);
+    const allowed = path === indexFile || staticDirs.some((dir) => path.startsWith(dir + sep));
+    const type = CONTENT_TYPES[extname(path)];
+    const file = Bun.file(path);
+    if (!allowed || !type || !(await file.exists())) return text('not found', 404);
+    return new Response(file, { headers: { ...BASE_HEADERS, 'content-type': type } });
   }
 
-  const server = createServer((req, res) => {
-    const port = /** @type {AddressInfo} */ (server.address()).port;
-    const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
-    const handled = (async () => {
-      if (!isAllowedHost(req.headers.host, port)) return sendText(res, 403, 'unexpected Host header');
-      if (url.pathname.startsWith('/api/')) {
-        const verdict = checkApiRequest({ method: req.method ?? 'GET', headers: req.headers, port, token });
-        if (!verdict.ok) return sendJson(res, verdict.status, { error: verdict.error });
-        return api(req, res, url);
-      }
-      if (req.method !== 'GET' && req.method !== 'HEAD') return sendText(res, 405, 'method not allowed');
-      if (url.searchParams.has('token')) return bootstrap(res, url);
-      return serveStatic(res, url.pathname);
-    })();
-    handled.catch((err) => {
-      const status = err instanceof HttpError ? err.status : err instanceof SessionNotRunning ? 409 : 500;
-      if (status === 500) console.error('[daemon]', err);
-      if (!res.headersSent) sendJson(res, status, { error: err.message });
-      else res.end();
-    });
+  return Bun.serve({
+    hostname: '127.0.0.1',
+    port,
+    maxRequestBodySize: MAX_BODY_BYTES,
+    routes: {
+      '/api/stream': api({ GET: stream }),
+      '/api/config': api({ GET: () => json(config) }),
+      '/api/ui': api({ GET: async () => json({ version: await uiVersion.current() }) }),
+      '/api/history': api({ GET: async (req) => json({ sessions: await history.list(new URL(req.url).searchParams.get('q') ?? '') }) }),
+      '/api/scratchpads': api({ GET: async () => json({ pads: await scratchpads.list() }) }),
+      '/api/scratchpads/:id': api({
+        GET: async (req) => json(await scratchpads.read(padOf(req))),
+        DELETE: async (req) => {
+          await scratchpads.remove(padOf(req));
+          return noContent();
+        },
+        PUT: async (req) => {
+          const id = padOf(req);
+          const body = await readJson(req);
+          if (typeof body?.text !== 'string' || typeof body?.base !== 'string') {
+            throw new HttpError(400, 'expected { text: string, base: string }');
+          }
+          const result = await scratchpads.write(id, body.text, body.base);
+          if (!result.ok) return json({ error: 'the scratchpad changed since this edit began', current: result.current }, 409);
+          return json({ rev: result.rev });
+        },
+      }),
+      '/api/scratchpads/:id/assets': api({
+        POST: async (req) => json({ path: await scratchpads.saveAsset(padOf(req), fileName(req), await req.bytes()) }, 201),
+      }),
+      '/api/scratchpads/:id/assets/:name': api({
+        GET: async (req) => {
+          const asset = scratchpads.asset(padOf(req), req.params.name);
+          const file = asset && Bun.file(asset.path);
+          if (!asset || !file || !(await file.exists())) throw new HttpError(404, 'no such file');
+          const headers = new Headers({ ...ASSET_HEADERS, 'content-type': asset.type });
+          if (!asset.inline) headers.set('content-disposition', 'attachment');
+          return new Response(file, { headers });
+        },
+      }),
+      '/api/attachments': api({
+        POST: async (req) => json({ path: await attachments.save(fileName(req), await req.bytes()) }, 201),
+      }),
+      '/api/sessions': api({
+        GET: () => json({ sessions: hub.list() }),
+        POST: async (req) => {
+          const body = await readJson(req);
+          const cwd = await existingPath(body?.cwd, 'directory', 'cwd');
+          const resume = body?.resume == null ? null : await existingPath(body.resume, 'file', 'resume');
+          return json({ session: hub.create({ cwd, resume }) }, 201);
+        },
+      }),
+      '/api/sessions/:id': api({
+        DELETE: async (req) => {
+          await sessionOf(req).close();
+          return noContent();
+        },
+      }),
+      '/api/sessions/:id/rpc': api({
+        POST: async (req) => {
+          const session = sessionOf(req);
+          const command = asCommand(await readJson(req));
+          if (command.type === 'extension_ui_response') throw new HttpError(400, 'send dialog answers to /ui');
+          const { id, response } = session.command(command);
+          response.catch(() => {}); // after the hold, the outcome travels on the stream
+          const answer = await Promise.race([response, Bun.sleep(rpcHoldMs).then(() => null)]);
+          return answer ? json(answer) : json({ pending: true, id }, 202);
+        },
+      }),
+      '/api/sessions/:id/ui': api({
+        POST: async (req) => {
+          const session = sessionOf(req);
+          const response = asCommand({ type: 'extension_ui_response', ...(await readJson(req)) });
+          if (typeof response.id !== 'string') throw new HttpError(400, 'a dialog answer needs the request `id`');
+          session.respondUi(response);
+          return noContent();
+        },
+      }),
+      '/api/*': api(() => json({ error: 'no such route' }, 404)),
+    },
+    async fetch(req, srv) {
+      if (!isAllowedHost(req.headers.get('host'), srv.port ?? port)) return text('unexpected Host header', 403);
+      if (req.method !== 'GET' && req.method !== 'HEAD') return text('method not allowed', 405);
+      const url = new URL(req.url);
+      if (url.searchParams.has('token')) return bootstrap(url);
+      return serveStatic(url.pathname);
+    },
+    error: errorResponse,
   });
-  return server;
 }

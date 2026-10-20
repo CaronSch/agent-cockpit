@@ -38,14 +38,24 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   the interrupted turn and its subagents; supervise outside the daemon only if
   that is not enough.
 
-## When omp is upgraded past 18.10.3
+## When omp is upgraded past 18.12.3
+
+omp is installed on its own, not pinned by the workbench; the threshold is
+crossed when the omp the daemon runs (on PATH, or `--omp`/`COCKPIT_OMP`)
+is newer. The daemon prints its version at start.
 
 - **The fake omp drifts from the real one.** `tests/fixtures/fake-omp.js`
-  copies frame shapes recorded from omp 18.10.3; tests stay green while a newer
-  omp sends something else. *Threshold detail:* `omp --version` (also printed
-  at daemon start) is newer than 18.10.3. *Response:* re-record a session with
-  the real omp, diff its frame and message types against the fake, update the
-  fake and this version number.
+  copies frame shapes recorded from omp 18.12.3: startup, setup commands,
+  `get_state`, models, thinking levels, login providers, `bash`, aborts,
+  builtin `/rename`, the start of a `btw`, failed prompts and `--resume`. The
+  frames of a turn a model actually answers (a pre-filled assistant
+  `message_start`, deltas, tool calls, `ask` dialogs, `btw_delta`, a generated
+  title) were checked against 18.12.3's source only, because no model call
+  succeeded during the recording; their recorded shapes are still 18.10.3's.
+  Tests stay green while a newer omp sends something else. *Response:*
+  re-record a session with the real omp (with a working model, so those turn
+  frames are recorded too), diff its frame and message types against the fake,
+  update the fake and this version number.
 
 - **The Sessions window reads omp's private journal format.** `daemon/history.js`
   parses `~/.omp/agent/sessions/<project>/*.jsonl` directly (the `title` and
@@ -65,7 +75,8 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   sessions that stay untitled, files that reach the model only as a bare path, or
   side answers that never arrive or turn up in the chat. *Response:* re-read omp's
   `slash-commands/builtin-lifecycle.ts` (`rename`), `modes/rpc/rpc-session-settle.ts`,
-  `utils/file-mentions.ts` and `modes/rpc/rpc-btw.ts`, then update
+  `utils/file-mentions.ts` and `modes/rpc/rpc-btw.ts` (in `packages/coding-agent/src/` of
+  github.com/can1357/oh-my-pi at the installed version's tag), then update
   `daemon/omp-session.js`, `src/omp/message.js`, `src/omp/transcript.js` and the fake.
 
 ## When the session history reaches thousands of journals

@@ -7,7 +7,7 @@
  * asks the way a user would, with `/rename`: omp's title model summarises the conversation
  * and the title lands in the journal, where the Sessions window reads it.
  */
-import { spawn } from 'node:child_process';
+import { dirname } from 'node:path';
 import { createFrameDecoder } from './frame-decoder.js';
 /** @import { RpcResponse, SessionEvent, SessionMeta } from './wire.js' */
 
@@ -24,6 +24,9 @@ export const SETUP_COMMANDS = Object.freeze([
   { type: 'set_ask_dialog', enabled: true },
   { type: 'get_state' },
 ]);
+
+/** The test fake (and omp installed through bun) start with `#!/usr/bin/env bun`: let them find the bun running the daemon. */
+export const OMP_ENV = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ''}` };
 
 const CLOSE_GRACE_MS = 5000;
 const MAX_GARBLED_CHARS = 64 * 1024;
@@ -72,9 +75,20 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
   };
 
   emit({ kind: 'session', meta });
-  const args = ['--mode', 'rpc-ui', ...(resume ? ['--resume', resume] : [])];
-  const child = spawn(ompPath, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
-  if (child.pid) update({ pid: child.pid });
+  /** @type {import('bun').Subprocess<'pipe', 'pipe', 'pipe'> | null} */
+  let child = null;
+  try {
+    child = Bun.spawn([ompPath, '--mode', 'rpc-ui', ...(resume ? ['--resume', resume] : [])], {
+      cwd,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: OMP_ENV,
+    });
+    update({ pid: child.pid });
+  } catch (err) {
+    finish(null, `could not run ${ompPath}: ${err instanceof Error ? err.message : err}`);
+  }
 
   /** @param {number | null} exitCode @param {string | null} error */
   function finish(exitCode, error) {
@@ -91,10 +105,6 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
     });
     markClosed();
   }
-
-  child.on('error', (err) => finish(null, `could not run ${ompPath}: ${err.message}`));
-  child.on('close', (code, signal) => finish(code ?? null, signal && code === null && meta.status === 'starting' ? `omp was killed (${signal})` : null));
-  child.stdin.on('error', () => {}); // EPIPE once omp is gone; `close` reports the exit
 
   /** @param {import('./frame-decoder.js').Decoded} decoded */
   function handle(decoded) {
@@ -120,22 +130,33 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
     }
   }
 
-  child.stdout.on('data', (data) => decoder.push(data).forEach(handle));
-  child.stdout.on('end', () => decoder.end().forEach(handle));
-
-  let stderrRest = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (/** @type {string} */ text) => {
-    const lines = (stderrRest + text).split('\n');
-    stderrRest = /** @type {string} */ (lines.pop());
-    for (const line of lines) emit({ kind: 'stderr', line: line.replace(/\r$/, '') });
-  });
-  child.stderr.on('end', () => stderrRest && emit({ kind: 'stderr', line: stderrRest }));
+  /**
+   * Reads omp's stdout as frames and its stderr as lines; reports the exit once both ended.
+   * @param {import('bun').Subprocess<'pipe', 'pipe', 'pipe'>} proc
+   */
+  async function pump(proc) {
+    const stdout = (async () => {
+      for await (const data of proc.stdout) decoder.push(data).forEach(handle);
+      decoder.end().forEach(handle);
+    })();
+    let rest = '';
+    for await (const text of proc.stderr.pipeThrough(new TextDecoderStream())) {
+      const lines = (rest + text).split('\n');
+      rest = /** @type {string} */ (lines.pop());
+      for (const line of lines) emit({ kind: 'stderr', line: line.replace(/\r$/, '') });
+    }
+    if (rest) emit({ kind: 'stderr', line: rest });
+    await Promise.all([proc.exited, stdout]);
+    const killed = proc.signalCode && proc.exitCode === null && meta.status === 'starting';
+    finish(proc.exitCode, killed ? `omp was killed (${proc.signalCode})` : null);
+  }
+  if (child) void pump(child);
 
   /** @param {Record<string, unknown>} frame */
   function writeFrame(frame) {
     emit({ kind: 'sent', command: frame });
-    child.stdin.write(`${JSON.stringify(frame)}\n`);
+    child?.stdin.write(`${JSON.stringify(frame)}\n`);
+    child?.stdin.flush();
   }
 
   /** @param {Record<string, unknown>} command @returns {{ id: string, response: Promise<RpcResponse> }} */
@@ -173,10 +194,11 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
       writeFrame({ ...response, type: 'extension_ui_response' });
     },
     async close() {
-      if (finished) return;
-      child.stdin.end(); // omp drains accepted work and exits on EOF
-      const term = setTimeout(() => child.kill('SIGTERM'), CLOSE_GRACE_MS);
-      const kill = setTimeout(() => child.kill('SIGKILL'), CLOSE_GRACE_MS * 2);
+      if (finished || !child) return;
+      const proc = child;
+      proc.stdin.end(); // omp drains accepted work and exits on EOF
+      const term = setTimeout(() => proc.kill('SIGTERM'), CLOSE_GRACE_MS);
+      const kill = setTimeout(() => proc.kill('SIGKILL'), CLOSE_GRACE_MS * 2);
       await closed;
       clearTimeout(term);
       clearTimeout(kill);

@@ -5,9 +5,7 @@
  * The daemon reads these files from disk on every request, so they change under a running
  * daemon (a `git pull`) as well as across restarts; the version is computed when asked.
  */
-import { createHash } from 'node:crypto';
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { extname, join, relative } from 'node:path';
+import { extname, join } from 'node:path';
 
 /** Directories served under their own name, besides `index.html`. */
 export const STATIC_DIRS = ['src', 'styles'];
@@ -23,14 +21,17 @@ export const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
   '.woff2': 'font/woff2',
 });
 
-/** @param {string} root @returns {Promise<string[]>} every served file, as absolute paths */
+const ALL_FILES = new Bun.Glob('**');
+
+/** @param {string} root @returns {Promise<string[]>} every served file, relative to `root` */
 async function servedFiles(root) {
-  const files = [join(root, INDEX_FILE)];
+  const files = [INDEX_FILE];
   for (const dir of STATIC_DIRS) {
-    const entries = await readdir(join(root, dir), { recursive: true, withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      if (entry.isFile() && CONTENT_TYPES[extname(entry.name)]) files.push(join(entry.parentPath, entry.name));
-    }
+    try {
+      for await (const path of ALL_FILES.scan({ cwd: join(root, dir), dot: true })) {
+        if (CONTENT_TYPES[extname(path)]) files.push(join(dir, path));
+      }
+    } catch {} // a missing directory serves nothing
   }
   return files.sort();
 }
@@ -46,13 +47,13 @@ export function createUiVersion(root) {
   return {
     async current() {
       const files = await servedFiles(root);
-      const stats = await Promise.all(files.map((file) => stat(file).catch(() => null)));
+      const stats = await Promise.all(files.map((file) => Bun.file(join(root, file)).stat().catch(() => null)));
       const next = files.map((file, i) => `${file}\0${stats[i]?.size}\0${stats[i]?.mtimeMs}`).join('\n');
       if (next === signature) return version;
-      const hash = createHash('sha256');
+      const hash = new Bun.CryptoHasher('sha256');
       for (const file of files) {
-        const bytes = await readFile(file).catch(() => null);
-        if (bytes) hash.update(`${relative(root, file)}\0${bytes.length}\0`).update(bytes);
+        const bytes = await Bun.file(join(root, file)).bytes().catch(() => null);
+        if (bytes) hash.update(`${file}\0${bytes.length}\0`).update(bytes);
       }
       signature = next;
       version = hash.digest('hex').slice(0, 16);

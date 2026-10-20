@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { createScratchpadStore } from '../src/scratchpad/store.js';
 import { revOf } from '../daemon/scratchpad.js';

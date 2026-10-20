@@ -192,10 +192,10 @@ function createPane(body, ctx, daemon) {
     if (status === 'unauthorized') {
       box.append(
         el('p', 'omp-error', REFUSED),
-        el('p', 'omp-muted', 'Open the URL printed by `npm start` to authorise this browser.'),
+        el('p', 'omp-muted', 'Open the URL printed by `bun start` to authorise this browser.'),
       );
     } else if (status === 'down') {
-      box.append(el('p', 'omp-error', 'Daemon not reachable.'), el('p', 'omp-muted', 'Start it with `npm start`; this pane reconnects by itself.'));
+      box.append(el('p', 'omp-error', 'Daemon not reachable.'), el('p', 'omp-muted', 'Start it with `bun start`; this pane reconnects by itself.'));
     } else {
       box.append(el('p', 'omp-muted', 'Connecting to the daemon…'));
     }

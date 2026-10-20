@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { loadLayout, saveLayout } from '../src/state/persistence.js';
 import { leaf, branch } from '../src/layout/grid-model.js';

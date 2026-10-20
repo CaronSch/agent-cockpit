@@ -1,0 +1,3 @@
+[test]
+# Playwright owns e2e/; bun test runs only the unit and daemon suites.
+root = "tests"

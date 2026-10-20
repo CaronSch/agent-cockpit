@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { createDaemonClient } from '../src/daemon/client.js';
 /** @import { SessionEvent, SessionMeta, StreamEvent } from '../daemon/wire.js' */

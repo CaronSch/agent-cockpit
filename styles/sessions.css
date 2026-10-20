@@ -17,7 +17,8 @@
 .sessions-search,
 .sessions-sort {
   min-width: 0;
-  padding: 6px 8px;
+  height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-s);
   background: var(--color-deck);
@@ -29,6 +30,19 @@
 
 .sessions-search {
   flex: 1;
+}
+
+/* Drawn like the search box beside it: no native control chrome, a thin chevron. */
+.sessions-sort {
+  appearance: none;
+  padding-right: 26px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-dim) 50%),
+    linear-gradient(135deg, var(--color-text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
 }
 
 .sessions-search:focus-visible,

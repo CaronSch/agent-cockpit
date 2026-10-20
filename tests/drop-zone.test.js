@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { computeDropZone, detectEdgeZone } from '../src/layout/drop-zone.js';
 

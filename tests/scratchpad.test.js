@@ -1,4 +1,4 @@
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach } from 'bun:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
