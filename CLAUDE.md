@@ -87,7 +87,8 @@ What runs today:
   omp has saved the conversation, which a new session does once the model has
   replied. The message box grows with the prompt; selected reply text can be
   commented on (the comment goes quoted with the next prompt) or asked about
-  (omp's `btw` answers in the popup, outside the chat); long pastes become
+  (omp's `btw` answers in the popup, outside the chat, where follow-up questions
+  continue the same topic, one at a time); long pastes become
   editable cards and pasted or dropped files are stored in
   `~/.cockpit/attachments/` and sent as omp `@"<path>"` mentions. A pane whose
   agent finished its turn (or asks something) while its user was not looking

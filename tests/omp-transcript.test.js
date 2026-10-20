@@ -282,13 +282,35 @@ describe('derived state', () => {
       frame({ type: 'btw_delta', recordId: 'b1', delta: 'Because ' }),
       frame({ type: 'btw_delta', recordId: 'b1', delta: 'it was' }),
     ]);
-    assert.deepEqual(state.sideAnswers.get('b1'), { answer: 'Because it was', status: 'running', error: null });
+    assert.deepEqual(state.sideAnswers.get('b1'), [{ answer: 'Because it was', status: 'running', error: null }]);
     applyEvent(state, frame({ type: 'btw_record', record: { ...record, answer: 'Because it was.', status: 'complete' } }));
-    assert.deepEqual(state.sideAnswers.get('b1'), { answer: 'Because it was.', status: 'complete', error: null });
-    // A follow-up in the same topic answers in its last turn.
-    const followUp = { question: 'and?', answer: '', status: 'error', error: 'No model', createdAt: 2, updatedAt: 2 };
-    applyEvent(state, frame({ type: 'btw_record', record: { ...record, status: 'complete', followUps: [followUp] } }));
-    assert.deepEqual(state.sideAnswers.get('b1'), { answer: '', status: 'error', error: 'No model' });
+    assert.deepEqual(state.sideAnswers.get('b1'), [{ answer: 'Because it was.', status: 'complete', error: null }]);
+    assert.deepEqual(kinds(state), []);
+  });
+
+  test('a follow-up adds a turn to its topic, streams into it, and can fail or be cancelled', () => {
+    const first = { id: 'b1', leafId: null, question: 'why?', answer: 'Because.', status: 'complete', createdAt: 1, updatedAt: 1 };
+    const turn = (/** @type {Record<string, unknown>} */ patch) => ({ question: 'and?', answer: '', status: 'running', createdAt: 2, updatedAt: 2, ...patch });
+    const state = run([
+      frame({ type: 'btw_record', record: first }),
+      frame({ type: 'btw_record', record: { ...first, followUps: [turn({})] } }),
+      frame({ type: 'btw_delta', recordId: 'b1', delta: 'Also ' }),
+      frame({ type: 'btw_delta', recordId: 'b1', delta: 'this' }),
+    ]);
+    const done = { answer: 'Because.', status: 'complete', error: null };
+    assert.deepEqual(state.sideAnswers.get('b1'), [done, { answer: 'Also this', status: 'running', error: null }]);
+
+    const failed = turn({ answer: 'Also this', status: 'error', error: 'Provider error' });
+    applyEvent(state, frame({ type: 'btw_record', record: { ...first, followUps: [failed] } }));
+    assert.deepEqual(state.sideAnswers.get('b1'), [done, { answer: 'Also this', status: 'error', error: 'Provider error' }]);
+
+    // Asked again after the failure, then cancelled before it answered.
+    applyEvent(state, frame({ type: 'btw_record', record: { ...first, followUps: [failed, turn({ status: 'cancelled' })] } }));
+    assert.deepEqual(state.sideAnswers.get('b1'), [
+      done,
+      { answer: 'Also this', status: 'error', error: 'Provider error' },
+      { answer: '', status: 'cancelled', error: null },
+    ]);
     assert.deepEqual(kinds(state), []);
   });
 

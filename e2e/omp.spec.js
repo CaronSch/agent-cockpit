@@ -74,6 +74,19 @@ async function send(pane, text) {
   await pane.locator('textarea').press('Enter');
 }
 
+/** The next command of `type` the page sends to omp. @param {Page} page @param {string} type */
+const rpcSent = (page, type) => page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === type);
+
+/**
+ * Selects the bold word in `reply` and opens Ask on it; resolves to the question box.
+ * @param {import('@playwright/test').Locator} pane @param {import('@playwright/test').Locator} reply
+ */
+async function askAbout(pane, reply) {
+  await reply.locator('strong').dblclick();
+  await pane.getByRole('button', { name: 'Ask', exact: true }).click();
+  return pane.getByRole('textbox', { name: 'Ask about the selected text' });
+}
+
 test('a browser without the token is told how to sign in, and the daemon serves it nothing', async ({ page }) => {
   await openWorkbench(page, { signIn: false });
   const pane = await addOmpPane(page);
@@ -208,17 +221,10 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
   await expect(pane.getByText(/Session renamed/)).toBeVisible(); // the chat has settled
   const transcript = pane.locator('.omp-transcript');
   const chat = await transcript.innerText();
-  /** Selects the bold word in the reply and opens Ask on it. */
-  const askAbout = async () => {
-    await reply.locator('strong').dblclick();
-    await pane.getByRole('button', { name: 'Ask', exact: true }).click();
-    return pane.getByRole('textbox', { name: 'Ask about the selected text' });
-  };
-  const rpcSent = (/** @type {string} */ type) => page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === type);
 
   // "slow": the answer streams in well after omp has taken the question.
-  const box = await askAbout();
-  const asked = rpcSent('btw');
+  const box = await askAbout(pane, reply);
+  const asked = rpcSent(page, 'btw');
   await box.fill('slow: what does this mean?');
   await box.press('Enter');
   expect((await asked).postDataJSON().question).toBe('About this part of our conversation:\n\n> hello\n\nslow: what does this mean?');
@@ -239,8 +245,8 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
 
   /** Asks `question` about the selection; resolves to omp's id for it. @param {string} question */
   const ask = async (question) => {
-    const box = await askAbout();
-    const started = rpcSent('btw');
+    const box = await askAbout(pane, reply);
+    const started = rpcSent(page, 'btw');
     await box.fill(question);
     await box.press('Enter');
     const answered = await (await started).response();
@@ -253,7 +259,7 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
   await expect(pop.locator('.omp-ask-status')).toHaveText('Thinking…');
   await transcript.click({ position: { x: 5, y: 5 } });
   await expect(pop).toBeVisible();
-  let cancelled = rpcSent('btw_cancel');
+  let cancelled = rpcSent(page, 'btw_cancel');
   await pop.getByRole('button', { name: 'Close' }).click();
   expect((await cancelled).postDataJSON().recordId).toBe(id);
   await expect(pop).toBeHidden();
@@ -267,16 +273,69 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
     if (route.request().postDataJSON()?.type === 'btw') await held;
     await route.continue();
   });
-  const early = await askAbout();
+  const early = await askAbout(pane, reply);
   await early.fill('slow: never mind');
   await early.press('Enter');
   await pop.getByRole('button', { name: 'Close' }).click();
-  cancelled = rpcSent('btw_cancel');
+  cancelled = rpcSent(page, 'btw_cancel');
   release();
   expect((await cancelled).postDataJSON().recordId).toEqual(expect.any(String));
   await page.unroute('**/rpc');
   await ask('why, then?');
   await expect(pop.locator('.omp-ask-answer strong')).toHaveText('hello');
+});
+
+test('Ask takes follow-ups in the same topic, one at a time, and keeps the whole thread out of the chat', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('strong')).toHaveText('hello');
+  await expect(pane.getByText(/Session renamed/)).toBeVisible(); // the chat has settled
+  const transcript = pane.locator('.omp-transcript');
+  const chat = await transcript.innerText();
+  const pop = pane.locator('.omp-quote-pop');
+  const questions = pop.locator('.omp-ask-question');
+  const answers = pop.locator('.omp-ask-answer');
+  const followUp = pop.getByRole('textbox', { name: 'Ask a follow-up' });
+
+  const box = await askAbout(pane, reply);
+  const first = rpcSent(page, 'btw');
+  await box.fill('what does this mean?');
+  await box.press('Enter');
+  const topic = (await (await (await first).response())?.json())?.data?.record?.id;
+  expect(topic).toEqual(expect.any(String));
+  await expect(answers.nth(0).locator('strong')).toHaveText('hello');
+  await expect(followUp).toBeFocused();
+
+  // Shift+Enter starts a new line; Enter sends the follow-up in the topic, as written.
+  await followUp.fill('slow: and');
+  await followUp.press('Shift+Enter');
+  await followUp.pressSequentially('why?');
+  await expect(followUp).toHaveValue('slow: and\nwhy?');
+  const asked = rpcSent(page, 'btw');
+  await followUp.press('Enter');
+  expect((await asked).postDataJSON()).toMatchObject({ question: 'slow: and\nwhy?', recordId: topic });
+  // omp answers one side question at a time: nothing more can be asked until this answer is in.
+  await expect(answers.nth(1)).toHaveText('Thinking…');
+  await expect(followUp).toBeDisabled();
+  await expect(pop.getByRole('button', { name: 'Ask', exact: true })).toBeDisabled();
+  await expect(answers.nth(1)).toHaveText('More on hello: it came up once.');
+  await expect(questions).toHaveText(['what does this mean?', 'slow: and\nwhy?']);
+  await expect(answers.nth(0)).toHaveText('hello is what the conversation said.');
+  await expect(followUp).toBeEnabled();
+
+  // A failed answer shows in the thread, and the topic can still be asked about.
+  await followUp.fill('fail, please');
+  await followUp.press('Enter');
+  await expect(answers.nth(2).locator('.omp-ask-error')).toHaveText('Provider error: overloaded');
+  await followUp.fill('once more?');
+  await followUp.press('Enter');
+  await expect(answers.nth(3)).toHaveText('More on hello: it came up once.');
+  await expect(questions).toHaveCount(4);
+
+  expect(await transcript.innerText()).toBe(chat);
+  await expect(pane.locator('.omp-card')).toHaveCount(0); // and nothing waits for the next prompt
 });
 
 test('long pasted text and pasted or dropped files go with the next prompt as attachments', async ({ page }) => {

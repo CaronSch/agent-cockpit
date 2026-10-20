@@ -71,9 +71,10 @@ import { json } from '../ui/format.js';
  */
 
 /**
- * The answer to a side question asked with omp's `btw` (see omp/message.js `composeAsk`),
- * keyed by omp's record id. It lives beside the chat, never in it: omp answers from the
- * session's context without adding the question or the answer to it.
+ * One turn of a side topic asked with omp's `btw` (see omp/message.js `composeAsk`): the
+ * answer to the topic's first question or to a follow-up. Topics are keyed by omp's record
+ * id and live beside the chat, never in it: omp answers from the session's context without
+ * adding the questions or the answers to it.
  * @typedef {{ answer: string, status: 'running' | 'complete' | 'cancelled' | 'error' | 'interrupted', error: string | null }} SideAnswer
  */
 
@@ -84,7 +85,7 @@ import { json } from '../ui/format.js';
  *   meta: SessionMeta | null,
  *   session: SessionInfo,
  *   dialogs: Dialog[],
- *   sideAnswers: Map<string, SideAnswer>,
+ *   sideAnswers: Map<string, SideAnswer[]>,
  *   streaming: boolean,
  *   queue: { steering: string[], followUp: string[] },
  *   commands: SlashCommand[],
@@ -362,22 +363,23 @@ function applyFrame(state, frame) {
     case 'session_info_update':
       if (typeof frame.title === 'string') state.title = withoutIcons(frame.title);
       return;
-    // Side questions: their answers go to `sideAnswers`, never into the chat.
+    // Side questions: each topic's answers, one per turn, go to `sideAnswers`, never into the chat.
     case 'btw_record': {
       const record = frame.record;
       if (typeof record?.id !== 'string') return unrecognised(state, type, frame);
-      const latest = record.followUps?.at(-1) ?? record; // a follow-up answers in its last turn
-      state.sideAnswers.set(record.id, {
-        answer: String(latest.answer ?? ''),
-        status: latest.status,
-        error: typeof latest.error === 'string' ? latest.error : null,
-      });
+      // omp's record is the topic's first turn, its follow-ups after it.
+      const turns = [record, ...(Array.isArray(record.followUps) ? record.followUps : [])];
+      state.sideAnswers.set(
+        record.id,
+        turns.map((turn) => ({ answer: String(turn.answer ?? ''), status: turn.status, error: typeof turn.error === 'string' ? turn.error : null })),
+      );
       return;
     }
     case 'btw_delta': {
-      const answer = state.sideAnswers.get(frame.recordId);
+      // omp streams into the topic's newest turn.
+      const answer = state.sideAnswers.get(frame.recordId)?.at(-1);
       if (answer) answer.answer += String(frame.delta ?? '');
-      else state.sideAnswers.set(frame.recordId, { answer: String(frame.delta ?? ''), status: 'running', error: null });
+      else state.sideAnswers.set(frame.recordId, [{ answer: String(frame.delta ?? ''), status: 'running', error: null }]);
       return;
     }
     case 'rpc_frame_error':

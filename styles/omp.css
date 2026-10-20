@@ -804,7 +804,8 @@
   font: var(--text-sm) / 1.45 var(--font-ui);
 }
 
-.omp-draft:disabled {
+.omp-draft:disabled,
+.omp-quote-input:disabled {
   opacity: 0.6;
 }
 
@@ -852,15 +853,26 @@
   font-size: var(--text-sm);
   font-weight: 600;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
-/* The side answer: read here, never added to the chat. */
-.omp-ask-answer {
-  max-height: 18em;
+/* The side questions and their answers: read here, never added to the chat. */
+.omp-ask-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 24em;
   overflow: auto;
+}
+
+.omp-ask-answer {
   font-size: var(--text-sm);
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.omp-ask-answer + .omp-ask-question {
+  margin-top: var(--space-2);
 }
 
 .omp-ask-answer > :first-child {

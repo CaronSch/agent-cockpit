@@ -13,7 +13,9 @@
  * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
  *   prompt that says something: "hi" alone is too little to name a session by)
  * - `btw`: a side question, answered from the conversation and kept out of it as omp's is;
- *   the answer bolds the first quoted line, and a question containing "slow" waits 1.5 s
+ *   the answer bolds the first quoted line; a follow-up (`recordId`) appends a turn to its
+ *   topic and answers from the topic's quote. A question containing "slow" waits 1.5 s, one
+ *   containing "fail" fails as a provider error would.
  * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
  * session already has a name; the fake never writes to a resumed file.
  * Other sessions keep a journal in `$TMPDIR/fake-omp-sessions/`, written as omp does: a new
@@ -192,24 +194,43 @@ function rename(id, title) {
   ok(id, 'prompt', { agentInvoked: false });
 }
 
+/** Side topics by id, each one omp's record: its first turn, follow-ups in `followUps`. @type {Map<string, Record<string, any>>} */
+const topics = new Map();
 /** The side question being answered, as omp runs one at a time. @type {{ record: Record<string, any>, timer?: ReturnType<typeof setTimeout> } | null} */
 let sideQuestion = null;
 
-/** @param {string | undefined} id @param {string} question */
-function btw(id, question) {
-  if (sideQuestion) {
-    return out({ id, type: 'response', command: 'btw', success: false, error: 'A /btw question is still running; cancel it first' });
-  }
+/**
+ * omp's `patchLatestBtwTurn`: the newest turn is the last follow-up, else the record itself.
+ * @param {Record<string, any>} record @param {Record<string, any>} patch @returns {Record<string, any>}
+ */
+function patchLatestTurn(record, patch) {
+  const followUps = record.followUps;
+  return followUps?.length ? { ...record, followUps: [...followUps.slice(0, -1), { ...followUps.at(-1), ...patch }] } : { ...record, ...patch };
+}
+
+/** @param {string | undefined} id @param {string} question @param {string | undefined} recordId */
+function btw(id, question, recordId) {
+  const fail = (/** @type {string} */ error) => out({ id, type: 'response', command: 'btw', success: false, error });
+  if (sideQuestion) return fail('A /btw question is still running; cancel it first');
+  const previous = recordId === undefined ? undefined : topics.get(recordId);
+  if (recordId !== undefined && !previous) return fail(`Unknown /btw topic: ${recordId}`);
   const now = Date.now();
-  const record = { question, answer: '', status: 'running', createdAt: now, updatedAt: now, id: `btw-${now}`, leafId: 'leaf-1' };
+  const turn = { question, answer: '', status: 'running', createdAt: now, updatedAt: now };
+  /** @type {Record<string, any>} */
+  const record = previous ? { ...previous, followUps: [...(previous.followUps ?? []), turn] } : { ...turn, id: `btw-${now}`, leafId: 'leaf-1' };
   const current = { record, timer: /** @type {ReturnType<typeof setTimeout> | undefined} */ (undefined) };
   sideQuestion = current;
+  topics.set(record.id, record);
   out({ type: 'btw_record', record });
   ok(id, 'btw', { record });
-  const quoted = /^> (.*)$/m.exec(question)?.[1] ?? 'that';
-  const answer = `**${quoted}** is what the conversation said.`;
+  const quoted = /^> (.*)$/m.exec(record.question)?.[1] ?? 'that';
+  const answer = previous ? `More on **${quoted}**: it came up once.` : `**${quoted}** is what the conversation said.`;
   current.timer = setTimeout(() => {
-    for (const delta of answer.match(/.{1,8}/gs) ?? []) out({ type: 'btw_delta', recordId: record.id, delta });
+    if (/fail/.test(question)) return finishSideQuestion({ status: 'error', error: 'Provider error: overloaded' });
+    for (const delta of answer.match(/.{1,8}/gs) ?? []) {
+      current.record = patchLatestTurn(current.record, { answer: (current.record.followUps?.at(-1) ?? current.record).answer + delta });
+      out({ type: 'btw_delta', recordId: record.id, delta });
+    }
     finishSideQuestion({ answer, status: 'complete' });
   }, /slow/.test(question) ? 1500 : 0);
 }
@@ -218,7 +239,9 @@ function btw(id, question) {
 function finishSideQuestion(patch) {
   if (!sideQuestion) return;
   clearTimeout(sideQuestion.timer);
-  out({ type: 'btw_record', record: { ...sideQuestion.record, ...patch, updatedAt: Date.now() } });
+  const record = patchLatestTurn(sideQuestion.record, { ...patch, updatedAt: Date.now() });
+  topics.set(record.id, record);
+  out({ type: 'btw_record', record });
   sideQuestion = null;
 }
 
@@ -301,7 +324,7 @@ lines.on('line', (line) => {
     case 'abort':
       return ok(id, type);
     case 'btw':
-      return btw(id, String(cmd.question ?? ''));
+      return btw(id, String(cmd.question ?? ''), cmd.recordId);
     case 'btw_cancel': {
       const cancelled = sideQuestion !== null && (cmd.recordId === undefined || sideQuestion.record.id === cmd.recordId);
       if (cancelled) finishSideQuestion({ status: 'cancelled' });
