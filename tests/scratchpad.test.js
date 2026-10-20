@@ -36,7 +36,7 @@ describe('scratchpad files', () => {
   test('the list names each pad by its first line, most recently changed first', async () => {
     const pads = createScratchpads({ dir });
     await save(pads, 'older', '\n![shot](older.assets/x.png)\n## Release checklist\nmore');
-    await new Promise((r) => setTimeout(r, 20));
+    await Bun.sleep(20);
     await save(pads, 'newer', '- buy milk');
     assert.deepEqual(
       (await pads.list()).map(({ id, title }) => ({ id, title })),
