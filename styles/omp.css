@@ -828,13 +828,59 @@
   display: none;
 }
 
-.omp-quote-pop:has(> .omp-quote-btn:only-child) {
+/* Only the action buttons: a slim row. */
+.omp-quote-pop:not(:has(> :not(.omp-quote-btn))) {
+  flex-direction: row;
+  gap: 2px;
   padding: 2px;
 }
 
 .omp-quote-btn {
   padding: 2px 10px;
   font-size: var(--text-xs);
+}
+
+.omp-quote-pop.is-answer {
+  width: min(440px, calc(100% - 16px));
+  max-width: none;
+}
+
+.omp-ask-question {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* The side answer: read here, never added to the chat. */
+.omp-ask-answer {
+  max-height: 18em;
+  overflow: auto;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.omp-ask-answer > :first-child {
+  margin-top: 0;
+}
+
+.omp-ask-answer > :last-child {
+  margin-bottom: 0;
+}
+
+.omp-ask-status,
+.omp-ask-error {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.omp-ask-status {
+  color: var(--color-text-faint);
+}
+
+.omp-ask-error {
+  color: var(--color-danger);
 }
 
 .omp-quote-preview {

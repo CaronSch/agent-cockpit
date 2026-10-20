@@ -155,6 +155,86 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
   await expect(pane.locator('textarea')).toHaveValue('');
 });
 
+test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('strong')).toHaveText('hello');
+  await expect(pane.getByText(/Session renamed/)).toBeVisible(); // the chat has settled
+  const transcript = pane.locator('.omp-transcript');
+  const chat = await transcript.innerText();
+  /** Selects the bold word in the reply and opens Ask on it. */
+  const askAbout = async () => {
+    await reply.locator('strong').dblclick();
+    await pane.getByRole('button', { name: 'Ask', exact: true }).click();
+    return pane.getByRole('textbox', { name: 'Ask about the selected text' });
+  };
+  const rpcSent = (/** @type {string} */ type) => page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === type);
+
+  // "slow": the answer streams in well after omp has taken the question.
+  const box = await askAbout();
+  const asked = rpcSent('btw');
+  await box.fill('slow: what does this mean?');
+  await box.press('Enter');
+  expect((await asked).postDataJSON().question).toBe('About this part of our conversation:\n\n> hello\n\nslow: what does this mean?');
+  const pop = pane.locator('.omp-quote-pop');
+  await expect(pop.locator('.omp-ask-question')).toHaveText('slow: what does this mean?');
+  await expect(pop.locator('.omp-ask-status')).toHaveText('Thinking…');
+  await expect(pop.locator('.omp-ask-answer strong')).toHaveText('hello'); // the answer, as Markdown
+  expect(await transcript.innerText()).toBe(chat);
+  await expect(pane.locator('.omp-card')).toHaveCount(0); // and nothing waits for the next prompt
+  await page.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+
+  // A reload replays the side answer's frames; they still stay out of the chat.
+  await page.reload();
+  await expect(reply.locator('strong')).toHaveText('hello');
+  await page.waitForTimeout(200);
+  expect(await transcript.innerText()).toBe(chat);
+
+  /** Asks `question` about the selection; resolves to omp's id for it. @param {string} question */
+  const ask = async (question) => {
+    const box = await askAbout();
+    const started = rpcSent('btw');
+    await box.fill(question);
+    await box.press('Enter');
+    const answered = await (await started).response();
+    return /** @type {string} */ (answered ? (await answered.json()).data?.record?.id : null);
+  };
+
+  // A stray click does not throw away an answer still coming; closing the popup stops it.
+  const id = await ask('slow: and why?');
+  expect(id).toEqual(expect.any(String));
+  await expect(pop.locator('.omp-ask-status')).toHaveText('Thinking…');
+  await transcript.click({ position: { x: 5, y: 5 } });
+  await expect(pop).toBeVisible();
+  let cancelled = rpcSent('btw_cancel');
+  await pop.getByRole('button', { name: 'Close' }).click();
+  expect((await cancelled).postDataJSON().recordId).toBe(id);
+  await expect(pop).toBeHidden();
+
+  // Closed before omp has even taken the question: it is cancelled once omp names it, so the
+  // next Ask is not refused for one still running.
+  /** @type {() => void} */
+  let release = () => {};
+  const held = new Promise((resolve) => (release = () => resolve(undefined)));
+  await page.route('**/rpc', async (route) => {
+    if (route.request().postDataJSON()?.type === 'btw') await held;
+    await route.continue();
+  });
+  const early = await askAbout();
+  await early.fill('slow: never mind');
+  await early.press('Enter');
+  await pop.getByRole('button', { name: 'Close' }).click();
+  cancelled = rpcSent('btw_cancel');
+  release();
+  expect((await cancelled).postDataJSON().recordId).toEqual(expect.any(String));
+  await page.unroute('**/rpc');
+  await ask('why, then?');
+  await expect(pop.locator('.omp-ask-answer strong')).toHaveText('hello');
+});
+
 test('long pasted text and pasted or dropped files go with the next prompt as attachments', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

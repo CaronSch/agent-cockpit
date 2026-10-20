@@ -72,6 +72,13 @@
  */
 
 /**
+ * The answer to a side question asked with omp's `btw` (see omp/message.js `composeAsk`),
+ * keyed by omp's record id. It lives beside the chat, never in it: omp answers from the
+ * session's context without adding the question or the answer to it.
+ * @typedef {{ answer: string, status: 'running' | 'complete' | 'cancelled' | 'error' | 'interrupted', error: string | null }} SideAnswer
+ */
+
+/**
  * @typedef {{
  *   version: number,
  *   items: Item[],
@@ -79,6 +86,7 @@
  *   meta: SessionMeta | null,
  *   session: SessionInfo,
  *   dialogs: Dialog[],
+ *   sideAnswers: Map<string, SideAnswer>,
  *   streaming: boolean,
  *   queue: { steering: string[], followUp: string[] },
  *   commands: SlashCommand[],
@@ -134,6 +142,7 @@ export function createTranscript() {
     meta: null,
     session: { model: null, thinkingLevel: null, contextPercent: null, sessionFile: null, sessionName: null },
     dialogs: [],
+    sideAnswers: new Map(),
     streaming: false,
     queue: { steering: [], followUp: [] },
     commands: [],
@@ -357,6 +366,24 @@ function applyFrame(state, frame) {
     case 'session_info_update':
       if (typeof frame.title === 'string') state.title = withoutIcons(frame.title);
       return;
+    // Side questions: their answers go to `sideAnswers`, never into the chat.
+    case 'btw_record': {
+      const record = frame.record;
+      if (typeof record?.id !== 'string') return unrecognised(state, type, frame);
+      const latest = record.followUps?.at(-1) ?? record; // a follow-up answers in its last turn
+      state.sideAnswers.set(record.id, {
+        answer: String(latest.answer ?? ''),
+        status: latest.status,
+        error: typeof latest.error === 'string' ? latest.error : null,
+      });
+      return;
+    }
+    case 'btw_delta': {
+      const answer = state.sideAnswers.get(frame.recordId);
+      if (answer) answer.answer += String(frame.delta ?? '');
+      else state.sideAnswers.set(frame.recordId, { answer: String(frame.delta ?? ''), status: 'running', error: null });
+      return;
+    }
     case 'rpc_frame_error':
       return note(state, 'error', 'transport', `Dropped ${frame.originalType ?? 'a frame'}: ${frame.error}`);
     case 'extension_ui_request':

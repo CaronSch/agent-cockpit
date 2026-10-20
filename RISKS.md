@@ -54,16 +54,19 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
-- **Auto-titles and attachments lean on omp internals.** Titles rely on `/rename`
-  with no title generating one in RPC mode (it is not gated by `PI_NO_TITLE`), and
-  on `session_settled` following only agent activity (if it followed a builtin
-  command too, the daemon's own `/rename` would trigger the next one, up to the
-  attempt cap). Attachments rely on `@"<absolute path>"` mentions being read when a
-  prompt starts a turn. A change shows up as sessions that stay untitled, or files
-  that reach the model only as a bare path. *Response:* re-read omp's
-  `slash-commands/builtin-lifecycle.ts` (`rename`), `modes/rpc/rpc-session-settle.ts`
-  and `utils/file-mentions.ts`, then update `daemon/omp-session.js`,
-  `src/omp/message.js` and the fake.
+- **Auto-titles, attachments and Ask lean on omp internals.** Titles rely on
+  `/rename` with no title generating one in RPC mode (it is not gated by
+  `PI_NO_TITLE`), and on `session_settled` following only agent activity (if it
+  followed a builtin command too, the daemon's own `/rename` would trigger the next
+  one, up to the attempt cap). Attachments rely on `@"<absolute path>"` mentions
+  being read when a prompt starts a turn. Ask relies on the `btw` / `btw_cancel`
+  commands and the `btw_record` / `btw_delta` frames, and on `btw` answering from
+  an ephemeral turn that leaves the session's history alone. A change shows up as
+  sessions that stay untitled, files that reach the model only as a bare path, or
+  side answers that never arrive or turn up in the chat. *Response:* re-read omp's
+  `slash-commands/builtin-lifecycle.ts` (`rename`), `modes/rpc/rpc-session-settle.ts`,
+  `utils/file-mentions.ts` and `modes/rpc/rpc-btw.ts`, then update
+  `daemon/omp-session.js`, `src/omp/message.js`, `src/omp/transcript.js` and the fake.
 
 ## When the session history reaches thousands of journals
 

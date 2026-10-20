@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { asQuote, composeMessage, isCommand, isLargePaste } from '../src/omp/message.js';
+import { asQuote, composeAsk, composeMessage, isCommand, isLargePaste } from '../src/omp/message.js';
 
 describe('the message the omp pane sends', () => {
   test('each comment quotes its text, then says its piece, before the prompt', () => {
@@ -24,6 +24,10 @@ describe('the message the omp pane sends', () => {
     assert.equal(isCommand('/model'), true);
     assert.equal(isCommand('  !ls'), true);
     assert.equal(isCommand('use /tmp for it'), false);
+  });
+
+  test('a side question quotes the text it is about, then asks', () => {
+    assert.equal(composeAsk('line one\n\nline three', '  why both?  '), 'About this part of our conversation:\n\n> line one\n>\n> line three\n\nwhy both?');
   });
 
   test('pasted text follows the prompt as one attachment block; files follow as omp mentions', () => {
