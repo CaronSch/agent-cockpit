@@ -45,10 +45,7 @@
   cursor: pointer;
 }
 
-.sessions-search:focus-visible,
-.sessions-sort:focus-visible,
-.sessions-icon-btn:focus-visible,
-.sessions-item:focus-visible {
+:is(.sessions-search, .sessions-sort, .sessions-icon-btn, .sessions-item):focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
 }
