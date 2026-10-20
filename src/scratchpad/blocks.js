@@ -107,13 +107,7 @@ export function insertAsset(blocks, index, caret, asset) {
   // Split at the caret, dropping the newline it sits next to: the file takes a line of its own.
   const before = target.text.slice(0, caret).replace(/\n$/, '');
   const after = target.text.slice(caret).replace(/^\n/, '');
-  return [
-    ...blocks.slice(0, index),
-    { kind: 'text', text: before },
-    asset,
-    { kind: 'text', text: after },
-    ...blocks.slice(index + 1),
-  ];
+  return blocks.toSpliced(index, 1, { kind: 'text', text: before }, asset, { kind: 'text', text: after });
 }
 
 /** Where the browser loads a pad asset from. @param {string} path `<id>.assets/<file>` */

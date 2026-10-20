@@ -57,14 +57,13 @@ export class SessionNotRunning extends Error {}
 export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
   /** @type {SessionMeta} */
   let meta = { id, cwd, resume, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt: now() };
-  /** @type {Map<string, { resolve: (r: RpcResponse) => void, reject: (e: Error) => void }>} */
+  /** @type {Map<string, PromiseWithResolvers<RpcResponse>>} */
   const pending = new Map();
   const decoder = createFrameDecoder();
   let counter = 0;
   let finished = false;
-  /** @type {() => void} */
-  let markClosed = () => {};
-  const closed = new Promise((resolve) => (markClosed = () => resolve(undefined)));
+  /** @type {PromiseWithResolvers<void>} */
+  const closed = Promise.withResolvers();
   let named = false;
   let titleAttempts = 0;
 
@@ -103,7 +102,7 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
       exitCode,
       error: error ?? (failed ? `omp exited with code ${exitCode} before it was ready` : null),
     });
-    markClosed();
+    closed.resolve();
   }
 
   /** @param {import('./frame-decoder.js').Decoded} decoded */
@@ -163,11 +162,11 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
   function send(command) {
     const frame = { ...command, id: `ac_${++counter}` };
     if (finished) return { id: frame.id, response: Promise.reject(new SessionNotRunning(`session is ${meta.status}`)) };
-    const response = new Promise((resolve, reject) => {
-      pending.set(frame.id, { resolve, reject });
-      writeFrame(frame);
-    });
-    return { id: frame.id, response: /** @type {Promise<RpcResponse>} */ (response) };
+    /** @type {PromiseWithResolvers<RpcResponse>} */
+    const response = Promise.withResolvers();
+    pending.set(frame.id, response);
+    writeFrame(frame);
+    return { id: frame.id, response: response.promise };
   }
 
   async function setup() {
@@ -199,7 +198,7 @@ export function launchOmp({ id, cwd, resume, ompPath, emit, now = Date.now }) {
       proc.stdin.end(); // omp drains accepted work and exits on EOF
       const term = setTimeout(() => proc.kill('SIGTERM'), CLOSE_GRACE_MS);
       const kill = setTimeout(() => proc.kill('SIGKILL'), CLOSE_GRACE_MS * 2);
-      await closed;
+      await closed.promise;
       clearTimeout(term);
       clearTimeout(kill);
     },
