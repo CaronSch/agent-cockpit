@@ -809,6 +809,48 @@
   opacity: 0.6;
 }
 
+/* Shell mode (a `!` draft): it reads as a terminal line, so Enter is plainly not a prompt. */
+.omp-composer.is-shell .omp-draft {
+  border-color: var(--color-accent);
+  border-left-width: 3px;
+  background: color-mix(in oklch, var(--color-accent) 6%, var(--color-deck));
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+}
+
+.omp-shell-mark {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-dim);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+}
+
+.omp-shell-mark[hidden] {
+  display: none;
+}
+
+.omp-shell-label {
+  flex: none;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.omp-shell-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.omp-shell-hint {
+  flex: none;
+  margin-left: auto;
+  color: var(--color-text-faint);
+  font-family: var(--font-ui);
+}
+
 /* ── comments on selected text, and the cards that go with the next message ── */
 
 .omp-quote-pop {
@@ -933,6 +975,19 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
+}
+
+/* In shell mode the cards stay for the next prompt: shown apart from the command. */
+.omp-cards-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-text-faint);
+  font: var(--text-xs) / 1.4 var(--font-ui);
+}
+
+.omp-cards.is-held .omp-card {
+  border-style: dashed;
+  opacity: 0.55;
 }
 
 .omp-card {

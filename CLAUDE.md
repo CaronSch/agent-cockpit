@@ -78,17 +78,20 @@ What runs today:
   Reload (the files' version: `daemon/ui-files.js`).
 - The daemon and the `omp` pane: start omp in a directory, chat with it from its
   structured event stream (streamed replies with Markdown and tables, thinking,
-  tool calls with output, `!` bash), pick model and thinking level, log in to
+  tool calls with output), pick model and thinking level, log in to
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
   a running turn, and resume the conversation after a daemon restart. Several
   panes can run side by side, each bound to its own session. **Fork** continues
   a copy of a pane's conversation in a new pane, as a session of its own (omp's
   `--fork`: a new journal, the original runs on untouched); it stays off until
   omp has saved the conversation, which a new session does once the model has
-  replied. The message box grows with the prompt; selected reply text can be
-  commented on (the comment goes quoted with the next prompt) or asked about
-  (omp's `btw` answers in the popup, outside the chat, where follow-up questions
-  continue the same topic, one at a time); long pastes become
+  replied. The message box grows with the prompt; a line starting with `!` runs
+  as a shell command in the session's directory, at once even mid-turn, and while
+  the draft is one the box turns into a shell line (monospace, `$ shell · <dir>`,
+  Run instead of Send, the cards shown as waiting for the next prompt). Selected
+  reply text can be commented on (the comment goes quoted with the next prompt)
+  or asked about (omp's `btw` answers in the popup, outside the chat, where
+  follow-up questions continue the same topic, one at a time); long pastes become
   editable cards and pasted or dropped files are stored in
   `~/.cockpit/attachments/` and sent as omp `@"<path>"` mentions. A pane whose
   agent finished its turn (or asks something) while its user was not looking
@@ -265,7 +268,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
-- `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then attachments) and side questions about a quote.
+- `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then attachments), `!` shell commands, and side questions about a quote.
 - `src/omp/selection-popup.js` — Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons appear at the end of the selection.
 - `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
 - `src/render/drop-indicator.js` — Landing preview for drag & drop, plus the sash snap guide.

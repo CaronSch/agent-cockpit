@@ -13,7 +13,7 @@ import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/tran
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
-import { composeAsk, isCommand } from '../omp/message.js';
+import { composeAsk, isCommand, shellCommand } from '../omp/message.js';
 import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { awaitsUser } from '../omp/activity.js';
 /** @import { WidgetContext } from './registry.js' */
@@ -413,6 +413,7 @@ function createPane(body, ctx, daemon) {
         addNote(state, 'error', 'attach', text);
         schedule();
       },
+      shellDir: () => ({ label: tildeHome(cwd(), home), path: cwd() }),
     });
     const { draft, sendBtn } = composer;
     const selectionPopup = attachSelectionPopup({
@@ -446,6 +447,8 @@ function createPane(body, ctx, daemon) {
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
+    /** The session's directory: where omp runs, and where `!` commands run. */
+    const cwd = () => params().cwd ?? meta()?.cwd ?? '';
     /**
      * Whether omp has this conversation on disk, so it can be forked: a journal the session
      * started from exists already, and omp writes a new session's once the model has replied.
@@ -491,6 +494,8 @@ function createPane(body, ctx, daemon) {
       if (!ready()) return;
       // `/command` and `!shell` go as typed; comments and attachments wait for the next prompt.
       const command = isCommand(draft.value);
+      // A bare `!` names no command: leave it in the box rather than run nothing.
+      if (shellCommand(draft.value) === '') return;
       // A file dropped a moment ago may still be on its way to the daemon: send it too.
       if (!command) await composer.settled();
       if (!ready()) return;
@@ -498,12 +503,14 @@ function createPane(body, ctx, daemon) {
       const text = taken.message;
       if (!text) return;
       hideSuggestions();
+      const shell = shellCommand(text);
       /** @type {Record<string, unknown>} */
-      const request = text.startsWith('!')
-        ? { type: 'bash', command: text.slice(1).trim() }
-        : state.streaming
-          ? { type: 'prompt', message: text, streamingBehavior: 'steer' }
-          : { type: 'prompt', message: text };
+      const request =
+        shell !== null
+          ? { type: 'bash', command: shell }
+          : state.streaming
+            ? { type: 'prompt', message: text, streamingBehavior: 'steer' }
+            : { type: 'prompt', message: text };
       void rpc(request).then((res) => {
         // Give it all back if omp refused it and nothing new has been written since.
         if (!res || !res.success) taken.restore();
@@ -856,9 +863,8 @@ function createPane(body, ctx, daemon) {
 
     function drawToolbar() {
       const m = meta();
-      const cwd = params().cwd ?? m?.cwd ?? '';
-      cwdEl.textContent = shortCwd(cwd);
-      cwdEl.title = cwd;
+      cwdEl.textContent = shortCwd(cwd());
+      cwdEl.title = cwd();
       const s = state.session;
       modelBtn.textContent = s.model ? s.model.name || s.model.id : 'model…';
       modelBtn.title = s.model ? `${s.model.provider}/${s.model.id}` : 'Choose model';

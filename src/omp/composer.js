@@ -5,12 +5,14 @@
  *
  * A paste past omp's size limit becomes a text card (click to edit) instead of filling the
  * draft. Files pasted into it or dropped anywhere on the pane are stored by the daemon as they
- * arrive, and go with the message as omp file mentions.
+ * arrive, and go with the message as omp file mentions. A draft starting with `!` is a shell
+ * command: the box switches to shell mode (monospace, marked with the directory it runs in,
+ * Run for Send) and shows the cards as waiting, since a command goes without them.
  */
 import { button, carriesFiles, el } from '../ui/dom.js';
 import { errorMessage } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
-import { composeMessage, isLargePaste } from './message.js';
+import { composeMessage, isLargePaste, shellCommand } from './message.js';
 /** @import { Attachment, QuoteComment } from './message.js' */
 
 /**
@@ -46,32 +48,47 @@ const extent = (text) => {
  *   pane: HTMLElement,
  *   upload: (file: Blob, name: string) => Promise<string>,
  *   onError: (message: string) => void,
+ *   shellDir: () => { label: string, path: string },
  * }} options `pane`: caps the draft's height and takes dropped files; `upload` stores a file
- * and answers with its path; `onError` hears about a file that could not be attached.
+ * and answers with its path; `onError` hears about a file that could not be attached;
+ * `shellDir` names the directory a shell command runs in, for shell mode's marker.
  */
-export function createComposer({ pane, upload, onError }) {
+export function createComposer({ pane, upload, onError, shellDir }) {
   const root = el('div', 'omp-composer');
   const cards = el('div', 'omp-cards');
   cards.hidden = true;
+  const heldNote = el('p', 'omp-cards-note', 'These wait for your next prompt: the command runs without them.');
   const editor = el('div', 'omp-card-editor');
   editor.hidden = true;
+  const mark = el('div', 'omp-shell-mark');
+  mark.id = `omp-shell-${Math.random().toString(36).slice(2)}`;
+  mark.hidden = true;
+  const markDir = el('span', 'omp-shell-dir');
+  mark.append(el('span', 'omp-shell-label', '$ shell'), markDir, el('span', 'omp-shell-hint', 'Enter runs it as a command, not a prompt'));
   const row = el('div', 'omp-compose-row');
   const draft = el('textarea', 'omp-draft');
   draft.rows = 2;
   draft.setAttribute('aria-label', 'Message omp');
   const sendBtn = button('btn btn-accent', 'Send');
   row.append(draft, sendBtn);
-  root.append(cards, editor, row);
+  root.append(cards, editor, mark, row);
 
   /** @type {Card[]} */
   let items = [];
   let pastes = 0;
+  /** Whether the draft is a `!` shell command. */
+  let shell = false;
   /** @type {Set<string>} */
   const previews = new Set();
 
   const maxHeight = () => Math.max(MIN_MAX_PX, pane.clientHeight * MAX_SHARE);
   const fit = () => autosize(draft, { max: maxHeight() });
-  draft.addEventListener('input', fit);
+  /** The draft's text changed: refit it, and switch shell mode on or off. */
+  const changed = () => {
+    fit();
+    drawMode();
+  };
+  draft.addEventListener('input', changed);
   // The cap follows the pane, and the wrap follows the draft's width.
   const resizes = new ResizeObserver(fit);
   resizes.observe(pane);
@@ -201,8 +218,30 @@ export function createComposer({ pane, upload, onError }) {
   }
 
   function drawCards() {
-    cards.replaceChildren(...items.map(cardView));
+    // A command goes without the cards: say so, rather than let them look attached to it.
+    const held = shell && items.length > 0;
+    cards.classList.toggle('is-held', held);
+    cards.replaceChildren(...(held ? [heldNote] : []), ...items.map(cardView));
     cards.hidden = items.length === 0;
+  }
+
+  /** Shell mode while the draft is a `!` command: it looks like one and says where it runs. */
+  function drawMode() {
+    const next = shellCommand(draft.value) !== null;
+    if (next === shell) return;
+    shell = next;
+    root.classList.toggle('is-shell', shell);
+    mark.hidden = !shell;
+    sendBtn.textContent = shell ? 'Run' : 'Send';
+    if (shell) {
+      const dir = shellDir();
+      markDir.textContent = `· ${dir.label}`;
+      mark.title = dir.path;
+      draft.setAttribute('aria-describedby', mark.id);
+    } else {
+      draft.removeAttribute('aria-describedby');
+    }
+    drawCards();
   }
 
   function closeEditor() {
@@ -254,7 +293,7 @@ export function createComposer({ pane, upload, onError }) {
     /** Replaces the draft (a restored or prefilled message) and fits it. @param {string} text */
     setText(text) {
       draft.value = text;
-      fit();
+      changed();
     },
     /** Adds a comment on `quote` to go with the next message. @param {string} quote @param {string} comment */
     addComment(quote, comment) {
@@ -285,9 +324,9 @@ export function createComposer({ pane, upload, onError }) {
       }
       const message = withCards ? composeMessage(text, comments, attachments) : text.trim();
       draft.value = '';
-      fit();
       items = items.filter((c) => !taken.includes(c));
       closeEditor();
+      changed();
       drawCards();
       return {
         message,
@@ -295,7 +334,7 @@ export function createComposer({ pane, upload, onError }) {
           if (draft.value || (taken.length && items.length)) return;
           draft.value = text;
           items = [...taken, ...items];
-          fit();
+          changed();
           drawCards();
         },
       };
