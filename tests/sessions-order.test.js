@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { naturalDir, relativeTime, sortSessions } from '../src/sessions/order.js';
 /** @import { PastSession } from '../daemon/wire.js' */

@@ -42,9 +42,11 @@ Planned capabilities:
 ## Architecture
 
 - **Browser UI** (`src/`): the window grid and the widgets. No build step.
-- **Local daemon** (`daemon/`, Node): the only process that touches the machine.
-  `npm start` runs it; it serves the UI on `127.0.0.1:4777` and launches each omp
-  session as `omp --mode rpc-ui` in the chosen directory, owning those processes.
+- **Local daemon** (`daemon/`, Bun): the only process that touches the machine.
+  `bun start` runs it; it serves the UI on `127.0.0.1:4777` (`Bun.serve`) and
+  launches each omp session as `omp --mode rpc-ui` in the chosen directory
+  (`Bun.spawn`), owning those processes. omp is the `omp` on PATH unless `--omp`
+  says otherwise. Prefer Bun's own APIs where they make the code smaller.
   The workbench is self-contained: it shows agents it launched and does not attach
   to sessions started in other terminals. Later it also samples process trees,
   proxies model calls and observes the filesystem.
@@ -133,12 +135,16 @@ telemetry views, cmux-parity features beyond the above.
 
 ## Constraints
 
-- The browser UI is plain ES modules with no build step (`npm start`). Dev-only
+- The daemon, tests and scripts run on Bun (1.3.14+, omp's own minimum); the
+  browser UI is plain ES modules with no build step (`bun start`). Dev-only
   tooling is TypeScript (type checking, never compiling), Playwright and
-  `@types/node`. Runtime dependencies are allowed only to avoid rebuilding a
+  `@types/bun`. Runtime dependencies are allowed only to avoid rebuilding a
   mature subsystem (terminal emulation, PTY handling), and each one is named in
   this file. Adding any other runtime dependency, dev tool, or bundler is a
   decision for the owner, not a side effect of a feature.
+- omp is not a dependency: the user installs it on its own (https://omp.sh) and
+  the daemon runs the `omp` on PATH. The version the fake omp in `tests/` was
+  recorded from is in `RISKS.md`; a newer installed omp means re-recording frames.
 - Types are JSDoc in the `.js` files, checked by `tsc` in strict mode. No `.ts`
   files, no `@ts-ignore`/`@ts-expect-error`; `any` only for untrusted input
   (parsed JSON, storage). A type lives in the module that owns the value and is
@@ -155,18 +161,20 @@ telemetry views, cmux-parity features beyond the above.
 - Several agent sessions may share this checkout. Make changes in a worktree
   (`git worktree add ../agent-cockpit-<topic> -b <branch> main`), never by
   switching branches or stashing in the shared tree.
-- Run it: `npm start`, then open the URL it prints once (it carries the token;
-  the browser keeps a cookie afterwards). `--port`, `--omp <path>` and
-  `COCKPIT_STATE_DIR` override the defaults.
+- Run it: `bun install`, then `bun start`, then open the URL it prints once (it
+  carries the token; the browser keeps a cookie afterwards). `--port`,
+  `--omp <path>` (or `COCKPIT_OMP`) and `COCKPIT_STATE_DIR` override
+  the defaults.
 - Before committing, all of these must pass (CI in `.github/workflows/ci.yml`
   runs the same on every push to `main` and every PR):
-  - `npm run typecheck`
-  - `npm test`: node:test suites in `tests/`: the pure modules, plus the daemon
-    end to end against `tests/fixtures/fake-omp.js`, a scripted stand-in for omp
-  - `npm run test:e2e`: Playwright suites in `e2e/`, driving the real app and
+  - `bun run typecheck`
+  - `bun run test`: `bun test` suites in `tests/`: the pure modules, plus the
+    daemon end to end against `tests/fixtures/fake-omp.js`, a scripted stand-in
+    for omp (plain `bun test` would also pick up `e2e/*.spec.js`)
+  - `bun run test:e2e`: Playwright suites in `e2e/`, driving the real app and
     daemon (with the fake omp) in Chromium. First run on a machine needs
-    `npx playwright install chromium`.
-  - `npm run claude-md:check`
+    `bunx playwright install chromium`.
+  - `bun run claude-md:check`
 - A UI behaviour change comes with an e2e test that fails without it.
 - When omp changes its protocol, re-record frames from the real omp (never
   commit them: they contain local tool and MCP names) and update the fake to
@@ -176,7 +184,7 @@ telemetry views, cmux-parity features beyond the above.
 
 The block below is generated from the code by `scripts/update-claude-md.js` and
 refreshed automatically by the git pre-commit hook (`.githooks/`, enabled by
-`npm install`) and by a Claude Code edit hook (`.claude/settings.json`). Do not
+`bun install`) and by a Claude Code edit hook (`.claude/settings.json`). Do not
 edit it by hand.
 
 The sections above are hand-written. A change that alters what the app does,
@@ -228,7 +236,7 @@ particular, move a capability into "Current state" when it ships.
 - `daemon/guard.js` — Loopback guard: decides which requests may reach the daemon (CLAUDE.md, Invariants).
 - `daemon/history.js` — Past omp sessions, read from omp's session files: one summary per conversation, searchable by title, directory and what the user asked.
 - `daemon/hub.js` — The daemon's omp sessions and the single ordered event log the browser replays.
-- `daemon/main.js` — Daemon entry point (`npm start`): serves the workbench on loopback and runs the omp processes it shows.
+- `daemon/main.js` — Daemon entry point (`bun start`): serves the workbench on loopback and runs the omp processes it shows.
 - `daemon/omp-session.js` — One omp process in RPC mode: launch, protocol setup, command/response correlation and lifecycle, with everything it does reported as session events.
 - `daemon/scratchpad.js` — Scratchpads: plain Markdown files the daemon keeps, one per pad, with pasted screenshots and files stored beside them.
 - `daemon/server.js` — HTTP face of the daemon: the workbench's static files, the JSON API and the event stream (routes in `wire.js`), all behind the loopback guard.
@@ -244,16 +252,16 @@ particular, move a capability into "Current state" when it ships.
 - `sessions` — Sessions: Past omp sessions: search, sort, drag one out to resume it
 - `scratchpad` — Scratchpad: Notes with screenshots and files; each new window starts its own pad
 
-### npm scripts
+### Scripts
 
-- `npm run start` — `node daemon/main.js`
-- `npm run test` — `node --test "tests/**/*.test.js"`
-- `npm run test:coverage` — `node --test --experimental-test-coverage "tests/**/*.test.js"`
-- `npm run test:e2e` — `playwright test`
-- `npm run typecheck` — `tsc -p .`
-- `npm run claude-md` — `node scripts/update-claude-md.js`
-- `npm run claude-md:check` — `node scripts/update-claude-md.js --check`
-- `npm run prepare` — `git config core.hooksPath .githooks`
+- `bun run start` — `bun daemon/main.js`
+- `bun run test` — `bun test`
+- `bun run test:coverage` — `bun test --coverage`
+- `bun run test:e2e` — `playwright test`
+- `bun run typecheck` — `tsc -p .`
+- `bun run claude-md` — `bun scripts/update-claude-md.js`
+- `bun run claude-md:check` — `bun scripts/update-claude-md.js --check`
+- `bun run prepare` — `git config core.hooksPath .githooks`
 
 ### Test suites
 

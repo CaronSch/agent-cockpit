@@ -1,5 +1,5 @@
 #!/bin/sh
 # Refresh the generated block of CLAUDE.md and include it in this commit.
 set -e
-node scripts/update-claude-md.js
+bun scripts/update-claude-md.js
 git add CLAUDE.md

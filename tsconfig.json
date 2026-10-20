@@ -8,7 +8,7 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "lib": ["es2023", "dom", "dom.iterable"],
-    "types": ["node"],
+    "types": ["bun"],
     "skipLibCheck": true
   },
   "include": ["src", "daemon", "scripts", "tests", "e2e", "playwright.config.js"]

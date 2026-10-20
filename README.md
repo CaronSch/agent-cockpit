@@ -11,30 +11,30 @@ ones to resume, and the **Scratchpad** keeps notes. Other windows are still to c
 Direction and invariants live in [`CLAUDE.md`](CLAUDE.md); deferred risks in
 [`RISKS.md`](RISKS.md).
 
-Requires Node 22+ and `omp` on your `PATH`. No runtime dependencies, no build
-step: plain ES modules. Development tools (TypeScript for JSDoc type checking,
-Playwright) are dev dependencies only.
+Requires [Bun](https://bun.sh) 1.3.14+ and omp, installed on its own
+(`curl -fsSL https://omp.sh/install | sh`; see [omp.sh](https://omp.sh)). The
+daemon runs the `omp` on PATH unless `--omp <path>` or `COCKPIT_OMP`
+names another. No runtime dependencies. No build step: plain ES modules. Development
+tools (TypeScript for JSDoc type checking, Playwright) are dev dependencies only.
 
 ```bash
-npm install                      # dev tools + git hooks
-npm start                        # daemon on http://127.0.0.1:4777; open the URL it prints
-npx playwright install chromium  # once per machine, for e2e
-npm run typecheck                # tsc --checkJs over JSDoc types
-npm test                         # unit suites, plus the daemon against a fake omp
-npm run test:e2e                 # Playwright: real app and daemon in Chromium
-npm run test:coverage
+bun install                      # dev tools + git hooks
+bun start                        # daemon on http://127.0.0.1:4777; open the URL it prints
+bunx playwright install chromium # once per machine, for e2e
+bun run typecheck                # tsc --checkJs over JSDoc types
+bun test                         # unit suites, plus the daemon against a fake omp
+bun run test:e2e                 # Playwright: real app and daemon in Chromium
+bun test --coverage
 ```
 
-The URL `npm start` prints carries an access token. Open it once; the browser
+The URL `bun start` prints carries an access token. Open it once; the browser
 keeps it as a cookie. The daemon listens on loopback only and refuses requests
 from other sites. Pick **＋ Widget → omp**, choose a directory, and start
-chatting. To continue an earlier conversation, add **＋ Widget → Sessions**,
-search or sort, and drag a session onto the grid (or press **Resume**). The list
-comes from omp's session files (`~/.omp/agent/sessions`, or
-`$COCKPIT_OMP_SESSIONS`). When the workbench's own files change under an
-open tab (a `git pull`, or a daemon restart on new code), the top bar says so;
-**Reload** picks up the new version. It never reloads by itself, so an unsent
-draft is never lost.
+chatting (`bun start` runs from the repo, so the directory it suggests is the
+repo; `bun daemon/main.js` started elsewhere suggests that directory). To
+continue an earlier conversation, add **＋ Widget → Sessions**, search or sort,
+and drag a session onto the grid (or press **Resume**). The list comes from
+omp's session files (`~/.omp/agent/sessions`, or `$COCKPIT_OMP_SESSIONS`).
 
 In an omp pane, select text in a reply to **Comment** on it: the comment waits as
 a card above the message box and goes with your next prompt, quoting what it is
@@ -144,7 +144,7 @@ src/
 └── main.js        bootstrap
 daemon/            local daemon: HTTP server, loopback guard, omp processes, event log, session history, scratchpads
 styles/            tokens.css, app.css, omp.css, sessions.css, scratchpad.css
-tests/             node:test suites; fixtures/fake-omp.js stands in for omp
+tests/             bun test suites; fixtures/fake-omp.js stands in for omp
 e2e/               Playwright suites against the real daemon
 ```
 

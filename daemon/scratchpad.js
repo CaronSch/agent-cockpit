@@ -13,7 +13,7 @@
  * so two saves cannot both pass the check before either lands.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 // Pure and shared with the browser, so a pad has one title, and one set of ids and file rules, wherever it is used.
 import { ASSET_NAME, IMAGE_TYPES, LEGACY_PAD, PAD_ID, titleOf } from '../src/scratchpad/blocks.js';
@@ -37,8 +37,7 @@ export function safeAssetName(name) {
  */
 export async function adoptLegacyScratchpad(legacyFile, dir) {
   const target = join(dir, `${LEGACY_PAD}.md`);
-  const [from, to] = await Promise.all([stat(legacyFile).catch(() => null), stat(target).catch(() => null)]);
-  if (!from || to) return false;
+  if (!(await Bun.file(legacyFile).exists()) || (await Bun.file(target).exists())) return false;
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await rename(legacyFile, target);
   return true;
@@ -74,10 +73,8 @@ export function createScratchpads({ dir }) {
 
   /** @param {string} id @returns {Promise<Scratchpad>} */
   async function read(id) {
-    const text = await readFile(fileOf(id), 'utf8').catch((/** @type {NodeJS.ErrnoException} */ err) => {
-      if (err.code === 'ENOENT') return '';
-      throw err;
-    });
+    const file = Bun.file(fileOf(id));
+    const text = (await file.exists()) ? await file.text() : '';
     return { text, rev: revOf(text) };
   }
 
@@ -113,8 +110,8 @@ export function createScratchpads({ dir }) {
           .filter((name) => name.endsWith('.md') && PAD_ID.test(name.slice(0, -3)))
           .map(async (name) => {
             const id = name.slice(0, -3);
-            const [info, text] = await Promise.all([stat(join(dir, name)), readFile(join(dir, name), 'utf8')]);
-            return { id, title: titleOf(text), modifiedAt: info.mtimeMs, size: info.size };
+            const file = Bun.file(join(dir, name));
+            return { id, title: titleOf(await file.text()), modifiedAt: file.lastModified, size: file.size };
           }),
       );
       return pads.sort((a, b) => b.modifiedAt - a.modifiedAt);

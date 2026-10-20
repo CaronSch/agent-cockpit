@@ -24,7 +24,7 @@ const garbled = (line, error) => ({ ok: false, line, error });
 
 /** @param {{ maxReassembledBytes?: number }} [options] */
 export function createFrameDecoder({ maxReassembledBytes = DEFAULT_MAX_REASSEMBLED_BYTES } = {}) {
-  /** @type {Buffer[]} */
+  /** @type {Uint8Array[]} */
   let partial = [];
   /** @type {ChunkRun | null} */
   let run = null;
@@ -102,7 +102,7 @@ export function createFrameDecoder({ maxReassembledBytes = DEFAULT_MAX_REASSEMBL
   }
 
   return {
-    /** @param {Buffer} data @returns {Decoded[]} */
+    /** @param {Uint8Array} data @returns {Decoded[]} */
     push(data) {
       /** @type {Decoded[]} */
       const out = [];

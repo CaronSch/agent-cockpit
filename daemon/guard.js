@@ -12,15 +12,14 @@ import { timingSafeEqual } from 'node:crypto';
 export const TOKEN_COOKIE = 'ac_token';
 
 /** @typedef {{ ok: true } | { ok: false, status: number, error: string }} Verdict */
-/** @typedef {Record<string, string | string[] | undefined>} Headers */
 
 /** @param {number} port */
 export const ownOrigins = (port) => [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
 
-/** @param {string | undefined} host @param {number} port */
+/** @param {string | null} host @param {number} port */
 export const isAllowedHost = (host, port) => host === `127.0.0.1:${port}` || host === `localhost:${port}`;
 
-/** @param {string | undefined} header @returns {Map<string, string>} */
+/** @param {string | null} header @returns {Map<string, string>} */
 export function parseCookies(header) {
   const cookies = new Map();
   for (const part of (header ?? '').split(';')) {
@@ -41,24 +40,18 @@ export function tokensMatch(given, token) {
 /** @param {number} status @param {string} error @returns {Verdict} */
 const deny = (status, error) => ({ ok: false, status, error });
 
-/** @param {Headers} headers @param {string} name */
-const single = (headers, name) => {
-  const value = headers[name];
-  return Array.isArray(value) ? value[0] : value;
-};
-
 /**
  * @param {{ method: string, headers: Headers, port: number, token: string }} request
  * @returns {Verdict}
  */
 export function checkApiRequest({ method, headers, port, token }) {
-  if (!isAllowedHost(single(headers, 'host'), port)) return deny(403, 'unexpected Host header');
-  const origin = single(headers, 'origin');
-  if (origin !== undefined && !ownOrigins(port).includes(origin)) return deny(403, 'cross-origin request refused');
-  const site = single(headers, 'sec-fetch-site');
-  if (site !== undefined && site !== 'same-origin' && site !== 'none') return deny(403, 'cross-site request refused');
-  if (method !== 'GET' && method !== 'HEAD' && origin === undefined) return deny(403, 'missing Origin header');
-  if (!tokensMatch(parseCookies(single(headers, 'cookie')).get(TOKEN_COOKIE), token)) {
+  if (!isAllowedHost(headers.get('host'), port)) return deny(403, 'unexpected Host header');
+  const origin = headers.get('origin');
+  if (origin !== null && !ownOrigins(port).includes(origin)) return deny(403, 'cross-origin request refused');
+  const site = headers.get('sec-fetch-site');
+  if (site !== null && site !== 'same-origin' && site !== 'none') return deny(403, 'cross-site request refused');
+  if (method !== 'GET' && method !== 'HEAD' && origin === null) return deny(403, 'missing Origin header');
+  if (!tokensMatch(parseCookies(headers.get('cookie')).get(TOKEN_COOKIE), token)) {
     return deny(401, 'not authenticated: open the URL the daemon printed');
   }
   return { ok: true };

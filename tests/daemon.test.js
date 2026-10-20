@@ -1,25 +1,21 @@
-import { test, describe, before, after } from 'node:test';
+import { test, describe, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
-import { request as httpRequest } from 'node:http';
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
 import { createAttachments } from '../daemon/attachments.js';
 import { createScratchpads } from '../daemon/scratchpad.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { SETUP_COMMANDS } from '../daemon/omp-session.js';
-/** @import { AddressInfo } from 'node:net' */
-/** @import { Server } from 'node:http' */
 /** @import { StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = resolve(import.meta.dir, '..');
 const FAKE_OMP = join(ROOT, 'tests/fixtures/fake-omp.js');
 const TOKEN = 'a'.repeat(64);
 
-/** @type {Server} */
+/** @type {ReturnType<typeof createDaemonServer>} */
 let server;
 /** @type {ReturnType<typeof createHub>} */
 let hub;
@@ -28,32 +24,27 @@ let cwd = '';
 
 /**
  * @param {{ method?: string, path: string, headers?: Record<string, string>, body?: unknown, raw?: string, auth?: boolean, origin?: boolean }} options
- * @returns {Promise<{ status: number, headers: import('node:http').IncomingHttpHeaders, text: string, json: any }>}
+ * @returns {Promise<{ status: number, headers: Headers, text: string, json: any }>}
  */
-function call({ method = 'GET', path, headers = {}, body, raw, auth = true, origin = method !== 'GET' }) {
-  const all = {
-    host: `127.0.0.1:${port}`,
-    ...(auth ? { cookie: `ac_token=${TOKEN}` } : {}),
-    ...(origin ? { origin: `http://127.0.0.1:${port}` } : {}),
-    ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-    ...headers,
-  };
-  return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: '127.0.0.1', port, method, path, headers: all }, (res) => {
-      let text = '';
-      res.setEncoding('utf8');
-      res.on('data', (d) => (text += d));
-      res.on('end', () => {
-        let json = null;
-        try {
-          json = JSON.parse(text);
-        } catch {}
-        resolve({ status: res.statusCode ?? 0, headers: res.headers, text, json });
-      });
-    });
-    req.on('error', reject);
-    req.end(raw ?? (body === undefined ? undefined : JSON.stringify(body)));
+async function call({ method = 'GET', path, headers = {}, body, raw, auth = true, origin = method !== 'GET' }) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    redirect: 'manual',
+    headers: {
+      host: `127.0.0.1:${port}`,
+      ...(auth ? { cookie: `ac_token=${TOKEN}` } : {}),
+      ...(origin ? { origin: `http://127.0.0.1:${port}` } : {}),
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...headers,
+    },
+    body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
   });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {}
+  return { status: res.status, headers: res.headers, text, json };
 }
 
 /**
@@ -61,39 +52,33 @@ function call({ method = 'GET', path, headers = {}, body, raw, auth = true, orig
  * @param {{ lastEventId?: string, done?: (events: StreamEvent[]) => boolean, ms?: number }} options
  * @returns {Promise<{ events: StreamEvent[], ids: string[] }>}
  */
-function readStream({ lastEventId, done = () => false, ms = 3000 }) {
-  return new Promise((resolve, reject) => {
-    /** @type {StreamEvent[]} */
-    const events = [];
-    /** @type {string[]} */
-    const ids = [];
-    let buffer = '';
-    const headers = { host: `127.0.0.1:${port}`, cookie: `ac_token=${TOKEN}`, ...(lastEventId ? { 'last-event-id': lastEventId } : {}) };
-    const req = httpRequest({ host: '127.0.0.1', port, path: '/api/stream', headers }, (res) => {
-      res.setEncoding('utf8');
-      res.on('data', (chunk) => {
-        buffer += chunk;
-        let end;
-        while ((end = buffer.indexOf('\n\n')) !== -1) {
-          const block = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          for (const l of block.split('\n')) {
-            if (l.startsWith('id: ')) ids.push(l.slice(4));
-            if (l.startsWith('data: ')) events.push(JSON.parse(l.slice(6)));
-          }
+async function readStream({ lastEventId, done = () => false, ms = 3000 }) {
+  /** @type {StreamEvent[]} */
+  const events = [];
+  /** @type {string[]} */
+  const ids = [];
+  const headers = { cookie: `ac_token=${TOKEN}`, ...(lastEventId ? { 'last-event-id': lastEventId } : {}) };
+  const res = await fetch(`http://127.0.0.1:${port}/api/stream`, { headers, signal: AbortSignal.timeout(ms) });
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for await (const bytes of /** @type {ReadableStream<Uint8Array>} */ (res.body)) {
+      buffer += decoder.decode(bytes, { stream: true });
+      let end;
+      while ((end = buffer.indexOf('\n\n')) !== -1) {
+        const block = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+        for (const l of block.split('\n')) {
+          if (l.startsWith('id: ')) ids.push(l.slice(4));
+          if (l.startsWith('data: ')) events.push(JSON.parse(l.slice(6)));
         }
-        if (done(events)) finish();
-      });
-    });
-    const finish = () => {
-      clearTimeout(timer);
-      req.destroy();
-      resolve({ events, ids });
-    };
-    const timer = setTimeout(finish, ms);
-    req.on('error', (err) => (/** @type {any} */ (err).code === 'ECONNRESET' ? undefined : reject(err)));
-    req.end();
-  });
+      }
+      if (done(events)) break;
+    }
+  } catch (err) {
+    if (/** @type {Error} */ (err).name !== 'TimeoutError') throw err;
+  }
+  return { events, ids };
 }
 
 /** @param {string} id @param {SessionMeta['status']} status */
@@ -111,7 +96,7 @@ async function waitForStatus(id, status) {
 const forSession = (events, session) =>
   /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.session === session));
 
-before(async () => {
+beforeAll(async () => {
   cwd = await mkdtemp(join(tmpdir(), 'ac-daemon-test-'));
   hub = createHub({ ompPath: FAKE_OMP });
   server = createDaemonServer({
@@ -122,16 +107,15 @@ before(async () => {
     token: TOKEN,
     root: ROOT,
     config: { defaultCwd: cwd, home: cwd, scratchpadDir: join(cwd, 'state', 'scratchpads') },
+    port: 0,
     rpcHoldMs: 200,
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(undefined)));
-  port = /** @type {AddressInfo} */ (server.address()).port;
+  port = /** @type {number} */ (server.port);
 });
 
-after(async () => {
+afterAll(async () => {
   await hub.closeAll();
-  server.closeAllConnections();
-  await new Promise((resolve) => server.close(() => resolve(undefined)));
+  await server.stop(true);
 });
 
 describe('loopback guard', () => {
@@ -162,8 +146,8 @@ describe('loopback guard', () => {
   test('the token link sets an HttpOnly, SameSite=Strict cookie and drops the token from the URL', async () => {
     const res = await call({ path: `/?token=${TOKEN}&x=1`, auth: false });
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/?x=1');
-    const cookie = String(res.headers['set-cookie']);
+    assert.equal(res.headers.get('location'), '/?x=1');
+    const cookie = String(res.headers.get('set-cookie'));
     assert.match(cookie, new RegExp(`^ac_token=${TOKEN};`));
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
@@ -290,7 +274,7 @@ describe('sessions', () => {
 
   test('each session reports the journal it writes, so a window can tell a past session is open', async () => {
     const journal = join(cwd, 'earlier.jsonl');
-    await writeFile(journal, '');
+    await Bun.write(journal, '');
     const resumed = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
     assert.equal(resumed.json.session.sessionFile, journal, 'known from the start for a resumed session');
 
@@ -331,7 +315,7 @@ describe('sessions', () => {
 
   test('a session that already has a name is not renamed, and one that cannot be named is asked only 3 times', async () => {
     const journal = join(cwd, 'titled.jsonl');
-    await writeFile(journal, '');
+    await Bun.write(journal, '');
     const titled = (await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } })).json.session.id;
     await waitForStatus(titled, 'ready');
     assert.equal(renames(await turn(titled, 'fix the login bug')), 0);
@@ -404,15 +388,15 @@ describe('scratchpads', () => {
     const image = await call({ path: `/api/scratchpads/shots/assets/${up.json.path.split('/')[1]}` });
     assert.equal(image.status, 200);
     assert.equal(image.text, 'PNGDATA');
-    assert.equal(image.headers['content-type'], 'image/png');
-    assert.match(String(image.headers['content-security-policy']), /sandbox/);
-    assert.equal(image.headers['content-disposition'], undefined);
+    assert.equal(image.headers.get('content-type'), 'image/png');
+    assert.match(String(image.headers.get('content-security-policy')), /sandbox/);
+    assert.equal(image.headers.get('content-disposition'), null);
 
     const page = await call({ method: 'POST', path: '/api/scratchpads/shots/assets', headers: { 'x-file-name': 'evil.html' }, raw: '<script>alert(1)</script>' });
     const served = await call({ path: `/api/scratchpads/shots/assets/${page.json.path.split('/')[1]}` });
-    assert.equal(served.headers['content-type'], 'application/octet-stream');
-    assert.equal(served.headers['content-disposition'], 'attachment');
-    assert.match(String(served.headers['content-security-policy']), /sandbox/);
+    assert.equal(served.headers.get('content-type'), 'application/octet-stream');
+    assert.equal(served.headers.get('content-disposition'), 'attachment');
+    assert.match(String(served.headers.get('content-security-policy')), /sandbox/);
     assert.equal((await call({ path: '/api/scratchpads/shots/assets/nope.png' })).status, 404);
   });
 
@@ -436,8 +420,8 @@ describe('attachments', () => {
     const dir = join(cwd, 'state', 'attachments');
     assert.match(first.json.path, new RegExp(`^${dir}/\\d{4}-\\d\\d-\\d\\d/[a-z0-9]+-Screen-Shot-1\\.png$`));
     assert.notEqual(first.json.path, second.json.path, 'the same name twice is two files');
-    assert.equal(await readFile(first.json.path, 'utf8'), 'PNG one');
-    assert.equal(await readFile(second.json.path, 'utf8'), 'PNG two');
+    assert.equal(await Bun.file(first.json.path).text(), 'PNG one');
+    assert.equal(await Bun.file(second.json.path).text(), 'PNG two');
     assert.equal((await stat(first.json.path)).mode & 0o777, 0o600);
     assert.equal((await call({ path: '/api/attachments' })).status, 405);
   });

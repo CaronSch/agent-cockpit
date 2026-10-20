@@ -70,7 +70,7 @@ async function send(pane, text) {
 test('a browser without the token is told how to sign in, and the daemon serves it nothing', async ({ page }) => {
   await openWorkbench(page, { signIn: false });
   const pane = await addOmpPane(page);
-  await expect(pane.getByText('Open the URL printed by `npm start`')).toBeVisible();
+  await expect(pane.getByText('Open the URL printed by `bun start`')).toBeVisible();
   expect((await page.request.get('/api/sessions')).status()).toBe(401);
 });
 

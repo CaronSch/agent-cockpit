@@ -19,27 +19,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: npm
+          bun-version-file: package.json
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
 
       - name: Type check
-        run: npm run typecheck
+        run: bun run typecheck
 
       - name: Unit tests
-        run: npm test
+        run: bun run test
 
       - name: CLAUDE.md is up to date
-        run: npm run claude-md:check
+        run: bun run claude-md:check
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: bunx playwright install --with-deps chromium
 
       - name: Browser tests
-        run: npm run test:e2e
+        run: bun run test:e2e
 
       - name: Upload Playwright report
         if: failure()

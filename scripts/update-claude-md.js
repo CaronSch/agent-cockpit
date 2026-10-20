@@ -1,34 +1,24 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Regenerates the code-derived block of CLAUDE.md from the source tree, so a new
  * agent session starts from the app as it is, not as it was last described.
  *
- *   node scripts/update-claude-md.js          rewrite the block in place
- *   node scripts/update-claude-md.js --check  exit 1 if the block is stale
+ *   bun scripts/update-claude-md.js          rewrite the block in place
+ *   bun scripts/update-claude-md.js --check  exit 1 if the block is stale
  *
  * Only the text between the markers is touched; everything else in CLAUDE.md is
  * hand-written and must be kept current by whoever changes the behaviour.
  */
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
 /** @import { WidgetDef } from '../src/widgets/registry.js' */
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = resolve(import.meta.dir, '..');
 const DOC = join(ROOT, 'CLAUDE.md');
 const BEGIN = '<!-- BEGIN GENERATED: scripts/update-claude-md.js — do not edit by hand -->';
 const END = '<!-- END GENERATED -->';
 
-/** @param {string} dir @param {string} ext @returns {string[]} */
-function listFiles(dir, ext) {
-  return readdirSync(dir, { withFileTypes: true })
-    .flatMap((entry) => {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) return listFiles(path, ext);
-      return entry.name.endsWith(ext) ? [path] : [];
-    })
-    .sort();
-}
+/** Paths (relative to the repo) of the files in `dir` matching `pattern`. @param {string} dir @param {string} pattern */
+const listFiles = (dir, pattern) => [...new Bun.Glob(pattern).scanSync(join(ROOT, dir))].map((path) => `${dir}/${path}`).sort();
 
 /**
  * First sentence of the module's leading doc comment: the first block comment
@@ -55,23 +45,23 @@ function moduleSummary(source) {
 }
 
 async function generate() {
-  const sources = [...listFiles(join(ROOT, 'src'), '.js'), ...listFiles(join(ROOT, 'daemon'), '.js')];
-  const modules = sources.map((path) => {
-    const summary = moduleSummary(readFileSync(path, 'utf8'));
-    return `- \`${relative(ROOT, path)}\` — ${summary ?? '**no module doc comment; add one**'}`;
-  });
+  const sources = [...listFiles('src', '**/*.js'), ...listFiles('daemon', '**/*.js')];
+  const modules = await Promise.all(
+    sources.map(async (path) => {
+      const summary = moduleSummary(await Bun.file(join(ROOT, path)).text());
+      return `- \`${path}\` — ${summary ?? '**no module doc comment; add one**'}`;
+    }),
+  );
 
-  const { WIDGETS } = await import(pathToFileURL(join(ROOT, 'src/widgets/registry.js')).href);
+  const { WIDGETS } = await import(join(ROOT, 'src/widgets/registry.js'));
   /** @type {Readonly<Record<string, WidgetDef>>} */
   const registry = WIDGETS;
   const widgets = Object.values(registry).map((w) => `- \`${w.type}\` — ${w.title}: ${w.description}`);
 
-  const { scripts } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-  const commands = Object.entries(scripts).map(([name, cmd]) => `- \`npm run ${name}\` — \`${cmd}\``);
+  const { scripts } = await Bun.file(join(ROOT, 'package.json')).json();
+  const commands = Object.entries(scripts).map(([name, cmd]) => `- \`bun run ${name}\` — \`${cmd}\``);
 
-  const tests = [...listFiles(join(ROOT, 'tests'), '.test.js'), ...listFiles(join(ROOT, 'e2e'), '.spec.js')].map(
-    (path) => `\`${relative(ROOT, path)}\``,
-  );
+  const tests = [...listFiles('tests', '**/*.test.js'), ...listFiles('e2e', '**/*.spec.js')].map((path) => `\`${path}\``);
 
   return [
     BEGIN,
@@ -84,7 +74,7 @@ async function generate() {
     '',
     ...widgets,
     '',
-    '### npm scripts',
+    '### Scripts',
     '',
     ...commands,
     '',
@@ -96,7 +86,7 @@ async function generate() {
   ].join('\n');
 }
 
-const doc = readFileSync(DOC, 'utf8');
+const doc = await Bun.file(DOC).text();
 const start = doc.indexOf(BEGIN);
 const stop = doc.indexOf(END);
 if (start === -1 || stop === -1 || stop < start) {
@@ -107,9 +97,9 @@ if (start === -1 || stop === -1 || stop < start) {
 const next = doc.slice(0, start) + (await generate()) + doc.slice(stop + END.length);
 if (process.argv.includes('--check')) {
   if (next !== doc) {
-    console.error('[update-claude-md] CLAUDE.md is stale; run: node scripts/update-claude-md.js');
+    console.error('[update-claude-md] CLAUDE.md is stale; run: bun run claude-md');
     process.exit(1);
   }
 } else if (next !== doc) {
-  writeFileSync(DOC, next);
+  await Bun.write(DOC, next);
 }

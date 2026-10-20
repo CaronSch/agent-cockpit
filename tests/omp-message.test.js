@@ -1,4 +1,4 @@
-import { test, describe } from 'node:test';
+import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { asQuote, composeAsk, composeMessage, isCommand, isLargePaste } from '../src/omp/message.js';
 
