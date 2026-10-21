@@ -235,7 +235,7 @@ export function askAnswers(questions, picks) {
  * box; they reach the pane as the session title and in `/rename`'s output.
  * @param {string} text
  */
-const withoutIcons = (text) => text.replace(/\p{Co}/gu, '').replace(/ {2,}/g, ' ').trim();
+const withoutIcons = (text) => text.replace(/\p{Co} ?/gu, '').trim();
 
 /**
  * Whether an `agent_end` hands the turn back to the user; `yielded: false` means the agent
@@ -368,8 +368,12 @@ function applyFrame(state, frame) {
     case 'available_commands_update':
       state.commands = Array.isArray(frame.commands) ? frame.commands.map(slashCommand) : [];
       return;
-    case 'command_output':
-      return note(state, 'info', 'command', '', withoutIcons(String(frame.text ?? '')));
+    case 'command_output': {
+      // One line ("Session renamed to …", whoever ran the command) is a quiet note; longer
+      // output is a slash command's answer to read, shown open.
+      const output = withoutIcons(String(frame.text ?? ''));
+      return output.includes('\n') ? note(state, 'info', 'command', '', output) : note(state, 'muted', 'command', output);
+    }
     case 'session_info_update':
       if (typeof frame.title === 'string') state.session.name = withoutIcons(frame.title) || null;
       return;

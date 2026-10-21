@@ -1,6 +1,10 @@
 /**
  * One omp process in RPC mode: launch, protocol setup, command/response correlation and
  * lifecycle, with everything it does reported as session events.
+ *
+ * It also asks once for a title. omp names sessions by itself only in its TUI, so when the
+ * first turn has settled in a session with no name, the daemon sends `/rename` with no
+ * title, as a user would: omp's title model names the conversation in the background.
  */
 import { createFrameDecoder } from './frame-decoder.js';
 /** @import { RpcResponse, SessionEvent, SessionMeta } from './wire.js' */
@@ -44,6 +48,7 @@ const STATE_CHANGING_FRAMES = new Set(['agent_end', 'model_changed', 'thinking_l
 const changesState = (frame) =>
   frame.type === 'response' ? frame.success === true && STATE_CHANGING_COMMANDS.has(frame.command) : STATE_CHANGING_FRAMES.has(frame.type);
 
+const RENAME = Object.freeze({ type: 'prompt', message: '/rename' });
 const CLOSE_GRACE_MS = 5000;
 const MAX_GARBLED_CHARS = 64 * 1024;
 
@@ -82,6 +87,8 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
   let finished = false;
   /** @type {PromiseWithResolvers<void>} */
   const closed = Promise.withResolvers();
+  let named = false;
+  let settledOnce = false;
 
   /** @param {Partial<SessionMeta>} patch */
   const update = (patch) => {
@@ -139,6 +146,13 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
     if (frame.type === 'response' && frame.command === 'get_state' && frame.success) {
       const file = frame.data?.sessionFile;
       if (typeof file === 'string' && file !== meta.sessionFile) update({ sessionFile: file });
+      if (frame.data?.sessionName) named = true;
+    }
+    if (frame.type === 'session_info_update' && frame.title) named = true;
+    // omp settles once per stretch of agent activity, so the first settle ends the first turn.
+    if (frame.type === 'session_settled' && !settledOnce) {
+      settledOnce = true;
+      if (!named) send(RENAME).response.catch(() => {});
     }
     if (frame.type === 'response' && typeof frame.id === 'string') {
       const waiter = pending.get(frame.id);

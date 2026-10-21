@@ -284,7 +284,17 @@ describe('derived state', () => {
     ]);
     assert.equal(state.session.name, 'Fix the login flow');
     const output = state.items.at(-1);
-    assert.equal(output?.kind === 'note' ? output.detail : null, 'Session renamed to Fix the login flow.');
+    assert.equal(output?.kind === 'note' ? output.text : null, 'Session renamed to Fix the login flow.');
+  });
+
+  test('one line of command output is a quiet note; several lines are an answer shown open', () => {
+    const state = run([
+      frame({ type: 'command_output', text: 'Session renamed to Login fix.\n' }),
+      frame({ type: 'command_output', text: 'Workspace directories:\n  /work (working directory)' }),
+    ]);
+    const [line, lines] = state.items.slice(-2).map((i) => (i.kind === 'note' ? [i.level, i.source, i.text, i.detail] : null));
+    assert.deepEqual(line, ['muted', 'command', 'Session renamed to Login fix.', null]);
+    assert.deepEqual(lines, ['info', 'command', '', 'Workspace directories:\n  /work (working directory)']);
   });
 
   test('a side question’s answer builds up beside the chat and never enters it', () => {
