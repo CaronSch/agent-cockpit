@@ -4,11 +4,13 @@
  *
  * Claiming: a window holds the Web Lock `cockpit:<workspace>:<screen>` until it goes away,
  * and tries screens in `claimOrder`: the one its tab showed before (kept in sessionStorage),
- * then each saved screen, else a new one. For the tab's own screen it waits a moment, since
- * on a reload the page going away may still hold that lock; a duplicated tab finds it still
- * held after the wait and moves on. The lock keeps windows that open at once (a restored
- * browser session) off each other's screens. Locks are per origin: windows open at two
- * different addresses at the same time do not see each other's claims.
+ * then each saved screen, else a new one. A page going away notes in sessionStorage which
+ * screen it lets go of, with its navigation entry; the page that replaces it in the tab (a
+ * reload) finds that entry as `navigation.activation.from` and waits for the lock, which the
+ * old page may still hold for a moment. A duplicated or restored tab replaced no page (its
+ * `from` is null), so it takes only free screens, at once. The lock keeps windows that open
+ * at once (a restored browser session) off each other's screens. Locks are per origin:
+ * windows open at two different addresses at the same time do not see each other's claims.
  *
  * Saving: a change is saved after a short pause, and a page going away sends its last
  * change in a keepalive request. A screen is stored once it holds a window and deleted when
@@ -48,28 +50,44 @@ import { DEFAULT_WORKSPACE, SCREEN_ID, claimOrder, lockName, newScreenId, worksp
 
 const SAVE_DELAY_MS = 250;
 const RETRY_MS = 2000;
-/** How long a window waits for its tab's own screen to be let go (a reload's old page). */
-const OWN_SCREEN_WAIT_MS = 1500;
+/** Where a page going away notes the screen it lets go of (see `handedOver`). */
+const HANDOVER_KEY = 'cockpit.handover';
 const SIGNED_OUT =
   'This browser is not signed in, so this layout lasts only until the page closes. Open the URL printed by `bun start` to sign in.';
 /** Where versions before workspaces kept the layout (see `legacyLayout`). */
 const LEGACY_LAYOUT_KEY = 'cockpit.layout.v1';
 
 /**
- * Takes lock `name` and holds it until the page goes away or the returned release is called;
- * null when another window holds it (after `waitMs`, if given, has passed).
- * @param {string} name @param {number} [waitMs] @returns {Promise<(() => void) | null>}
+ * Takes lock `name` and holds it until the page goes away or the returned release is called.
+ * Unless told to wait for it, null when another window holds it.
+ * @param {string} name @param {{ wait?: boolean }} [options] @returns {Promise<(() => void) | null>}
  */
-function hold(name, waitMs = 0) {
-  return new Promise((resolve) => {
-    const options = waitMs ? { signal: AbortSignal.timeout(waitMs) } : { ifAvailable: true };
+function hold(name, { wait = false } = {}) {
+  return new Promise((resolve, reject) => {
     navigator.locks
-      .request(name, options, (lock) => {
+      .request(name, wait ? {} : { ifAvailable: true }, (lock) => {
         if (!lock) return resolve(null);
         return new Promise((release) => resolve(() => release(undefined)));
       })
-      .catch(() => resolve(null)); // the wait ran out: another window has it
+      .catch(reject);
   });
+}
+
+/**
+ * Whether the page this one replaced in its tab (a reload, or a navigation from it) let go of
+ * lock `name` as it went: then it is about to release it, if it has not yet. A duplicated or
+ * restored tab carries a copy of the note but replaced no page, so it never matches.
+ * @param {string} name
+ */
+function handedOver(name) {
+  const from = globalThis.navigation?.activation?.from?.id;
+  if (!from) return false;
+  try {
+    const note = JSON.parse(sessionStorage.getItem(HANDOVER_KEY) ?? 'null');
+    return note?.lock === name && note.entry === from;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -131,7 +149,8 @@ async function claimScreen(daemon, workspace, saved) {
     const remembered = sessionStorage.getItem(tabKey);
     const own = remembered && SCREEN_ID.test(remembered) ? remembered : null;
     for (const id of claimOrder(own, saved.map((s) => s.id))) {
-      const got = await hold(lockName(workspace, id), id === own ? OWN_SCREEN_WAIT_MS : 0);
+      const name = lockName(workspace, id);
+      const got = await hold(name, { wait: id === own && handedOver(name) });
       if (got) {
         release = got;
         return id;
@@ -142,6 +161,13 @@ async function claimScreen(daemon, workspace, saved) {
 
   let id = await claim();
   sessionStorage.setItem(tabKey, id);
+  // For the page that replaces this one in the tab (see `handedOver`); a page kept in the
+  // back/forward cache keeps its lock, so it lets go of nothing.
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return;
+    const note = { lock: lockName(workspace, id), entry: globalThis.navigation?.currentEntry?.id };
+    sessionStorage.setItem(HANDOVER_KEY, JSON.stringify(note));
+  });
   const mine = saved.find((s) => s.id === id);
   /** The newest layout. @type {Tree} */
   let latest = mine?.tree ?? null;
