@@ -1,11 +1,11 @@
 /**
- * Which omp events turn an omp window "unread": the agent's final response, when it hands
- * the turn back to the user, or a question it stops to ask them.
+ * Which omp events make a session "unread": the agent's final response, when it hands the
+ * turn back to the user, or a question it stops to ask them.
  *
  * Nothing in between counts (thinking, intermediate replies, tool runs, notices, command
- * output): the user only needs to come back when the agent is done or waiting on them. A
- * session needs its user's attention while the newest such event is later than what they
- * have seen of it (SessionMeta `seenAt`, kept by the daemon for every window).
+ * output): the user only needs to come back when the agent is done or waiting on them. The
+ * daemon marks the conversation unread at each such event (daemon/unread.js), for every
+ * window; an omp window reads at once what lands while its user is looking at it.
  */
 import { handsTurnBack } from './transcript.js';
 /** @import { SessionEvent } from '../../daemon/wire.js' */

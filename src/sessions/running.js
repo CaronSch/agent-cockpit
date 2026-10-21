@@ -5,17 +5,16 @@
  *
  * A session runs from its launch until the user stops it or the daemon exits; windows only
  * show it. How it is doing is read from its own events, as an omp window reads them: its
- * name and whether a turn runs from the transcript, whether it needs attention from what
- * awaits the user against what they have seen (`omp/activity.js`).
+ * name, whether a turn runs and whether it asks its user something from the transcript; and
+ * from whether the user has read what it did (daemon/unread.js).
  */
 import { applyEvent, conversationName, createTranscript } from '../omp/transcript.js';
-import { awaitedAfter } from '../omp/activity.js';
 /** @import { PastSession, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { LeafParams } from '../layout/grid-model.js' */
 /** @import { Transcript } from '../omp/transcript.js' */
 
-/** @typedef {'starting' | 'working' | 'idle' | 'attention'} RunningState */
-/** What the list follows of one running session. @typedef {{ transcript: Transcript, awaitedAt: number }} Followed */
+/** @typedef {'starting' | 'asking' | 'working' | 'done' | 'idle'} RunningState */
+/** What the list follows of one running session. @typedef {{ transcript: Transcript }} Followed */
 
 /** @param {SessionMeta} meta */
 export const isRunning = (meta) => meta.status === 'starting' || meta.status === 'ready';
@@ -28,27 +27,29 @@ export const runningSessions = (metas, directory) =>
   metas.filter((m) => isRunning(m) && (!directory || m.cwd === directory)).sort((a, b) => b.startedAt - a.startedAt);
 
 /** @returns {Followed} */
-export const follow = () => ({ transcript: createTranscript(), awaitedAt: 0 });
+export const follow = () => ({ transcript: createTranscript() });
 
 /** @param {Followed} followed @param {SessionEvent} event */
 export function noteEvent(followed, event) {
   applyEvent(followed.transcript, event);
-  followed.awaitedAt = awaitedAfter(followed.awaitedAt, event);
 }
 
 /**
- * How a running session is doing: still starting, waiting on its user (it finished or asks
- * something they have not seen), working on a turn, or idle.
- * @param {Followed} followed @param {SessionMeta} meta @returns {RunningState}
+ * How a running session is doing: still starting, asking its user something (a question or
+ * an approval, read or not: it waits until they answer), working on a turn, done (it handed
+ * the turn back and they have not read it yet), or idle.
+ * @param {Followed} followed @param {SessionMeta} meta @param {boolean} unread
+ * @returns {RunningState}
  */
-export function runningState(followed, meta) {
+export function runningState(followed, meta, unread) {
   if (meta.status === 'starting') return 'starting';
-  if (followed.awaitedAt > meta.seenAt) return 'attention';
-  return followed.transcript.streaming ? 'working' : 'idle';
+  if (followed.transcript.dialogs.length > 0) return 'asking';
+  if (followed.transcript.streaming) return 'working';
+  return unread ? 'done' : 'idle';
 }
 
 /** How each state reads in the list: a short word. @type {Readonly<Record<RunningState, string>>} */
-export const STATE_LABELS = Object.freeze({ starting: 'starting', working: 'working', idle: 'idle', attention: 'needs you' });
+export const STATE_LABELS = Object.freeze({ starting: 'starting', asking: 'needs you', working: 'working', done: 'done', idle: 'idle' });
 
 /** What the session is called: its title, else its first prompt (as an omp window names it). @param {Followed} followed */
 export const followedName = (followed) => conversationName(followed.transcript);

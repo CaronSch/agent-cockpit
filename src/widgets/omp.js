@@ -128,8 +128,9 @@ function createPane(body, ctx, daemon) {
   });
 
   // ── unread: a final response or question nobody has looked at (omp/activity.js) ──
-  // What was seen is the daemon's (SessionMeta `seenAt`), so every window showing the session,
-  // and the Sessions window, agree on it.
+  // Which conversations are unread is the daemon's (daemon/unread.js), so every window showing
+  // the session, and the Sessions window, agree on it, across reloads and restarts.
+  const offUnread = daemon.onUnread(() => schedule());
   let pointerInside = false;
   /** Looking at this window: the pointer is over it, in a page that has focus. */
   const reading = () => pointerInside && document.visibilityState === 'visible' && document.hasFocus();
@@ -374,20 +375,27 @@ function createPane(body, ctx, daemon) {
    */
   function createSessionView(session) {
     const state = createTranscript();
-    /** When the session last waited on its user (omp/activity.js), and what this window told the daemon they saw. */
+    /** When the session last waited on its user here (omp/activity.js), and the last mark this window read. */
     let awaitedAt = 0;
-    let seenSent = 0;
+    let readSent = -Infinity;
     const subscription = daemon.subscribe(session, (event) => {
       applyEvent(state, event);
       awaitedAt = awaitedAfter(awaitedAt, event);
       schedule();
     });
-    const seenAt = () => Math.max(daemon.meta(session)?.seenAt ?? Infinity, seenSent);
+    const ompId = () => daemon.meta(session)?.ompId ?? null;
+    /** When the conversation became unread, unless this window has read that already. */
+    const unreadSince = () => {
+      const since = daemon.unreadSince(ompId());
+      return since !== null && since > readSent ? since : null;
+    };
     function markRead() {
-      if (awaitedAt <= seenAt()) return;
-      seenSent = awaitedAt;
+      const id = ompId();
+      const since = unreadSince();
+      if (id === null || since === null) return;
+      readSent = since;
       ctx.setUnread(false);
-      daemon.markSeen(session, awaitedAt).catch(() => {});
+      daemon.markRead(id, since).catch(() => {});
     }
     // The subscription replayed history synchronously: requests in it are already handled.
     let editorSeen = state.editorText?.seq ?? 0;
@@ -1043,9 +1051,11 @@ function createPane(body, ctx, daemon) {
       drawQueue();
       drawComposer();
       selectionPopup.refresh();
-      // News that lands under the reader's eyes is read as it comes.
-      if (reading()) markRead();
-      ctx.setUnread(awaitedAt > seenAt());
+      // News that lands under the reader's eyes is read as it comes. A mark the user made
+      // themselves (newer than any news here) waits for them to come back to the window.
+      const since = unreadSince();
+      if (since !== null && since <= awaitedAt && reading()) markRead();
+      ctx.setUnread(unreadSince() !== null);
     }
 
     return {
@@ -1077,6 +1087,7 @@ function createPane(body, ctx, daemon) {
       if (frame) cancelAnimationFrame(frame);
       offStatus();
       offReset();
+      offUnread();
       // The session runs on: the daemon's, not this window's.
       view?.destroy();
       view = null;

@@ -5,6 +5,7 @@
  * once never meet. The runner process decides when it loads the config; its workers inherit
  * the choice through the environment.
  */
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -12,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** A port nothing listens on now. @returns {Promise<number>} */
-function freePort() {
+export function freePort() {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.on('error', reject);
@@ -94,4 +95,35 @@ export async function rpcAnswer(request) {
     stream.abort();
   }
   throw new Error(`the stream ended before omp answered ${id}`);
+}
+
+/**
+ * A daemon of a test's own, beside the shared one, for a test that restarts it: the real
+ * daemon with the fake omp, keeping its state in `stateDir` and reading journals from
+ * `sessionsDir`. Resolves once it answers; `stop()` ends it as Ctrl+C does.
+ * @param {{ port: number, stateDir: string, sessionsDir: string }} options
+ */
+export async function startDaemon({ port, stateDir, sessionsDir }) {
+  const child = spawn('bun', ['daemon/main.js', '--port', String(port), '--omp', 'tests/fixtures/fake-omp.js'], {
+    env: { ...process.env, HOME: E2E_HOME, COCKPIT_STATE_DIR: stateDir, COCKPIT_OMP_SESSIONS: sessionsDir },
+    stdio: 'ignore',
+  });
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  for (let tries = 0; ; tries++) {
+    const up = await fetch(`http://127.0.0.1:${port}/`).then(
+      () => true,
+      () => false,
+    );
+    if (up) break;
+    if (tries > 100 || child.exitCode !== null) throw new Error(`the daemon on port ${port} did not start`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return {
+    /** The URL that signs a page in to this daemon, in `workspace`. @param {string} workspace */
+    url: (workspace) => `http://127.0.0.1:${port}/?token=${readFileSync(join(stateDir, 'token'), 'utf8').trim()}&workspace=${workspace}`,
+    async stop() {
+      child.kill('SIGTERM');
+      await exited;
+    },
+  };
 }

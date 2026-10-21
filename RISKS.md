@@ -73,6 +73,14 @@ is newer. The daemon prints its version at start.
   (`rename`) and `modes/rpc/rpc-session-settle.ts`, then update `daemon/omp-session.js`
   and the fake.
 
+- **Unread marks lean on omp's conversation id.** A session's mark is kept under
+  `get_state`'s `sessionId`, which must be its journal header's `id` (what the Sessions
+  window lists a past session by), also when resumed (`SessionManager` sets it from the
+  header). A change shows up as a session that is unread while it runs but read once it
+  stops, or the reverse. *Response:* re-read `session/session-manager.ts`
+  (`#applyEntries`) and `modes/rpc/rpc-mode.ts` (`get_state`), then update
+  `daemon/omp-session.js` and the fake.
+
 - **The Sessions window reads omp's private journal format.** `daemon/history.js`
   parses `~/.omp/agent/sessions/<project>/*.jsonl` directly (the `title` and
   `session` records, user messages and their `attribution`); omp has no rpc for

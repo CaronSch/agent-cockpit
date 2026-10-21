@@ -25,13 +25,13 @@ class FakeSource {
 }
 
 /** @param {string} id @param {SessionMeta['status']} [status] @returns {SessionMeta} */
-const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, fork: null, sessionFile: null, status, pid: 1, exitCode: null, error: null, startedAt: 0, seenAt: 0 });
+const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, fork: null, sessionFile: null, status, pid: 1, exitCode: null, error: null, startedAt: 0, ompId: null });
 
 /** @param {string} session @param {number} seq @returns {SessionEvent} */
 const frame = (session, seq) => ({ kind: 'frame', frame: { type: 'agent_start' }, seq, at: 0, session });
 
-/** @param {string} bootId @param {SessionMeta[]} [sessions] @param {string} [ui] @returns {StreamEvent} */
-const hello = (bootId, sessions = [], ui = 'v1') => ({ kind: 'hello', bootId, sessions, ui });
+/** @param {string} bootId @param {SessionMeta[]} [sessions] @param {string} [ui] @param {Record<string, number>} [unread] @returns {StreamEvent} */
+const hello = (bootId, sessions = [], ui = 'v1', unread = {}) => ({ kind: 'hello', bootId, sessions, unread, ui });
 
 /** The daemon's answer to POST /rpc: the id omp's response will carry on the stream. */
 const accepted = () => new Response(JSON.stringify({ id: 'ac_7' }), { status: 202 });
@@ -156,5 +156,22 @@ describe('daemon client', () => {
     await new Promise((r) => setImmediate(r));
     source.deliver({ kind: 'session', meta: meta('s1', 'exited'), seq: 1, at: 0, session: 's1' });
     await assert.rejects(answer, /omp exited before answering/);
+  });
+});
+
+describe('unread conversations', () => {
+  test('come with every hello and every change, and every listener hears them', async () => {
+    const { client, source } = await connectedClient();
+    let heard = 0;
+    client.onUnread(() => heard++);
+    assert.equal(client.unreadSince('c1'), null, 'nothing before the daemon says');
+    source.deliver(hello('b1', [], 'v1', { c1: 10 }));
+    assert.equal(client.unreadSince('c1'), 10);
+    source.deliver({ kind: 'unread', unread: { c2: 20 } });
+    assert.equal(client.unreadSince('c1'), null, 'read elsewhere');
+    assert.equal(client.unreadSince('c2'), 20);
+    assert.equal(client.unreadSince(null), null, 'a session omp has not named yet is never unread');
+    assert.equal(client.unreadSince('toString'), null, 'only the daemon’s own marks');
+    assert.equal(heard, 2);
   });
 });

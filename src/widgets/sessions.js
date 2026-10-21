@@ -16,6 +16,11 @@
  * Archive moves a session out of omp's sessions into the daemon's archive (omp's own resume
  * no longer offers it); "Archived" switches the window to the archived sessions, each with
  * Restore. A running session cannot be archived: omp is still writing its journal.
+ *
+ * A session with news its user has not read (daemon/unread.js) has a blue dot and a bold
+ * title, running, past or archived alike, and the window's top bar counts those it lists.
+ * Showing one from here reads it. Each row's menu (a right-click, the ContextMenu key,
+ * Shift+F10, or its ⋯ button) marks it read or unread, beside the row's other actions.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -23,6 +28,7 @@ import { getDaemon } from '../daemon/client.js';
 import { SORT_KEYS, directoryCounts, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
 import { STATE_LABELS, follow, followedName, isRunning, noteEvent, runningSessions, runningState, showPast, showRunning } from '../sessions/running.js';
 import { confirmBeside } from '../ui/confirm.js';
+import { openContextMenu, opensContextMenu } from '../ui/context-menu.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { PastSession, SessionMeta } from '../../daemon/wire.js' */
@@ -101,7 +107,7 @@ function createSessionsWindow(body, ctx, daemon) {
   let byFile = new Map();
   /** @type {string | null} */
   let error = null;
-  /** Why the last Archive or Restore failed, until the next one. @type {string | null} */
+  /** Why the last row action (Archive, Restore, Stop, a mark) failed, until the next one. @type {string | null} */
   let moveError = null;
   let loading = false;
   let loaded = false;
@@ -199,10 +205,52 @@ function createSessionsWindow(body, ctx, daemon) {
     return s && !showArchived() ? showPast(s) : null;
   }
 
-  /** Shows the row's session in the omp window this screen used last. @param {HTMLElement} row */
+  /** omp's id for the row's conversation (what its unread mark is kept under), if known. @param {HTMLElement} row */
+  function ompIdOf(row) {
+    if (row.dataset.session) return daemon.meta(row.dataset.session)?.ompId ?? null;
+    return byFile.get(row.dataset.file ?? '')?.id ?? null;
+  }
+
+  /** Marks the row's conversation read or unread. @param {HTMLElement} row @param {boolean} unread */
+  function mark(row, unread) {
+    const id = ompIdOf(row);
+    const since = daemon.unreadSince(id);
+    if (id === null || unread === (since !== null)) return;
+    (since === null ? daemon.markUnread(id) : daemon.markRead(id, since)).catch((err) => {
+      moveError = `Could not mark it ${unread ? 'unread' : 'read'}: ${errorMessage(err)}`;
+      draw();
+    });
+  }
+
+  /** Shows the row's session in the omp window this screen used last; that reads it. @param {HTMLElement} row */
   function show(row) {
     const params = paramsFor(row);
-    if (params) ctx.showWidget('omp', params);
+    if (!params) return;
+    ctx.showWidget('omp', params);
+    mark(row, false);
+  }
+
+  /**
+   * Opens the row's menu: show it, mark it read or unread, and its own last action.
+   * @param {HTMLElement} row @param {HTMLElement} anchor @param {{ x: number, y: number }} [at]
+   */
+  function openRowMenu(row, anchor, at) {
+    /** @type {import('../ui/context-menu.js').MenuItem[]} */
+    const items = [];
+    const meta = row.dataset.session ? daemon.meta(row.dataset.session) : null;
+    const s = byFile.get(row.dataset.file ?? '');
+    if (paramsFor(row)) items.push({ label: meta ? 'Show' : 'Resume', run: () => show(row) });
+    const id = ompIdOf(row);
+    if (id !== null) {
+      const unread = daemon.unreadSince(id) !== null;
+      items.push({ label: unread ? 'Mark as read' : 'Mark as unread', run: () => mark(row, !unread) });
+    }
+    /** The row's own button for an action, which shows that the action is under way. @param {string} kind */
+    const control = (kind) => /** @type {HTMLButtonElement} */ (row.querySelector(`.sessions-${kind}`));
+    if (meta) items.push({ label: 'Stop', run: () => stop(meta, control('stop')) });
+    else if (s && showArchived()) items.push({ label: 'Restore', run: () => void move(s, control('restore')) });
+    else if (s) items.push({ label: 'Archive', run: () => void move(s, control('archive')) });
+    openContextMenu(anchor, items, at);
   }
 
   /** Stops a running session, asking first while it works on a turn. @param {SessionMeta} meta @param {HTMLButtonElement} control */
@@ -215,8 +263,7 @@ function createSessionsWindow(body, ctx, daemon) {
         draw();
       });
     };
-    const f = followed.get(meta.id)?.followed;
-    if (f && runningState(f, meta) === 'working') {
+    if (followed.get(meta.id)?.followed.transcript.streaming) {
       confirmBeside(control, { message: 'The agent is working on a turn. Stop the session anyway?', action: 'Stop session', run });
     } else run();
   }
@@ -251,36 +298,65 @@ function createSessionsWindow(body, ctx, daemon) {
   }
 
   /** @param {SessionMeta} meta */
-  function renderRunningRow(meta) {
+  const isUnread = (meta) => daemon.unreadSince(meta.ompId) !== null;
+
+  /** @param {SessionMeta} meta */
+  function stateOf(meta) {
     const f = followed.get(meta.id)?.followed;
-    const state = f ? runningState(f, meta) : 'starting';
-    const row = el('li', `sessions-item is-running is-${state}`);
+    return f ? runningState(f, meta, isUnread(meta)) : 'starting';
+  }
+
+  /**
+   * The dot before a row's title: how a running session is doing, and blue while unread (then
+   * it says so to screen readers too).
+   * @param {boolean} unread
+   */
+  function rowDot(unread) {
+    const dot = el('span', 'sessions-dot');
+    if (unread) {
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', 'Unread');
+    } else dot.setAttribute('aria-hidden', 'true');
+    return dot;
+  }
+
+  /** The row's ⋯ button, which opens its menu. */
+  function moreButton() {
+    const more = button('sessions-action sessions-more', '⋯');
+    more.title = 'More: mark read or unread, and the rest (or right-click the row)';
+    more.setAttribute('aria-label', 'More actions');
+    more.setAttribute('aria-haspopup', 'menu');
+    return more;
+  }
+
+  /** @param {SessionMeta} meta */
+  function renderRunningRow(meta) {
+    const state = stateOf(meta);
+    const unread = isUnread(meta);
+    const row = el('li', `sessions-item is-running is-${state}${unread ? ' is-unread' : ''}`);
     row.tabIndex = 0;
     row.dataset.session = meta.id;
     row.title = `${meta.cwd}\nStarted ${new Date(meta.startedAt).toLocaleString()}\nClick to show it in the last omp window used, or drag it onto one`;
-    const dot = el('span', 'sessions-dot');
-    dot.setAttribute('aria-hidden', 'true');
     const word = el('span', 'sessions-state', STATE_LABELS[state]);
     const main = rowText(runningName(meta) ?? 'New session', [shortDir(meta.cwd)]);
     main.querySelector('.sessions-meta')?.append(' ', word);
     const actions = el('div', 'sessions-actions');
     const stopBtn = button('sessions-action sessions-stop', 'Stop');
     stopBtn.title = 'End this session';
-    actions.append(stopBtn);
-    row.append(dot, main, actions);
+    actions.append(stopBtn, moreButton());
+    row.append(rowDot(unread), main, actions);
     return row;
   }
 
   /** @param {PastSession} s @param {number} now */
   function renderRow(s, now) {
     const archived = showArchived();
-    const row = el('li', `sessions-item${archived ? ' is-archived' : ''}`);
+    const unread = daemon.unreadSince(s.id) !== null;
+    const row = el('li', `sessions-item${archived ? ' is-archived' : ''}${unread ? ' is-unread' : ''}`);
     row.tabIndex = 0;
     row.dataset.file = s.file;
     const hint = archived ? 'Archived: Restore to resume it' : 'Click to resume it in the last omp window used, or drag it onto one';
     row.title = `${s.title && s.firstPrompt ? `${s.firstPrompt}\n` : ''}${s.file}\nLast active ${new Date(s.modifiedAt).toLocaleString()}\n${hint}`;
-    const dot = el('span', 'sessions-dot');
-    dot.setAttribute('aria-hidden', 'true');
     const facts = [shortDir(s.cwd), relativeTime(s.modifiedAt, now), `${s.prompts} prompt${s.prompts === 1 ? '' : 's'}`];
     const main = rowText(displayTitle(s), facts);
     const actions = el('div', 'sessions-actions');
@@ -289,7 +365,8 @@ function createSessionsWindow(body, ctx, daemon) {
     } else {
       actions.append(button('sessions-action sessions-resume', 'Resume'), button('sessions-action sessions-archive', 'Archive'));
     }
-    row.append(dot, main, actions);
+    actions.append(moreButton());
+    row.append(rowDot(unread), main, actions);
     return row;
   }
 
@@ -386,22 +463,23 @@ function createSessionsWindow(body, ctx, daemon) {
       runningRows,
       running,
       (m) => m.id,
-      (m) => {
-        const f = followed.get(m.id)?.followed;
-        return JSON.stringify([runningName(m), m.cwd, f ? runningState(f, m) : 'starting', home]);
-      },
+      (m) => JSON.stringify([runningName(m), m.cwd, stateOf(m), isUnread(m), home]),
       renderRunningRow,
     );
 
     const now = Date.now();
+    const past = sortSessions(shownSessions(), sortKey(), dir);
+    const unreadPast = (/** @type {PastSession} */ s) => daemon.unreadSince(s.id) !== null;
     syncRows(
       list,
       rows,
-      sortSessions(shownSessions(), sortKey(), dir),
+      past,
       (s) => s.file,
-      (s) => JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), home, showArchived()]),
+      (s) => JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), home, showArchived(), unreadPast(s)]),
       (s) => renderRow(s, now),
     );
+    const unread = running.filter(isUnread).length + past.filter(unreadPast).length;
+    ctx.setLabel(unread ? `${unread} unread` : null);
   }
 
   // ── interaction ──
@@ -410,12 +488,20 @@ function createSessionsWindow(body, ctx, daemon) {
 
   // A row drags out from anywhere on it, its Resume button included; its other actions only act.
   root.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive, .sessions-stop')) return;
+    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive, .sessions-stop, .sessions-more')) return;
     const row = rowAt(event.target);
     const params = row && paramsFor(row);
     if (!row || !params) return;
     const label = row.querySelector('.sessions-title')?.textContent ?? 'omp';
-    ctx.dragWidget('omp', params, event, { label, into: true });
+    // Dropped, it shows in an omp window: that reads it, as a click does.
+    ctx.dragWidget('omp', params, event, { label, into: true, onEnd: ({ dropped }) => dropped && mark(row, false) });
+  });
+  root.addEventListener('contextmenu', (event) => {
+    const row = rowAt(event.target);
+    if (!row) return;
+    event.preventDefault();
+    row.focus();
+    openRowMenu(row, row, { x: event.clientX, y: event.clientY });
   });
   root.addEventListener('click', (event) => {
     const row = rowAt(event.target);
@@ -424,13 +510,17 @@ function createSessionsWindow(body, ctx, daemon) {
     const meta = row.dataset.session ? daemon.meta(row.dataset.session) : null;
     const s = byFile.get(row.dataset.file ?? '');
     if (!control || control.classList.contains('sessions-resume')) show(row);
+    else if (control.classList.contains('sessions-more')) openRowMenu(row, /** @type {HTMLElement} */ (control));
     else if (control.classList.contains('sessions-stop') && meta) stop(meta, /** @type {HTMLButtonElement} */ (control));
     else if (s && (control.classList.contains('sessions-archive') || control.classList.contains('sessions-restore'))) void move(s, /** @type {HTMLButtonElement} */ (control));
   });
   root.addEventListener('keydown', (event) => {
     const row = /** @type {HTMLElement} */ (event.target);
     if (!row.classList?.contains('sessions-item')) return;
-    if (event.key === 'Enter') {
+    if (opensContextMenu(event)) {
+      event.preventDefault();
+      openRowMenu(row, row);
+    } else if (event.key === 'Enter') {
       event.preventDefault();
       show(row);
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -475,6 +565,7 @@ function createSessionsWindow(body, ctx, daemon) {
     void load();
   });
 
+  const offUnread = daemon.onUnread(scheduleDraw);
   const offSessions = daemon.onSessions(() => {
     syncFollowed();
     scheduleDraw();
@@ -495,6 +586,7 @@ function createSessionsWindow(body, ctx, daemon) {
       clearTimeout(searchTimer);
       requestSeq++; // drop any answer still on its way
       offSessions();
+      offUnread();
       offStatus();
       for (const entry of followed.values()) entry.off();
       cancelAnimationFrame(frame);
