@@ -1,6 +1,6 @@
 // Behaviour tests for the omp pane against the real daemon driving tests/fixtures/fake-omp.js.
 import { test, expect } from '@playwright/test';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { E2E_STATE_DIR, newWorkspace, savedLayout, workbenchPath } from './daemon.js';
@@ -59,10 +59,10 @@ async function addOmpPane(page) {
   });
 }
 
-/** Starts omp in the test project and waits until it accepts prompts. @param {Page} page */
-async function startedPane(page) {
+/** Starts omp in `dir` (the test project) and waits until it accepts prompts. @param {Page} page @param {string} [dir] */
+async function startedPane(page, dir = PROJECT) {
   const pane = await addOmpPane(page);
-  await pane.locator('input').fill(PROJECT);
+  await pane.locator('input').fill(dir);
   await pane.getByRole('button', { name: 'Start omp' }).click();
   await expect(pane.locator('textarea')).toBeVisible();
   await expect(pane.getByText('Fake Model')).toBeVisible(); // get_state answered: the session is ready
@@ -175,6 +175,40 @@ test('a markdown table copies as Markdown, as CSV, and as a PNG image of the tab
   expect(Math.abs(image.height / (2 * box.height) - 1)).toBeLessThan(0.35);
 });
 
+test('the message box is set like scratchpad text and starts one line high, placeholder and all', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  /** @param {import('@playwright/test').Locator} node */
+  const font = (node) =>
+    node.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { family: s.fontFamily, size: s.fontSize, lineHeight: s.lineHeight };
+    });
+  const padText = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('textarea'));
+    probe.className = 'pad-text';
+    const s = getComputedStyle(probe);
+    const style = { family: s.fontFamily, size: s.fontSize, lineHeight: s.lineHeight };
+    probe.remove();
+    return style;
+  });
+  expect(await font(draft)).toEqual(padText);
+
+  // One line of text tall, even in a pane too narrow for the whole placeholder.
+  const lines = () =>
+    draft.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return (el.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom)) / parseFloat(s.lineHeight);
+    });
+  await expect(draft).toHaveAttribute('placeholder', /^Message omp/);
+  expect(await lines()).toBeCloseTo(1, 1);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect.poll(lines).toBeCloseTo(1, 1);
+  await draft.fill('one\ntwo');
+  await expect.poll(lines).toBeCloseTo(2, 1);
+});
+
 test('the message box grows with the prompt, up to half the pane, and shrinks again after sending', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
@@ -197,6 +231,66 @@ test('the message box grows with the prompt, up to half the pane, and shrinks ag
 
   await draft.press('Enter');
   await expect.poll(async () => (await box()).height).toBe(empty.height);
+});
+
+test('@ suggests files from the session directory; Tab, arrows, Enter and clicks complete them into mentions', async ({ page }) => {
+  const root = mkdtempSync(join(tmpdir(), 'ac-e2e-mentions-'));
+  const project = join(root, 'proj');
+  mkdirSync(join(project, 'src'), { recursive: true });
+  mkdirSync(join(project, 'docs'));
+  for (const name of ['src/app.js', 'src/api.js', 'README.md', 'notes with space.md', '.env']) writeFileSync(join(project, name), name);
+  writeFileSync(join(root, 'sibling.txt'), 'hi');
+  await openWorkbench(page);
+  const pane = await startedPane(page, project);
+  const draft = pane.locator('textarea');
+  const list = pane.locator('.omp-suggest');
+  const rows = list.getByRole('option');
+
+  // `@` lists the session's directory: folders first and marked, dotfiles hidden.
+  await draft.pressSequentially('read @');
+  await expect(rows).toHaveText(['docs/', 'src/', 'notes with space.md', 'README.md']);
+  await draft.pressSequentially('.');
+  await expect(rows).toHaveText(['.env', 'notes with space.md', 'README.md']);
+  await draft.press('Backspace');
+
+  // Tab completes a folder with its slash and lists what is in it; then the common prefix, then the one left.
+  await draft.pressSequentially('sr');
+  await expect(rows).toHaveText(['src/']);
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('read @src/');
+  await expect(rows).toHaveText(['api.js', 'app.js']);
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('read @src/ap');
+  await draft.pressSequentially('p');
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('read @src/app.js ');
+  await expect(list).toBeHidden();
+
+  // `@../` walks up; arrows move and Enter picks.
+  await draft.pressSequentially('and @../');
+  await expect(rows).toHaveText(['proj/', 'sibling.txt']);
+  await draft.press('ArrowDown');
+  await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await draft.press('Enter');
+  await expect(draft).toHaveValue('read @src/app.js and @../sibling.txt ');
+
+  // A click picks too; a name with spaces goes quoted, as omp reads it whole.
+  await draft.pressSequentially('and @no');
+  await rows.filter({ hasText: 'notes with space.md' }).click();
+  await expect(draft).toHaveValue('read @src/app.js and @../sibling.txt and @"notes with space.md" ');
+  await expect(draft).toBeFocused();
+
+  // Esc closes the list without touching the draft.
+  await draft.pressSequentially('@');
+  await expect(list).toBeVisible();
+  await draft.press('Escape');
+  await expect(list).toBeHidden();
+  await draft.press('Backspace');
+
+  // The mentions go to omp as typed: it reads them relative to the session's directory.
+  const sent = rpcSent(page, 'prompt');
+  await draft.press('Enter');
+  expect((await sent).postDataJSON().message).toBe('read @src/app.js and @../sibling.txt and @"notes with space.md"');
 });
 
 test('a comment on selected reply text goes with the next prompt, quoting what it is about', async ({ page }) => {
@@ -794,6 +888,30 @@ test('dragging Send sends the message in a fork placed where it is dropped, and 
   const home = page.locator(`.widget[data-id="${await source.getAttribute('data-id')}"]`);
   await expect(home.locator('.omp-assistant').last()).toContainText('You said: stay here');
   await expect(home.locator('.omp-user')).toHaveText([/shared start$/, /stay here$/]);
+});
+
+test('a suggestion list open when Send is dragged into a fork closes as the box empties', async ({ page }) => {
+  const project = mkdtempSync(join(tmpdir(), 'ac-e2e-fork-mention-'));
+  writeFileSync(join(project, 'notes.md'), 'hi');
+  await openWorkbench(page);
+  const source = await startedPane(page, project);
+  await send(source, 'shared start');
+  await expect(source.locator('.omp-assistant').last()).toContainText('You said: shared start');
+  const draft = source.locator('textarea');
+  const list = source.locator('.omp-suggest');
+  await draft.pressSequentially('see @');
+  await expect(list.getByRole('option')).toHaveText(['notes.md']);
+  const grid = await page.locator('#grid').boundingBox();
+  const button = await source.getByRole('button', { name: 'Send', exact: true }).boundingBox();
+  if (!grid || !button) throw new Error('not laid out');
+  await paneAddedBy(page, async () => {
+    await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
+    await page.mouse.up();
+  });
+  await expect(draft).toHaveValue('');
+  await expect(list).toBeHidden();
 });
 
 test('the window’s top bar names its conversation, and the name is saved with the window', async ({ page }) => {

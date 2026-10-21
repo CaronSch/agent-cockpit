@@ -68,12 +68,15 @@ is newer. The daemon prints its version at start.
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
-- **Auto-titles, attachments, Ask, Fork, `!` commands, the responses-only view, window names and todo progress lean on omp internals.** Titles rely on
+- **Auto-titles, attachments, `@` mentions, Ask, Fork, `!` commands, the responses-only view, window names and todo progress lean on omp internals.** Titles rely on
   `/rename` with no title generating one in RPC mode (it is not gated by
   `PI_NO_TITLE`), and on `session_settled` following only agent activity (if it
   followed a builtin command too, the daemon's own `/rename` would trigger the next
   one, up to the attempt cap). Attachments rely on `@"<absolute path>"` mentions
-  being read when a prompt starts a turn. Ask relies on the `btw` / `btw_cancel`
+  being read when a prompt starts a turn; `@` mentions typed in the draft also rely on a
+  bare `@path` ending at whitespace or `@`, with quotes, brackets and sentence
+  punctuation trimmed from its ends (a path that would lose any is sent quoted), and on
+  relative and `~/` paths resolving against the session's directory (`resolveReadPath`). Ask relies on the `btw` / `btw_cancel`
   commands and the `btw_record` / `btw_delta` frames, and on `btw` answering from
   an ephemeral turn that leaves the session's history alone. Its follow-ups rely on
   `btw` with a `recordId` appending a turn to that topic's record (the record is the
@@ -99,7 +102,7 @@ is newer. The daemon prints its version at start.
   (`details.op` is `view` for a read), on `get_state`'s `todoPhases`, and on
   `todo_auto_clear` meaning the list changed. A
   change shows up as sessions that stay untitled, files
-  that reach the model only as a bare path, side answers that never arrive or turn
+  that reach the model only as a bare path (or, for a typed `@` mention, not at all), side answers that never arrive or turn
   up in the chat, follow-ups answered under the wrong question or without knowing
   what was asked before, a forked pane that opens empty or shows its history twice, a
   Fork button that stays off with the journal on disk (or is on without it, and the
@@ -116,7 +119,8 @@ is newer. The daemon prints its version at start.
   `#shouldHaveSessionFile`) (in `packages/coding-agent/src/` of
   github.com/can1357/oh-my-pi at the installed version's tag) and `StopReason` in
   `packages/ai/src/types.ts`, then update `daemon/omp-session.js`,
-  `src/omp/message.js`, `src/omp/transcript.js`, `src/omp/todos.js`,
+  `src/omp/message.js`, `src/omp/file-mention.js`,
+  `src/omp/transcript.js`, `src/omp/todos.js`,
   `src/omp/visibility.js`, `src/widgets/omp.js` and the fake.
 
 ## When the session history reaches thousands of journals

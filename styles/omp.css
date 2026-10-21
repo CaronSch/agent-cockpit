@@ -870,6 +870,18 @@
   color: var(--color-accent);
 }
 
+/* `@` file entries: folders (ending in `/`) in the accent, like commands; files plain. */
+.omp-suggestion-file {
+  color: var(--color-text);
+}
+
+.omp-suggest-note {
+  margin: 0;
+  padding: 3px 8px;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
 .omp-suggestion-hint {
   color: var(--color-text-dim);
 }
@@ -893,17 +905,26 @@
   gap: var(--space-2);
 }
 
-/* Grows with its text (composer.js sets the height, up to half the pane), so no resize grip. */
+/*
+ * One line to start, growing with its text (composer.js sets the height, up to half the
+ * pane), so no resize grip. Its text is set like a scratchpad's (`.pad-text`).
+ */
 .omp-draft {
   flex: 1;
-  min-height: 2.6em;
   resize: none;
   padding: 6px 8px;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-s);
   background: var(--color-deck);
   color: var(--color-text);
-  font: var(--text-sm) / 1.45 var(--font-ui);
+  font: var(--text-sm) / 1.55 var(--font-mono);
+}
+
+/* A placeholder that wrapped would make the empty box taller than one line. */
+.omp-draft::placeholder {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .omp-draft:disabled,
@@ -917,7 +938,6 @@
   border-left-width: 3px;
   background: color-mix(in oklch, var(--color-accent) 6%, var(--color-deck));
   color: var(--color-accent);
-  font-family: var(--font-mono);
 }
 
 .omp-shell-mark {

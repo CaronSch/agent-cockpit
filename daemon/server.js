@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { SessionNotRunning } from './omp-session.js';
+import { listDirectory } from './files.js';
 import { PAD_ID } from '../src/scratchpad/blocks.js';
 import { SCREEN_ID, WORKSPACE_NAME } from '../src/workspace/model.js';
 import { isValidTree } from '../src/layout/grid-model.js';
@@ -300,6 +301,15 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
           response.catch(() => {}); // after the hold, the outcome travels on the stream
           const answer = await Promise.race([response, Bun.sleep(rpcHoldMs).then(() => null)]);
           return answer ? json(answer) : json({ pending: true, id }, 202);
+        },
+      }),
+      '/api/sessions/:id/files': api({
+        GET: async (req) => {
+          const dir = resolve(sessionOf(req).meta().cwd, expandHome(new URL(req.url).searchParams.get('dir') ?? ''));
+          const listing = await listDirectory(dir).catch(() => {
+            throw new HttpError(404, `not a folder that can be read: ${dir}`);
+          });
+          return json({ dir, ...listing });
         },
       }),
       '/api/sessions/:id/ui': api({

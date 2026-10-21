@@ -1,7 +1,7 @@
 import { test, describe, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
@@ -9,6 +9,7 @@ import { createAttachments } from '../daemon/attachments.js';
 import { createScratchpads } from '../daemon/scratchpad.js';
 import { createWorkspaces } from '../daemon/workspace.js';
 import { createDaemonServer } from '../daemon/server.js';
+import { listDirectory } from '../daemon/files.js';
 import { SETUP_COMMANDS } from '../daemon/omp-session.js';
 /** @import { StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
 
@@ -538,5 +539,75 @@ describe('attachments', () => {
     assert.equal(await Bun.file(second.json.path).text(), 'PNG two');
     assert.equal((await stat(first.json.path)).mode & 0o777, 0o600);
     assert.equal((await call({ path: '/api/attachments' })).status, 405);
+  });
+});
+
+describe('file listings for @ mentions', () => {
+  /** @type {string} */
+  let project;
+  /** @type {string} */
+  let files;
+
+  beforeAll(async () => {
+    project = join(cwd, 'listing', 'project');
+    await mkdir(join(project, 'src'), { recursive: true });
+    await Bun.write(join(project, 'notes with space.md'), 'notes');
+    await Bun.write(join(project, '.env'), 'X=1');
+    await Bun.write(join(cwd, 'listing', 'sibling.txt'), 'hi');
+    await symlink(join(project, 'src'), join(project, 'linked'));
+    const created = await call({ method: 'POST', path: '/api/sessions', body: { cwd: project } });
+    files = `/api/sessions/${created.json.session.id}/files`;
+  });
+
+  /** @param {string} dir */
+  const list = (dir) => call({ path: `${files}?dir=${encodeURIComponent(dir)}` });
+
+  test('like every API route, listings need the token and refuse a foreign page', async () => {
+    assert.equal((await call({ path: files, auth: false })).status, 401);
+    assert.equal((await call({ path: files, headers: { origin: 'http://evil.example' } })).status, 403);
+    assert.equal((await call({ path: files, headers: { 'sec-fetch-site': 'cross-site' } })).status, 403);
+  });
+
+  test('a folder is listed relative to the session’s directory, dotfiles and links to folders included', async () => {
+    const res = await list('');
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.json, {
+      dir: project,
+      entries: [
+        { name: '.env', isDir: false },
+        { name: 'linked', isDir: true },
+        { name: 'notes with space.md', isDir: false },
+        { name: 'src', isDir: true },
+      ],
+      truncated: false,
+    });
+    assert.deepEqual((await list('src/')).json, { dir: join(project, 'src'), entries: [], truncated: false });
+  });
+
+  test('a path may leave the session’s directory: up, from home, or absolute', async () => {
+    const up = await list('../');
+    assert.equal(up.json.dir, join(cwd, 'listing'));
+    assert.deepEqual(up.json.entries, [
+      { name: 'project', isDir: true },
+      { name: 'sibling.txt', isDir: false },
+    ]);
+    assert.equal((await list('~/')).json.dir, homedir());
+    assert.equal((await list(`${project}/src`)).json.dir, join(project, 'src'));
+  });
+
+  test('what is not a folder is a 404, and so is a session that does not exist', async () => {
+    assert.equal((await list('notes with space.md')).status, 404);
+    assert.equal((await list('missing/')).status, 404);
+    assert.equal((await call({ path: '/api/sessions/nope/files' })).status, 404);
+  });
+
+  test('a huge folder is cut short by name, and says so', async () => {
+    assert.deepEqual(await listDirectory(project, 2), {
+      entries: [
+        { name: '.env', isDir: false },
+        { name: 'linked', isDir: true },
+      ],
+      truncated: true,
+    });
   });
 });
