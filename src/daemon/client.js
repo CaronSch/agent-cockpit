@@ -35,7 +35,6 @@ export class DaemonError extends Error {
  *   onReset(fn: () => void): () => void,
  *   subscribe(session: string, fn: (event: SessionEvent) => void): () => void,
  *   meta(session: string): SessionMeta | null,
- *   lastEventAt(session: string | null): number,
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
  *   onHistory(fn: () => void): () => void,
@@ -54,6 +53,7 @@ export class DaemonError extends Error {
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string, fork?: string }): Promise<SessionMeta>,
  *   closeSession(session: string): Promise<void>,
+ *   markSeen(session: string, at: number): Promise<void>,
  *   rpc(session: string, command: Record<string, unknown>): Promise<RpcResponse>,
  *   respondUi(session: string, response: Record<string, unknown>): Promise<void>,
  *   listFiles(session: string | null, dir: string): Promise<DirListing>,
@@ -287,8 +287,6 @@ export function createDaemonClient(env = {}) {
     },
     subscribe,
     meta: (session) => metas.get(session) ?? null,
-    /** When the daemon stamped the newest event this page holds for `session`, in daemon time; 0 for none. */
-    lastEventAt: (session) => (session ? (buffers.get(session)?.at(-1)?.at ?? 0) : 0),
     sessions: () => [...metas.values()],
     onSessions(fn) {
       sessionListeners.add(fn);
@@ -359,6 +357,9 @@ export function createDaemonClient(env = {}) {
     },
     async closeSession(session) {
       await request(sessionPath(session), { method: 'DELETE' });
+    },
+    async markSeen(session, at) {
+      await request(`${sessionPath(session)}/seen`, { method: 'POST', body: JSON.stringify({ at }) });
     },
     async rpc(session, command) {
       const { id } = await request(`${sessionPath(session)}/rpc`, { method: 'POST', body: JSON.stringify(command) });

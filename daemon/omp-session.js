@@ -19,6 +19,7 @@ export const SETUP_COMMANDS = Object.freeze([
   { type: 'get_state' },
 ]);
 
+
 /**
  * Added to the setup of a session started from a journal (resumed or forked): omp streams
  * none of the conversation so far, so its answer puts that history in the log, ahead of
@@ -47,8 +48,10 @@ export class SessionNotRunning extends Error {}
 /**
  * `command` throws SessionNotRunning unless the session is ready; otherwise it returns the
  * id the daemon gave the request (omp echoes it on its response frame) and the response.
+ * `markSeen(at)` records that the user has seen what the session did up to `at` (daemon time).
  * @typedef {{
  *   meta(): SessionMeta,
+ *   markSeen(at: number): void,
  *   command(command: Record<string, unknown>): { id: string, response: Promise<RpcResponse> },
  *   respondUi(response: Record<string, unknown>): void,
  *   close(): Promise<void>,
@@ -65,8 +68,9 @@ export class SessionNotRunning extends Error {}
  * @returns {OmpSession}
  */
 export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now }) {
+  const startedAt = now();
   /** @type {SessionMeta} */
-  let meta = { id, cwd, resume, fork, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt: now() };
+  let meta = { id, cwd, resume, fork, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt, seenAt: startedAt };
   /** @type {Map<string, PromiseWithResolvers<RpcResponse>>} */
   const pending = new Map();
   const decoder = createFrameDecoder();
@@ -186,6 +190,9 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
 
   return {
     meta: () => meta,
+    markSeen(at) {
+      if (at > meta.seenAt) update({ seenAt: Math.min(at, now()) });
+    },
     command(command) {
       if (meta.status !== 'ready') throw new SessionNotRunning(`session is ${meta.status}`);
       return send(command);

@@ -395,6 +395,39 @@ describe('sessions', () => {
     assert.match(String(ready.sessionFile), /\.jsonl$/, 'learned from omp’s get_state before ready');
   });
 
+  test('resuming a journal a running session writes hands over that session, never a second omp', async () => {
+    const journal = join(cwd, 'shared.jsonl');
+    await Bun.write(journal, '');
+    const first = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
+    assert.equal(first.status, 201);
+    const again = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
+    assert.equal(again.status, 200);
+    assert.equal(again.json.session.id, first.json.session.id);
+
+    await call({ method: 'DELETE', path: `/api/sessions/${first.json.session.id}` });
+    await waitForStatus(first.json.session.id, 'exited');
+    const after = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
+    assert.equal(after.status, 201, 'once it stopped, resuming starts omp again');
+    assert.notEqual(after.json.session.id, first.json.session.id);
+    await call({ method: 'DELETE', path: `/api/sessions/${after.json.session.id}` });
+  });
+
+  test('what the user has seen of a session is kept with it, for every window, and only moves forward', async () => {
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    const id = json.session.id;
+    assert.equal(json.session.seenAt, json.session.startedAt, 'nothing to see before it started');
+    await waitForStatus(id, 'ready');
+    const at = json.session.startedAt + 1;
+    assert.equal((await call({ method: 'POST', path: `/api/sessions/${id}/seen`, body: { at } })).status, 204);
+    const seen = await logged((e) => e.session === id && e.kind === 'session' && e.meta.seenAt === at);
+    assert.ok(seen, 'announced on the stream');
+    await call({ method: 'POST', path: `/api/sessions/${id}/seen`, body: { at: at - 1 } });
+    assert.equal(hub.get(id)?.meta().seenAt, at);
+    assert.equal((await call({ method: 'POST', path: `/api/sessions/${id}/seen`, body: { at: 'later' } })).status, 400);
+    assert.equal((await call({ method: 'POST', path: '/api/sessions/nope/seen', body: { at } })).status, 404);
+    await call({ method: 'DELETE', path: `/api/sessions/${id}` });
+  });
+
   test('a fork runs a new session on a copy of the journal and leaves the journal alone', async () => {
     const journal = join(cwd, 'to-fork.jsonl');
     const lines = [
@@ -653,13 +686,13 @@ describe('session archive', () => {
     assert.ok(await Bun.file(json.file).exists());
   });
 
-  test('a session open in a window cannot be archived until it is closed', async () => {
+  test('a running session cannot be archived until it is stopped', async () => {
     const file = await pastSession('busy');
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: file } });
     await waitForStatus(json.session.id, 'ready');
     const refused = await call({ method: 'POST', path: '/api/history/archive', body: { file } });
     assert.equal(refused.status, 409);
-    assert.match(refused.json.error, /open in a window/);
+    assert.match(refused.json.error, /running; stop it/);
     assert.ok(await Bun.file(file).exists());
 
     await call({ method: 'DELETE', path: `/api/sessions/${json.session.id}` });

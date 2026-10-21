@@ -25,7 +25,7 @@ class FakeSource {
 }
 
 /** @param {string} id @param {SessionMeta['status']} [status] @returns {SessionMeta} */
-const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, fork: null, sessionFile: null, status, pid: 1, exitCode: null, error: null, startedAt: 0 });
+const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, fork: null, sessionFile: null, status, pid: 1, exitCode: null, error: null, startedAt: 0, seenAt: 0 });
 
 /** @param {string} session @param {number} seq @returns {SessionEvent} */
 const frame = (session, seq) => ({ kind: 'frame', frame: { type: 'agent_start' }, seq, at: 0, session });
@@ -110,16 +110,6 @@ describe('daemon client', () => {
     source.deliver(hello('b2', [], 'v3')); // a restart on newer files still
     source.deliver(hello('b3', [], 'v1')); // back on the files this page loaded
     assert.deepEqual(heard, [true, true, false]);
-  });
-
-  test('the newest event time of a session is the daemon’s, 0 before any', async () => {
-    const { client, source } = await connectedClient();
-    source.deliver(hello('b1', [meta('s1')]));
-    assert.equal(client.lastEventAt('s1'), 0);
-    source.deliver({ ...frame('s1', 1), at: 500 });
-    source.deliver({ ...frame('s2', 2), at: 900 });
-    assert.equal(client.lastEventAt('s1'), 500);
-    assert.equal(client.lastEventAt(null), 0);
   });
 
   test('session metadata follows the stream', async () => {
