@@ -1,4 +1,5 @@
-/* Sessions window: past omp sessions, searchable, sortable, draggable onto the grid, archivable. */
+/* Sessions window: running sessions, then past ones; one font (mono), quiet controls,
+   row actions shown on hover or focus. */
 
 .sessions {
   display: flex;
@@ -6,117 +7,157 @@
   flex-direction: column;
   gap: var(--space-2);
   min-height: 0;
+  font: 0.875rem / 1.45 var(--font-mono);
+  color: var(--color-text);
+}
+
+.sessions button,
+.sessions input,
+.sessions select {
+  font: inherit;
 }
 
 .sessions-bar {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-1);
   align-items: center;
+}
+
+.sessions-search,
+.sessions-sort,
+.sessions-icon-btn,
+.sessions-toggle {
+  height: 28px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
 }
 
 .sessions-search,
 .sessions-sort {
   min-width: 0;
-  height: 30px;
   padding: 0 8px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-s);
-  background: var(--color-deck);
-  color: var(--color-text);
-  font: inherit;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
 }
 
 .sessions-search {
-  flex: 1;
+  flex: 1 1 8em;
+  min-width: 8em;
+  color: var(--color-text);
+}
+
+.sessions-search::placeholder {
+  color: var(--color-text-faint);
 }
 
 /* Paths can be long: the directory menu gives way to the search box first. */
 .sessions-directory {
-  flex: 0 1 auto;
+  flex: 0 100 auto;
   max-width: 16em;
 }
 
-/* Drawn like the search box beside it: no native control chrome, a thin chevron. */
+/* No native control chrome, a thin chevron. */
 .sessions-sort {
   appearance: none;
-  padding-right: 26px;
+  padding-right: 22px;
   background-image:
-    linear-gradient(45deg, transparent 50%, var(--color-text-dim) 50%),
-    linear-gradient(135deg, var(--color-text-dim) 50%, transparent 50%);
-  background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%;
+    linear-gradient(45deg, transparent 50%, var(--color-text-faint) 50%),
+    linear-gradient(135deg, var(--color-text-faint) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 55%, calc(100% - 8px) 55%;
   background-size: 4px 4px;
   background-repeat: no-repeat;
   cursor: pointer;
 }
 
-:is(.sessions-search, .sessions-sort, .sessions-icon-btn, .sessions-toggle, .sessions-item):focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
+.sessions-sort option {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
 }
 
 .sessions-icon-btn {
   flex: none;
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--color-text-dim);
-  font: inherit;
+  width: 28px;
   cursor: pointer;
-}
-
-.sessions-icon-btn:hover {
-  color: var(--color-text);
 }
 
 /* Archived ⇄ past sessions: lit while the window lists the archive. */
 .sessions-toggle {
   flex: none;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--color-text-dim);
-  font: inherit;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  padding: 0 8px;
   cursor: pointer;
 }
 
-.sessions-toggle:hover {
+:is(.sessions-search, .sessions-sort, .sessions-icon-btn, .sessions-toggle):hover {
+  border-color: var(--color-line-strong);
   color: var(--color-text);
 }
 
 .sessions-toggle[aria-pressed='true'] {
-  border-color: var(--color-accent);
-  background: var(--color-accent-glow);
-  color: var(--color-accent);
+  border-color: var(--color-line-strong);
+  color: var(--color-text);
+}
+
+:is(.sessions-search, .sessions-sort, .sessions-icon-btn, .sessions-toggle, .sessions-action):focus-visible,
+.sessions-item:focus-visible {
+  outline: 1px solid var(--color-unread);
+  outline-offset: -1px;
+}
+
+/* "Running", "Past": small and dim, with the past list's count beside its heading. */
+.sessions-head {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.sessions-heading {
+  margin: var(--space-1) 0 0;
+  padding: 0 var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.sessions-heading[hidden] {
+  display: none;
 }
 
 .sessions-status {
   margin: 0;
   color: var(--color-text-faint);
-  font: var(--text-2xs) / 1.4 var(--font-mono);
+  font-size: var(--text-2xs);
 }
 
 .sessions-status.is-error {
   color: var(--color-danger);
 }
 
+.sessions-running,
 .sessions-list {
-  flex: 1;
-  min-height: 0;
   margin: 0;
   padding: 0;
   overflow: auto;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+}
+
+/* Running sessions take what they need, up to a third of the window; the past list the rest. */
+.sessions-running {
+  flex: none;
+  max-height: 34%;
+}
+
+.sessions-running[hidden] {
+  display: none;
+}
+
+.sessions-list {
+  flex: 1;
+  min-height: 0;
 }
 
 .sessions-item {
@@ -124,20 +165,54 @@
   display: flex;
   gap: var(--space-2);
   align-items: center;
-  padding: var(--space-2);
-  border: 1px solid transparent;
+  padding: 5px var(--space-2);
   border-radius: var(--radius-s);
   cursor: grab;
   user-select: none;
 }
 
 .sessions-item:hover {
-  border-color: var(--color-line);
   background: var(--color-surface-raised);
 }
 
-.sessions-item:is(.is-open, .is-archived) {
+.sessions-item.is-archived {
   cursor: default;
+}
+
+/* How a session is doing: a small dot (running sessions, and past ones a running one writes). */
+.sessions-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.sessions-item.is-open .sessions-dot,
+.sessions-item.is-idle .sessions-dot {
+  background: var(--color-text-faint);
+}
+
+.sessions-item.is-starting .sessions-dot,
+.sessions-item.is-working .sessions-dot {
+  background: var(--color-text-dim);
+  animation: sessions-pulse 1.2s ease-in-out infinite;
+}
+
+.sessions-item.is-attention .sessions-dot {
+  background: var(--color-unread);
+}
+
+@keyframes sessions-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sessions-item .sessions-dot {
+    animation: none;
+  }
 }
 
 .sessions-main {
@@ -145,62 +220,66 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.sessions-title,
-.sessions-preview {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sessions-title {
-  color: var(--color-text);
-  font-size: var(--text-sm);
-}
-
-.sessions-preview {
-  color: var(--color-text-dim);
-  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sessions-meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--space-3);
+  min-width: 0;
   color: var(--color-text-faint);
-  font: var(--text-2xs) / 1.4 var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
 }
 
 .sessions-dir {
   overflow: hidden;
-  max-width: 100%;
+  min-width: 0;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.sessions-badge {
-  padding: 0 6px;
+.sessions-state {
+  color: var(--color-text-dim);
+}
+
+.sessions-item.is-attention .sessions-state {
+  color: var(--color-unread);
+}
+
+/* Row actions: quiet text buttons, shown while the row is hovered or holds focus. */
+.sessions-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--duration-fast);
+}
+
+.sessions-item:is(:hover, :focus-within) .sessions-actions {
+  opacity: 1;
+}
+
+.sessions-action {
+  padding: 2px 6px;
+  border: 0;
   border-radius: var(--radius-s);
-  background: var(--color-accent-glow);
-  color: var(--color-accent);
-}
-
-.sessions-resume,
-.sessions-restore {
-  flex: none;
-}
-
-/* Quieter than Resume: a way to tidy up, not the row's main action. */
-.sessions-archive {
-  flex: none;
-  border-color: transparent;
   background: transparent;
   color: var(--color-text-dim);
-  font-weight: 400;
+  font-size: var(--text-xs);
+  cursor: pointer;
 }
 
-.sessions-archive:hover:not(:disabled) {
+.sessions-action:hover:not(:disabled) {
+  background: var(--color-surface);
   color: var(--color-text);
+}
+
+.sessions-action:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
 }
