@@ -2,7 +2,7 @@ import { test, describe, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
 import { createAttachments } from '../daemon/attachments.js';
@@ -760,6 +760,21 @@ describe('file listings for @ mentions', () => {
     ]);
     assert.equal((await list('~/')).json.dir, homedir());
     assert.equal((await list(`${project}/src`)).json.dir, join(project, 'src'));
+  });
+
+  test('without a session, a folder is listed relative to home, as a new session’s directory is found', async () => {
+    const fromHome = (/** @type {string} */ dir) => call({ path: `/api/files?dir=${encodeURIComponent(dir)}` });
+    assert.equal((await fromHome('')).json.dir, homedir());
+    assert.equal((await fromHome('~/')).json.dir, homedir());
+    assert.equal((await fromHome(relative(homedir(), project))).json.dir, project);
+    assert.deepEqual((await fromHome(`${project}/`)).json.entries, (await list('')).json.entries);
+    assert.equal((await fromHome(join(project, 'missing'))).status, 404);
+    assert.equal((await call({ path: '/api/files', auth: false })).status, 401);
+    assert.equal((await call({ path: '/api/files', headers: { 'sec-fetch-site': 'cross-site' } })).status, 403);
+
+    const created = await call({ method: 'POST', path: '/api/sessions', body: { cwd: relative(homedir(), project) } });
+    assert.equal(created.status, 201);
+    assert.equal(created.json.session.cwd, project);
   });
 
   test('what is not a folder is a 404, and so is a session that does not exist', async () => {

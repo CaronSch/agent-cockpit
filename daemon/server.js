@@ -7,7 +7,7 @@ import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { MoveRefused } from './history.js';
 import { SessionNotRunning } from './omp-session.js';
-import { listDirectory } from './files.js';
+import { listDirectory, resolvePath } from './files.js';
 import { PAD_ID } from '../src/scratchpad/blocks.js';
 import { SCREEN_ID, WORKSPACE_NAME } from '../src/workspace/model.js';
 import { isValidTree } from '../src/layout/grid-model.js';
@@ -65,17 +65,30 @@ const readJson = (req) =>
 /** @param {Request} req */
 const fileName = (req) => decodeURIComponent(req.headers.get('x-file-name') ?? 'file');
 
-/** @param {string} input */
-const expandHome = (input) => (input === '~' || input.startsWith('~/') ? homedir() + input.slice(1) : input);
-
-/** @param {unknown} input @param {'directory' | 'file'} kind @param {string} field */
+/**
+ * The existing directory or file `input` names, relative to home unless it is absolute, as the
+ * Directory field's suggestions read it (`listing` with home as `base`).
+ * @param {unknown} input @param {'directory' | 'file'} kind @param {string} field
+ */
 async function existingPath(input, kind, field) {
   if (typeof input !== 'string' || !input.trim()) throw new HttpError(400, `${field} is required`);
-  const path = resolve(expandHome(input.trim()));
+  const path = resolvePath(input.trim(), homedir());
   const info = await Bun.file(path).stat().catch(() => null);
   const ok = kind === 'directory' ? info?.isDirectory() : info?.isFile();
   if (!ok) throw new HttpError(400, `${field} is not an existing ${kind}: ${path}`);
   return path;
+}
+
+/**
+ * The folder the request's `?dir=` names, relative to `base`, listed.
+ * @param {Request} req @param {string} base
+ */
+async function listing(req, base) {
+  const dir = resolvePath(new URL(req.url).searchParams.get('dir') ?? '', base);
+  const found = await listDirectory(dir).catch(() => {
+    throw new HttpError(404, `not a folder that can be read: ${dir}`);
+  });
+  return json({ dir, ...found });
 }
 
 /** @param {any} body */
@@ -316,15 +329,8 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
           return json({ id }, 202);
         },
       }),
-      '/api/sessions/:id/files': api({
-        GET: async (req) => {
-          const dir = resolve(sessionOf(req).meta().cwd, expandHome(new URL(req.url).searchParams.get('dir') ?? ''));
-          const listing = await listDirectory(dir).catch(() => {
-            throw new HttpError(404, `not a folder that can be read: ${dir}`);
-          });
-          return json({ dir, ...listing });
-        },
-      }),
+      '/api/files': api({ GET: (req) => listing(req, homedir()) }),
+      '/api/sessions/:id/files': api({ GET: (req) => listing(req, sessionOf(req).meta().cwd) }),
       '/api/sessions/:id/ui': api({
         POST: async (req) => {
           const session = sessionOf(req);

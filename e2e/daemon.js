@@ -6,7 +6,7 @@
  * the choice through the environment.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +28,12 @@ process.env.COCKPIT_E2E_DIR ??= mkdtempSync(join(tmpdir(), 'cockpit-e2e-'));
 
 export const E2E_PORT = Number(process.env.COCKPIT_E2E_PORT);
 export const E2E_STATE_DIR = join(process.env.COCKPIT_E2E_DIR, 'state');
+/**
+ * The e2e daemon's home directory (its `HOME`), so what it lists and suggests from home is the
+ * test's own: the omp spec lays out folders here.
+ */
+export const E2E_HOME = join(process.env.COCKPIT_E2E_DIR, 'home');
+mkdirSync(E2E_HOME, { recursive: true });
 /** Stands in for ~/.omp/agent/sessions; the Sessions spec writes its journals here. */
 export const E2E_OMP_SESSIONS = join(process.env.COCKPIT_E2E_DIR, 'omp-sessions');
 

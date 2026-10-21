@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { E2E_STATE_DIR, newWorkspace, rpcAnswer, savedLayout, workbenchPath } from './daemon.js';
+import { E2E_HOME, E2E_STATE_DIR, newWorkspace, rpcAnswer, savedLayout, workbenchPath } from './daemon.js';
 import { composeAsk, composeFollowUp } from '../src/omp/message.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
@@ -265,6 +265,63 @@ test('the message box grows with the prompt, up to half the pane, and shrinks ag
 
   await draft.press('Enter');
   await expect.poll(async () => (await box()).height).toBe(empty.height);
+});
+
+test('the Directory field suggests folders from home as the path is typed; Tab, arrows, Enter and Esc work the list', async ({ page }) => {
+  for (const dir of ['code/app', 'code/apple', 'docs', '.hidden']) mkdirSync(join(E2E_HOME, dir), { recursive: true });
+  writeFileSync(join(E2E_HOME, 'notes.txt'), 'not a folder');
+  writeFileSync(join(E2E_HOME, 'code', 'apps.txt'), 'not a folder');
+  await openWorkbench(page);
+  const pane = await addOmpPane(page);
+  const field = pane.locator('input');
+  const list = pane.locator('.omp-suggest');
+  const rows = list.getByRole('option');
+  // Home's folders as listed, among those this test made (the daemon's own tools may add more).
+  const ours = ['.hidden/', 'code/', 'docs/', 'notes.txt'];
+  const homeRows = () => expect.poll(async () => (await rows.allTextContents()).filter((t) => ours.includes(t)));
+
+  // The suggested directory (home) comes selected, with no list; emptied, the field lists home's folders.
+  await expect(field).toHaveValue(E2E_HOME);
+  await expect(field).toBeFocused();
+  await expect(list).toBeHidden();
+  await field.press('Backspace');
+  await homeRows().toEqual(['code/', 'docs/']);
+
+  // Esc closes the list; focusing the empty field opens it again, as does `~/`.
+  await field.press('Escape');
+  await expect(list).toBeHidden();
+  await field.blur();
+  await field.focus();
+  await homeRows().toEqual(['code/', 'docs/']);
+  await field.pressSequentially('~/');
+  await expect(field).toHaveValue('~/');
+  await homeRows().toEqual(['code/', 'docs/']);
+
+  // Absolute paths and `../` are read as typed; files are never suggested.
+  await field.fill('');
+  await field.pressSequentially(`${E2E_HOME}/code/app/../`);
+  await expect(rows).toHaveText(['app/', 'apple/']);
+
+  // Tab completes a folder and lists its folders; then the common prefix; arrows move.
+  await field.fill('');
+  await field.pressSequentially('co');
+  await expect(rows).toHaveText(['code/']);
+  await field.press('Tab');
+  await expect(field).toHaveValue('code/');
+  await expect(rows).toHaveText(['app/', 'apple/']);
+  await field.press('Tab');
+  await expect(field).toHaveValue('code/app');
+  await field.press('ArrowDown');
+  await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+
+  // Enter picks the selected folder and closes the list; the next Enter starts omp there.
+  await field.press('Enter');
+  await expect(field).toHaveValue('code/apple/');
+  await expect(list).toBeHidden();
+  const created = page.waitForResponse((r) => r.url().endsWith('/api/sessions') && r.request().method() === 'POST');
+  await field.press('Enter');
+  expect((await (await created).json()).session.cwd).toBe(join(E2E_HOME, 'code', 'apple'));
+  await expect(pane.locator('textarea')).toBeVisible();
 });
 
 test('@ suggests files from the session directory; Tab, arrows, Enter and clicks complete them into mentions', async ({ page }) => {

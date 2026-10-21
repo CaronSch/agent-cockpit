@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { commonPrefix, completeEntry, extendSegment, matchEntries, mentionAt } from '../src/omp/file-mention.js';
+import { PLAIN_PATH, commonPrefix, completeEntry, extendSegment, matchEntries, mentionAt } from '../src/omp/file-mention.js';
 /** @import { DirEntry } from '../src/omp/file-mention.js' */
 
 /** @param {string} text */
@@ -88,5 +88,29 @@ describe('Tab and choosing an entry', () => {
     assert.equal(extendSegment(bare, 'my n'), '@"my n');
     const open = { start: 0, end: 9, quote: /** @type {'"'} */ ('"'), dir: 'my dir/', segment: '' };
     assert.equal(completeEntry(open, file('a.txt')), '@"my dir/a.txt" ');
+  });
+});
+
+describe('a field that holds one path', () => {
+  /** @param {string} text */
+  const pathAt = (text) => PLAIN_PATH.at(text, text.length);
+
+  test('is all of its text, with no @, split at its last slash', () => {
+    assert.deepEqual(pathAt(''), { start: 0, end: 0, quote: '', dir: '', segment: '' });
+    assert.deepEqual(pathAt('~/'), { start: 0, end: 2, quote: '', dir: '~/', segment: '' });
+    assert.deepEqual(pathAt('code/my app'), { start: 0, end: 11, quote: '', dir: 'code/', segment: 'my app' });
+    assert.deepEqual(pathAt('../x'), { start: 0, end: 4, quote: '', dir: '../', segment: 'x' });
+    assert.deepEqual(pathAt('/Users/b'), { start: 0, end: 8, quote: '', dir: '/Users/', segment: 'b' });
+  });
+
+  test('is none while the caret is not at its end', () => {
+    assert.equal(PLAIN_PATH.at('/Users/ben', 0), null);
+    assert.equal(PLAIN_PATH.at('/Users/ben', 6), null);
+  });
+
+  test('completes without quotes, a folder open on its own folders', () => {
+    const query = /** @type {import('../src/omp/file-mention.js').MentionQuery} */ (pathAt('~/my co'));
+    assert.equal(PLAIN_PATH.complete(query, dir('my code')), '~/my code/');
+    assert.equal(PLAIN_PATH.extend(query, 'my cod'), '~/my cod');
   });
 });
