@@ -1,6 +1,7 @@
 /**
  * Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted
- * parts of earlier replies, the draft, then attachments) and side questions about a quote.
+ * parts of earlier replies, the draft, then attachments), `!` shell commands, and side
+ * questions about a quote.
  *
  * A comment goes first as a Markdown quote of the text it is about, followed by the comment,
  * the way a reply quotes an email; the model and the transcript both read it naturally.
@@ -51,6 +52,15 @@ export function composeMessage(draft, comments, attachments = []) {
 
 /** Commands (`/model`, `!ls`) go to omp as typed; comments and attachments wait for the next prompt. @param {string} draft */
 export const isCommand = (draft) => /^[/!]/.test(draft.trim());
+
+/**
+ * The shell command a `!cmd` draft runs ('' for a bare `!`), or null when the draft is not one.
+ * @param {string} draft
+ */
+export function shellCommand(draft) {
+  const text = draft.trim();
+  return text.startsWith('!') ? text.slice(1).trim() : null;
+}
 
 /**
  * A side question about `quote`, for omp's `btw`: answered from the session's context, kept

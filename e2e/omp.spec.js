@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { E2E_STATE_DIR, e2eToken } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
@@ -173,6 +173,86 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
   expect((await sent).postDataJSON().message).toBe('> hello\n\nwhy this word?\n\nand the next step?');
   await expect(card).toHaveCount(0);
   await expect(pane.locator('textarea')).toHaveValue('');
+});
+
+test('a ! draft turns the message box into a shell line that Enter runs in the session directory', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  const mark = pane.locator('.omp-shell-mark');
+  const sendBtn = pane.locator('.omp-compose-row button');
+  const heldNote = pane.getByText('These wait for your next prompt');
+  const bashSent = () => page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'bash');
+
+  // A prompt: the box as usual. A long paste waits as a card for it.
+  await draft.evaluate((node) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n'));
+    node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  const card = pane.locator('.omp-card.is-text');
+  await draft.pressSequentially('ls');
+  await expect(sendBtn).toHaveText('Send');
+  await expect(mark).toBeHidden();
+  await expect(card).toBeVisible();
+  await expect(heldNote).toBeHidden();
+
+  // Typing `!` in front, even after a space: a shell command, marked with where it runs, and
+  // the card shown as waiting instead of going with it.
+  await draft.evaluate((node) => /** @type {HTMLTextAreaElement} */ (node).setSelectionRange(0, 0));
+  await page.keyboard.type(' !');
+  await expect(sendBtn).toHaveText('Run');
+  await expect(mark).toBeVisible();
+  await expect(mark).toContainText('$ shell');
+  await expect(mark).toContainText(basename(PROJECT));
+  await expect(heldNote).toBeVisible();
+
+  // Deleting the `!` makes it a prompt again.
+  await draft.press('Backspace');
+  await expect(sendBtn).toHaveText('Send');
+  await expect(mark).toBeHidden();
+  await expect(heldNote).toBeHidden();
+
+  // Enter runs it as a command; its output shows, the card stays for the next prompt.
+  await page.keyboard.type('!');
+  await expect(sendBtn).toHaveText('Run');
+  const sent = bashSent();
+  await draft.press('Enter');
+  expect((await sent).postDataJSON().command).toBe('ls');
+  const run = pane.locator('.omp-bash').last();
+  await expect(run.locator('.omp-bash-cmd')).toHaveText('$ ls');
+  await expect(run).toContainText('hi');
+  await expect(draft).toHaveValue('');
+  await expect(sendBtn).toHaveText('Send');
+  await expect(mark).toBeHidden();
+  await expect(card).toBeVisible();
+  await expect(heldNote).toBeHidden();
+
+  // A bare `!` names nothing to run: it stays in the box.
+  let ranBare = false;
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'bash') ranBare = true;
+  });
+  await send(pane, '!');
+  await page.waitForTimeout(300);
+  expect(ranBare, 'a bare ! sends no command').toBe(false);
+  await expect(draft).toHaveValue('!');
+  await expect(pane.locator('.omp-bash')).toHaveCount(1);
+});
+
+test('a ! command while the agent works runs at once, and is not sent as a steer', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'slow');
+  await expect(pane.getByText('working')).toBeVisible();
+  const sent = page.waitForRequest((r) => r.url().endsWith('/rpc') && ['bash', 'prompt'].includes(r.postDataJSON()?.type));
+  await pane.locator('textarea').fill('!echo hi');
+  await expect(pane.locator('.omp-compose-row button')).toHaveText('Run');
+  await pane.locator('textarea').press('Enter');
+  expect((await sent).postDataJSON()).toEqual({ type: 'bash', command: 'echo hi' });
+  await expect(pane.locator('.omp-bash').last()).toContainText('hi');
+  await expect(pane.getByText('working')).toBeVisible(); // the run came back while the turn went on
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: slow');
 });
 
 test('the toolbar menus open under their button, close on Esc or a click outside, and set what is picked', async ({ page }) => {
