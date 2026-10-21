@@ -163,9 +163,8 @@ function createPane(body, ctx, daemon) {
     const save = () => {
       if (!destroyed && ctx.params.readAt !== readAt) ctx.setParams({ readAt });
     };
-    // Never during mount: a commit while the grid is still drawing this window would re-enter it.
     if (soon) readSave = setTimeout(save, READ_SAVE_MS);
-    else queueMicrotask(save);
+    else save();
   }
 
   function markRead() {
@@ -1052,11 +1051,8 @@ function createPane(body, ctx, daemon) {
       // The conversation's name names the window, and is saved with it for when omp is gone.
       const name = conversationName(state);
       if (name && name !== params().name) {
-        queueMicrotask(() => {
-          if (closed || params().session !== session) return;
-          ctx.setParams({ name });
-          schedule();
-        });
+        ctx.setParams({ name });
+        schedule(); // the next draw labels the window with it
       }
       drawToolbar();
       drawStrips();
