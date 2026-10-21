@@ -157,7 +157,8 @@ What runs today:
   shows them, or none), newest first, each with how it is doing (starting,
   working, idle, or *needs you*: it finished or asks something nobody has looked
   at) and **Stop** (asking first while a turn runs); then every past omp
-  conversation (read from omp's session files), searchable across titles,
+  conversation (read from omp's session files) but those a running session
+  writes, which are listed under Running only, searchable across titles,
   directories and prompts, and sortable. A click on a session (or Resume, or
   Enter) shows it in the omp window this screen used last (pressed or focused
   last), or a new one if there is none; dragging it onto the middle of an omp

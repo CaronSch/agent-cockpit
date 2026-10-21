@@ -5,8 +5,8 @@
  * window where it is dropped.
  *
  * Running sessions are every one the daemon runs, whichever screen shows them, or none
- * (sessions/running.js). A past session is resumed when shown, unless a running session
- * writes its journal: then the daemon hands over that one, never a second omp on it.
+ * (sessions/running.js). A past session is resumed when shown. One whose journal a running
+ * session writes is listed only under Running, so it is never resumed a second time.
  *
  * Search runs in the daemon (every word must match the title, directory or a prompt); sorting
  * runs here, and so does narrowing to one directory (running sessions too). The query,
@@ -271,39 +271,36 @@ function createSessionsWindow(body, ctx, daemon) {
     return row;
   }
 
-  /** @param {PastSession} s @param {boolean} running @param {number} now */
-  function renderRow(s, running, now) {
+  /** @param {PastSession} s @param {number} now */
+  function renderRow(s, now) {
     const archived = showArchived();
-    const row = el('li', `sessions-item${running ? ' is-open' : ''}${archived ? ' is-archived' : ''}`);
+    const row = el('li', `sessions-item${archived ? ' is-archived' : ''}`);
     row.tabIndex = 0;
     row.dataset.file = s.file;
-    const hint = archived ? 'Archived: Restore to resume it' : running ? 'Running: click to show it' : 'Click to resume it in the last omp window used, or drag it onto one';
+    const hint = archived ? 'Archived: Restore to resume it' : 'Click to resume it in the last omp window used, or drag it onto one';
     row.title = `${s.title && s.firstPrompt ? `${s.firstPrompt}\n` : ''}${s.file}\nLast active ${new Date(s.modifiedAt).toLocaleString()}\n${hint}`;
     const dot = el('span', 'sessions-dot');
     dot.setAttribute('aria-hidden', 'true');
     const facts = [shortDir(s.cwd), relativeTime(s.modifiedAt, now), `${s.prompts} prompt${s.prompts === 1 ? '' : 's'}`];
     const main = rowText(displayTitle(s), facts);
-    if (running) main.querySelector('.sessions-meta')?.append(' ', el('span', 'sessions-state', 'running'));
     const actions = el('div', 'sessions-actions');
     if (archived) {
       actions.append(button('sessions-action sessions-restore', 'Restore'));
     } else {
-      actions.append(button('sessions-action sessions-resume', running ? 'Show' : 'Resume'));
-      const archive = button('sessions-action sessions-archive', 'Archive');
-      if (running) {
-        archive.disabled = true;
-        archive.title = 'Running: stop it to archive it';
-      }
-      actions.append(archive);
+      actions.append(button('sessions-action sessions-resume', 'Resume'), button('sessions-action sessions-archive', 'Archive'));
     }
     row.append(dot, main, actions);
     return row;
   }
 
-  /** The sessions this window shows: the daemon's answer, narrowed to the chosen directory. */
+  /**
+   * The past sessions this window lists: the daemon's answer, narrowed to the chosen directory,
+   * without those a running session writes (they are listed under Running).
+   */
   const shownSessions = () => {
     const dir = directory();
-    return dir ? sessions.filter((s) => s.cwd === dir) : sessions;
+    const open = openFiles();
+    return sessions.filter((s) => (!dir || s.cwd === dir) && !open.has(s.file));
   };
 
   function drawDirectories() {
@@ -396,15 +393,14 @@ function createSessionsWindow(body, ctx, daemon) {
       renderRunningRow,
     );
 
-    const open = openFiles();
     const now = Date.now();
     syncRows(
       list,
       rows,
       sortSessions(shownSessions(), sortKey(), dir),
       (s) => s.file,
-      (s) => JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), open.has(s.file), home, showArchived()]),
-      (s) => renderRow(s, open.has(s.file), now),
+      (s) => JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), home, showArchived()]),
+      (s) => renderRow(s, now),
     );
   }
 

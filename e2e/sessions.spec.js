@@ -216,15 +216,17 @@ test('dragging a session onto the grid resumes it in a new omp window; dragged a
   const live = async () => (await daemonSessions(page)).filter((/** @type {any} */ s) => s.sessionFile === fileOf('deploy') && s.status !== 'exited');
   expect(await live()).toHaveLength(1);
   expect((await live())[0].cwd).toBe(BRAVO);
-  await expect(deploy.locator('.sessions-state')).toHaveText('running');
+  const session = await shownSession(page, pane);
+  await expect(deploy, 'listed once: under Running, not under Past').toHaveCount(0);
+  await expect(runningRow(window, session)).toBeVisible();
 
   // Running, it is shown again rather than resumed a second time: one omp, two windows.
-  await dragToGridRight(page, deploy);
+  await dragToGridRight(page, runningRow(window, session));
   await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
   await page.mouse.up();
   await expect(pane).toHaveCount(2);
   await expect(pane.nth(1).locator('.omp-assistant')).toContainText('earlier answer');
-  expect(await shownSession(page, pane.nth(1))).toBe(await shownSession(page, pane.nth(0)));
+  expect(await shownSession(page, pane.nth(1))).toBe(session);
   expect(await live()).toHaveLength(1);
 });
 
@@ -260,7 +262,7 @@ test('Resume opens the session in a new omp window when there is none, then in t
   await page.keyboard.press('Enter');
   await expect.poll(() => shownSession(page, pane)).not.toBe(login);
   await expect(pane, 'shown in the window there is, not a new one').toHaveCount(1);
-  await expect(row(window, 'Zebra cleanup').locator('.sessions-state')).toHaveText('running');
+  await expect(runningRow(window, await shownSession(page, pane))).toBeVisible();
   await expect(runningRow(window, login), 'the session it showed before runs on').toBeVisible();
   await expect(page.locator('.widget[data-widget="sessions"]'), 'the list stays').toHaveCount(1);
 });
@@ -321,7 +323,7 @@ test('Archive does not drag the session out: pressed and moved onto the grid, it
   await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(0);
 });
 
-test('a running session cannot be archived, even with its window closed, until Stop ends it', async ({ page }) => {
+test('a running session is listed once, under Running, even with its window closed, and only Stop puts it back under Past to archive', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
   const pane = page.locator('.widget[data-widget="omp"]');
@@ -329,14 +331,14 @@ test('a running session cannot be archived, even with its window closed, until S
   await pane.locator('.widget-close').click();
   await expect(pane).toHaveCount(0);
 
-  const archive = row(window, 'deploy staging').getByRole('button', { name: 'Archive' });
-  await expect(archive).toBeDisabled();
-  await expect(archive).toHaveAttribute('title', /stop it to archive it/);
-  await expect(row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' })).toBeEnabled();
+  await expect(runningRow(window, session)).toBeVisible();
+  await expect(titles(window), 'not under Past, where it could be archived').toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  await expect(window.locator('.sessions-status')).toHaveText('2 sessions');
 
   await runningRow(window, session).getByRole('button', { name: 'Stop' }).click();
   await expect(runningRow(window, session)).toHaveCount(0);
-  await expect(archive).toBeEnabled();
+  await expect(titles(window)).toHaveText(['Zebra cleanup', 'deploy staging', 'Fix the login flow']);
+  await expect(row(window, 'deploy staging').getByRole('button', { name: 'Archive' })).toBeEnabled();
 });
 
 test('Running lists every running session with how it is doing; a click shows it in the omp window used last', async ({ page }) => {

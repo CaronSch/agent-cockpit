@@ -179,7 +179,7 @@
   cursor: default;
 }
 
-/* How a session is doing: a small dot (running sessions, and past ones a running one writes). */
+/* How a running session is doing: a small dot (past rows keep its space, empty). */
 .sessions-dot {
   flex: none;
   width: 6px;
@@ -188,7 +188,6 @@
   background: transparent;
 }
 
-.sessions-item.is-open .sessions-dot,
 .sessions-item.is-idle .sessions-dot {
   background: var(--color-text-faint);
 }
