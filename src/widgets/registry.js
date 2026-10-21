@@ -6,9 +6,12 @@ import scratchpad from './scratchpad.js';
 
 /**
  * Widgets the palette can add, keyed by type.
- * Contract: { type, title, glyph, description, newParams?(), mount(body, ctx) → { destroy() } }.
+ * Contract: { type, title, glyph, description, newParams?(), close?(params), mount(body, ctx) → { destroy() } }.
  * `newParams()` gives a window its starting settings when one is created (e.g. a fresh
  * scratchpad id); windows restored from a saved layout keep theirs.
+ * `close(params)` ends what a window owns when it is closed without being mounted (its
+ * screen is deleted), as `destroy()` does when a mounted one is closed; e.g. the omp
+ * window's agent. A window that owns nothing beyond its settings leaves it out.
  * `ctx.params` is this window's saved settings (read it when needed: it changes after
  * mount); `ctx.setParams(patch)` merges into them and persists them with the layout.
  * `ctx.addWidget(type, params)` opens another window beside the largest one;
@@ -30,6 +33,7 @@ import scratchpad from './scratchpad.js';
 /**
  * @typedef {{ type: string, title: string, glyph: string, description: string,
  *   newParams?: () => LeafParams,
+ *   close?: (params: LeafParams) => void,
  *   mount(body: HTMLElement, ctx: WidgetContext): { destroy(): void } }} WidgetDef
  */
 

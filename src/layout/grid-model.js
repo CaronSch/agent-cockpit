@@ -244,7 +244,7 @@ function resize(node, path, sizes) {
 export const setSizes = (tree, path, sizes) => tree && resize(tree, path, sizes);
 
 /**
- * Schema check for untrusted data (e.g. layouts restored from localStorage).
+ * Schema check for untrusted data (e.g. layouts sent to or read by the daemon).
  * @param {unknown} data
  * @returns {data is Tree}
  */

@@ -10,8 +10,10 @@
  * reports is the code this page loaded, and `onUiChange` hears when the files served stop
  * being, or become again, those.
  */
-/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, SessionEvent, SessionMeta, StreamEvent } from '../../daemon/wire.js' */
+/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, Screen, SessionEvent, SessionMeta, StreamEvent, Workspace } from '../../daemon/wire.js' */
+/** @import { Tree } from '../layout/grid-model.js' */
 /** @typedef {{ ok: true, rev: string } | { ok: false, current: Scratchpad }} ScratchpadSave */
+/** @typedef {{ ok: true, rev: number | null } | { ok: false, current: Screen | null }} ScreenSave */
 
 /** @typedef {'connecting' | 'open' | 'down' | 'unauthorized'} ConnectionStatus */
 
@@ -43,6 +45,8 @@ export class DaemonError extends Error {
  *   uploadScratchpadFile(id: string, file: Blob, name: string): Promise<string>,
  *   uploadAttachment(file: Blob, name: string): Promise<string>,
  *   onScratchpad(fn: (id: string, pad: Scratchpad) => void): () => void,
+ *   workspace(name: string): Promise<Workspace>,
+ *   saveScreen(workspace: string, id: string, tree: Tree, base: number | null, options?: { keepalive?: boolean }): Promise<ScreenSave>,
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string, fork?: string }): Promise<SessionMeta>,
  *   closeSession(session: string): Promise<void>,
@@ -195,8 +199,29 @@ export function createDaemonClient(env = {}) {
     return check(res, await readJson(res)).path;
   }
 
+  /**
+   * PUTs `payload` as JSON: the daemon's answer, or `{ conflict }` when it refused the save
+   * as made from an older version (409).
+   * @param {string} path @param {unknown} payload @param {boolean} keepalive
+   * @returns {Promise<{ answer: any } | { conflict: any }>}
+   */
+  async function save(path, payload, keepalive) {
+    const body = JSON.stringify(payload);
+    const res = await doFetch(path, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body,
+      // Browsers refuse keepalive bodies over 64 KiB outright; a plain request may still land.
+      keepalive: keepalive && new TextEncoder().encode(body).length <= KEEPALIVE_MAX_BYTES,
+    });
+    const answer = await readJson(res);
+    if (res.status === 409 && answer && 'current' in answer) return { conflict: answer.current };
+    return { answer: check(res, answer) };
+  }
+
   const sessionPath = (/** @type {string} */ session) => `/api/sessions/${encodeURIComponent(session)}`;
   const padPath = (/** @type {string} */ id) => `/api/scratchpads/${encodeURIComponent(id)}`;
+  const workspacePath = (/** @type {string} */ name) => `/api/workspaces/${encodeURIComponent(name)}`;
 
   /** @param {string} session @param {(event: SessionEvent) => void} fn @returns {() => void} */
   function subscribe(session, fn) {
@@ -266,17 +291,8 @@ export function createDaemonClient(env = {}) {
     },
     scratchpad: (id) => request(padPath(id)),
     async saveScratchpad(id, text, base, { keepalive = false } = {}) {
-      const body = JSON.stringify({ text, base });
-      const res = await doFetch(padPath(id), {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body,
-        // Browsers refuse keepalive bodies over 64 KiB outright; a plain request may still land.
-        keepalive: keepalive && new TextEncoder().encode(body).length <= KEEPALIVE_MAX_BYTES,
-      });
-      const answer = await readJson(res);
-      if (res.status === 409 && answer?.current) return { ok: false, current: answer.current };
-      return { ok: true, rev: check(res, answer).rev };
+      const result = await save(padPath(id), { text, base }, keepalive);
+      return 'conflict' in result ? { ok: false, current: result.conflict } : { ok: true, rev: result.answer.rev };
     },
     async deleteScratchpad(id) {
       await request(padPath(id), { method: 'DELETE' });
@@ -290,6 +306,11 @@ export function createDaemonClient(env = {}) {
     onScratchpad(fn) {
       scratchpadListeners.add(fn);
       return () => scratchpadListeners.delete(fn);
+    },
+    workspace: (name) => request(workspacePath(name)),
+    async saveScreen(workspace, id, tree, base, { keepalive = false } = {}) {
+      const result = await save(`${workspacePath(workspace)}/screens/${encodeURIComponent(id)}`, { tree, base }, keepalive);
+      return 'conflict' in result ? { ok: false, current: result.conflict } : { ok: true, rev: result.answer.rev };
     },
     onUiChange(fn) {
       uiListeners.add(fn);

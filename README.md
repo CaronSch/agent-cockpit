@@ -17,6 +17,18 @@ A pane whose agent finished or asks something while you looked away gets a blue
 border. When the workbench's files change under an open tab, the top bar offers
 **Reload**.
 
+**Screens.** Each browser window is a screen of your workspace, like an extra
+monitor: open a second window and it starts empty, with its own panes. Layouts
+are kept by the daemon (`~/.cockpit/workspaces/`), so they survive a browser
+restart: windows opened again get their screens back, and a reload keeps the
+window's screen. The switcher in the top bar (**Screen 2 of 3**) lists every
+screen and what it holds; a screen open in no window can be opened in this one
+(**Open here**, without stopping its agents) or deleted (its agents end). Add
+`?workspace=<name>` to the address for a separate workspace (lowercase letters,
+digits and dashes; the default is `main`). Windows at two different addresses at
+once (say `127.0.0.1` and `localhost`) do not see which screens the other has
+open.
+
 ## Install
 
 You need two programs:
@@ -53,7 +65,7 @@ The daemon listens on loopback only and refuses requests from other sites.
 | --- | --- |
 | `--port <n>` / `COCKPIT_PORT` | `4777` |
 | `--omp <path>` / `COCKPIT_OMP` | `omp` on `PATH` |
-| `COCKPIT_STATE_DIR` (token, scratchpads, attachments) | `~/.cockpit` |
+| `COCKPIT_STATE_DIR` (token, scratchpads, attachments, workspaces) | `~/.cockpit` |
 | `COCKPIT_OMP_SESSIONS` (omp's session files) | `~/.omp/agent/sessions` |
 
 Pass flags through with `bun start --port 4800`, or run `bun daemon/main.js`

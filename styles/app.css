@@ -152,6 +152,11 @@ button {
   background: oklch(86% 0.15 75);
 }
 
+.btn-danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
 /* A button that cannot be pressed now says so. */
 .btn:disabled {
   opacity: 0.5;
@@ -232,6 +237,120 @@ button {
 .palette-desc {
   font-size: var(--text-xs);
   color: var(--color-text-dim);
+}
+
+/* ── Screen switcher ─────────────────────────────────── */
+.screen-switch {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text);
+  font: 600 var(--text-sm) / 1.4 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.screen-switch:hover,
+.screen-switch:has(+ :popover-open) {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+}
+
+/* The layout is not being saved: shown, never hidden. */
+.screen-switch.is-unsaved {
+  border-color: var(--color-danger);
+}
+
+.screen-caret {
+  color: var(--color-text-faint);
+}
+
+.screen-menu:popover-open {
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-inline;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(400px, calc(100vw - 16px));
+  max-height: min(420px, calc(100vh - var(--topbar-h) - 16px));
+  padding: var(--space-1);
+  overflow: auto;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-lift);
+}
+
+.screen-menu-head {
+  margin: 0;
+  padding: 6px 8px 2px;
+  font: 500 var(--text-2xs) / 1.2 var(--font-mono);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+}
+
+.screen-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+}
+
+.screen-row[aria-current='true'] {
+  background: var(--color-surface);
+}
+
+.screen-row .btn {
+  padding: 2px 10px;
+}
+
+.screen-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.screen-row-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.screen-row[aria-current='true'] .screen-row-name::before {
+  content: '✓ ';
+  color: var(--color-accent);
+}
+
+.screen-row-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-faint);
+  font: var(--text-2xs) / 1.4 var(--font-mono);
+}
+
+.screen-row-where {
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+.screen-note {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: var(--text-sm);
+}
+
+.screen-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 8px 6px;
 }
 
 /* ── Deck & grid ─────────────────────────────────────── */

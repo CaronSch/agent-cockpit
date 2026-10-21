@@ -7,6 +7,8 @@ import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { SessionNotRunning } from './omp-session.js';
 import { PAD_ID } from '../src/scratchpad/blocks.js';
+import { SCREEN_ID, WORKSPACE_NAME } from '../src/workspace/model.js';
+import { isValidTree } from '../src/layout/grid-model.js';
 import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-files.js';
 /** @import { BunRequest, Server } from 'bun' */
 /** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
@@ -14,6 +16,7 @@ import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-fi
 /** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
 /** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
 /** @typedef {ReturnType<typeof import('./attachments.js').createAttachments>} Attachments */
+/** @typedef {ReturnType<typeof import('./workspace.js').createWorkspaces>} Workspaces */
 /** @typedef {(req: BunRequest, server: Server<undefined>) => Response | Promise<Response>} Handler */
 
 /** Bun refuses (413) any request body larger than this; uploads are the largest. */
@@ -107,9 +110,9 @@ export const RPC_HOLD_MS = 2000;
 
 /**
  * Starts serving on `127.0.0.1:port` (0 picks a free port); throws if the port is taken.
- * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, token: string, root: string, config: DaemonConfig, port: number, rpcHoldMs?: number }} options
+ * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, workspaces: Workspaces, token: string, root: string, config: DaemonConfig, port: number, rpcHoldMs?: number }} options
  */
-export function createDaemonServer({ hub, history, scratchpads, attachments, token, root, config, port, rpcHoldMs = RPC_HOLD_MS }) {
+export function createDaemonServer({ hub, history, scratchpads, attachments, workspaces, token, root, config, port, rpcHoldMs = RPC_HOLD_MS }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, INDEX_FILE);
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
@@ -174,12 +177,18 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, tok
     return req.params.id;
   }
 
+  /** @param {BunRequest} req */
+  function workspaceOf(req) {
+    if (!WORKSPACE_NAME.test(req.params.name)) throw new HttpError(404, 'no such workspace');
+    return req.params.name;
+  }
+
   /** @param {URL} url */
   function bootstrap(url) {
     if (!tokensMatch(url.searchParams.get('token') ?? undefined, token)) {
       return text('This link does not match the running daemon. Use the URL it printed.', 403);
     }
-    url.searchParams.delete('token');
+    url.searchParams.delete('token'); // only the token: `?workspace=` must survive signing in
     return new Response(null, {
       status: 302,
       headers: {
@@ -250,6 +259,20 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, tok
       }),
       '/api/attachments': api({
         POST: async (req) => json({ path: await attachments.save(fileName(req), await req.bytes()) }, 201),
+      }),
+      '/api/workspaces/:name': api({ GET: async (req) => json(await workspaces.read(workspaceOf(req))) }),
+      '/api/workspaces/:name/screens/:id': api({
+        PUT: async (req) => {
+          const name = workspaceOf(req);
+          if (!SCREEN_ID.test(req.params.id)) throw new HttpError(404, 'no such screen');
+          const { tree, base } = (await readJson(req)) ?? {};
+          if (!isValidTree(tree) || !(base === null || (Number.isInteger(base) && base > 0))) {
+            throw new HttpError(400, 'expected { tree: a layout or null, base: the rev it was made from, or null }');
+          }
+          const result = await workspaces.write(name, req.params.id, tree, base);
+          if (!result.ok) return json({ error: 'the screen changed since this layout was loaded', current: result.current }, 409);
+          return json({ rev: result.rev });
+        },
       }),
       '/api/sessions': api({
         GET: () => json({ sessions: hub.list() }),

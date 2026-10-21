@@ -7,8 +7,8 @@
  *
  * omp defaults to the `omp` on PATH (install it from https://omp.sh).
  * Environment: COCKPIT_PORT, COCKPIT_OMP, COCKPIT_STATE_DIR (default ~/.cockpit; holds the
- * access token and scratchpads/), COCKPIT_OMP_SESSIONS (omp's session journals; default
- * `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
+ * access token, scratchpads/, attachments/ and workspaces/), COCKPIT_OMP_SESSIONS (omp's
+ * session journals; default `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
  */
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,6 +19,7 @@ import { OMP_ENV } from './omp-session.js';
 import { createAttachments } from './attachments.js';
 import { createScratchpads } from './scratchpad.js';
 import { createDaemonServer } from './server.js';
+import { createWorkspaces } from './workspace.js';
 import { loadToken } from './token.js';
 
 const ROOT = resolve(import.meta.dir, '..');
@@ -54,6 +55,7 @@ try {
     history: createHistory({ root: ompSessions }),
     scratchpads: createScratchpads({ dir: scratchpadDir }),
     attachments: createAttachments({ dir: join(stateDir, 'attachments') }),
+    workspaces: createWorkspaces({ dir: join(stateDir, 'workspaces') }),
     token,
     root: ROOT,
     port,

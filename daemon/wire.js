@@ -26,6 +26,10 @@
  *   GET    /api/scratchpads/:id/assets/:name → the file (images inline, anything else as a download)
  *   POST   /api/attachments            raw file body, `x-file-name` header (URI-encoded)
  *                                      → 201 { path }: where omp can read it, for an `@"<path>"` mention
+ *   GET    /api/workspaces/:name       → Workspace (no screens for a workspace never saved)
+ *   PUT    /api/workspaces/:name/screens/:id { tree, base } → { rev }, or 409 { error, current: Screen | null }
+ *                                      when the screen is no longer at rev `base` (null: not stored);
+ *                                      a null `tree` deletes the screen (`rev` comes back null)
  *   GET    /api/stream                 Server-Sent Events, one StreamEvent per message
  *
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
@@ -34,6 +38,7 @@
  * `scratchpad` events carry no id and are not replayed: a reconnecting page reads
  * GET /api/scratchpads/:id instead.
  */
+/** @import { GridNode } from '../src/layout/grid-model.js' */
 
 /** @typedef {'starting' | 'ready' | 'exited' | 'failed'} SessionStatus */
 
@@ -99,6 +104,13 @@
 /** @typedef {HelloEvent | ScratchpadEvent | SessionEvent} StreamEvent */
 
 /** @typedef {{ defaultCwd: string, home: string, scratchpadDir: string }} DaemonConfig */
+
+/**
+ * One browser window's share of a workspace: its layout, and `rev`, which counts its saves
+ * (see `workspace.js`).
+ * @typedef {{ id: string, rev: number, tree: GridNode }} Screen
+ */
+/** Screens in the order they were created. @typedef {{ screens: Screen[] }} Workspace */
 
 /**
  * omp's reply to one command (see omp's rpc docs). `success: false` is a normal answer,

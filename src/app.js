@@ -1,20 +1,24 @@
 /**
- * Cockpit controller: owns the layout atom and wires rendering, interaction
- * and widgets together.
+ * Cockpit controller: owns the layout atom and wires rendering, interaction and widgets together.
+ *
+ * The layout is this window's screen of its workspace (workspace/screen.js), which the daemon
+ * keeps; the app starts once the screen is claimed and loaded.
  */
 import { applyDrop, branch, findLeaf, insertBeside, listLeaves, moveLeaf, removeLeaf, setLeafParams } from './layout/grid-model.js';
 import { computeLayout } from './layout/compute-layout.js';
 import { findNeighbor, DIRECTION_KEYS } from './layout/neighbors.js';
 import { createAtom } from './state/atom.js';
-import { loadLayout, saveLayout } from './state/persistence.js';
 import { createGridRenderer } from './render/grid-renderer.js';
 import { createDropIndicator } from './render/drop-indicator.js';
 import { attachSashController } from './interaction/sash-controller.js';
 import { createDragController } from './interaction/drag-controller.js';
 import { createPalette } from './ui/palette.js';
+import { createScreenSwitcher } from './ui/screen-switcher.js';
 import { createUpdateNotice } from './ui/update-notice.js';
 import { button, el } from './ui/dom.js';
 import { getDaemon } from './daemon/client.js';
+import { openScreen } from './workspace/screen.js';
+import { describeWindows } from './workspace/model.js';
 import { WIDGETS, newWidgetLeaf } from './widgets/registry.js';
 /** @import { Leaf, LeafParams, Tree } from './layout/grid-model.js' */
 /** @import { WidgetContext } from './widgets/registry.js' */
@@ -23,7 +27,6 @@ import { WIDGETS, newWidgetLeaf } from './widgets/registry.js';
 /** @import { GridApi } from './interaction/drag-controller.js' */
 
 export const LAYOUT_OPTIONS = Object.freeze({ gap: 6, minWidth: 180, minHeight: 120 });
-const SAVE_DELAY_MS = 250;
 const STACK_BREAKPOINT = 640;
 const STACK_ROW_HEIGHT = 260;
 
@@ -55,23 +58,30 @@ function stackProjection(tree) {
   return leaves.length > 1 ? branch('col', leaves) : (leaves[0] ?? null);
 }
 
+/** @param {string} widget */
+const titleOf = (widget) => WIDGETS[widget]?.title ?? widget;
+
+/** Ends what the windows of a tree that is not mounted own, as closing each would. @param {Tree} tree */
+function closeWindows(tree) {
+  for (const leaf of listLeaves(tree)) WIDGETS[leaf.widget]?.close?.(leaf.params ?? {});
+}
+
 /** @param {ParentNode} root */
-export function createApp(root) {
+export async function createApp(root) {
   const gridEl = query(root, '#grid');
   const deckEl = query(root, '.deck');
   const emptyEl = query(root, '.grid-empty');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-  const saved = loadLayout();
-  const layoutAtom = createAtom(saved ?? null);
+  const daemon = getDaemon();
+  const opened = await openScreen({ daemon });
+  const layoutAtom = createAtom(opened.ok ? opened.screen.tree() : null);
   const indicator = createDropIndicator(gridEl);
 
   let bounds = { x: 0, y: 0, w: 0, h: 0 };
   let layout = computeLayout(null, bounds, LAYOUT_OPTIONS);
   let frame = 0;
   let pendingAnimate = false;
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let saveTimer;
   /** @type {Palette | null} */
   let palette = null;
 
@@ -183,20 +193,7 @@ export function createApp(root) {
     onDragStateChange: (/** @type {boolean} */ dragging) => palette?.setDragging(dragging),
   };
 
-  layoutAtom.subscribe((/** @type {Tree} */ tree) => {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      saveTimer = undefined;
-      saveLayout(tree);
-    }, SAVE_DELAY_MS);
-  });
-  // A reload or close inside the debounce window would otherwise lose the last change.
-  window.addEventListener('pagehide', () => {
-    if (saveTimer === undefined) return;
-    clearTimeout(saveTimer);
-    saveTimer = undefined;
-    saveLayout(layoutAtom.get());
-  });
+  if (opened.ok) layoutAtom.subscribe((/** @type {Tree} */ tree) => opened.screen.update(tree));
 
   new ResizeObserver(([entry]) => {
     bounds = { x: 0, y: 0, w: Math.floor(entry.contentRect.width), h: Math.floor(entry.contentRect.height) };
@@ -260,7 +257,10 @@ export function createApp(root) {
     onAdd: addWidget,
   });
 
-  query(root, '.brand').after(createUpdateNotice({ daemon: getDaemon() }).root);
+  query(root, '.brand').after(createUpdateNotice({ daemon }).root);
+  query(root, '.topbar-actions').prepend(
+    createScreenSwitcher({ opened, describe: (tree) => describeWindows(tree, titleOf), closeWindows }).root,
+  );
 
   schedule();
   return { api };
