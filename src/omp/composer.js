@@ -7,11 +7,13 @@
  * draft. Files pasted into it or dropped anywhere on the pane are stored by the daemon as they
  * arrive, and go with the message as omp file mentions. A draft starting with `!` is a shell
  * command: the box switches to shell mode (accent-coloured, marked with the directory it runs
- * in, Run for Send) and shows the cards as waiting, since a command goes without them.
+ * in, Run for Send) and shows the cards as waiting, since a command goes without them. Tab
+ * indents, as in a code editor (Esc then Tab leaves the box).
  */
 import { button, carriesFiles, el } from '../ui/dom.js';
 import { errorMessage } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
+import { tabIndent } from '../ui/indent.js';
 import { composeMessage, isLargePaste, shellCommand } from './message.js';
 /** @import { Attachment, QuoteComment } from './message.js' */
 
@@ -72,6 +74,8 @@ export function createComposer({ pane, upload, onError, shellDir }) {
   const sendBtn = button('btn btn-accent', 'Send');
   row.append(draft, sendBtn);
   root.append(cards, editor, mark, row);
+  // Tab indents in the draft and the card editor; an open suggestion list takes it first.
+  tabIndent(root);
 
   /** @type {Card[]} */
   let items = [];
