@@ -44,7 +44,7 @@ export class DaemonError extends Error {
  *   uploadAttachment(file: Blob, name: string): Promise<string>,
  *   onScratchpad(fn: (id: string, pad: Scratchpad) => void): () => void,
  *   config(): Promise<DaemonConfig>,
- *   createSession(options: { cwd: string, resume?: string }): Promise<SessionMeta>,
+ *   createSession(options: { cwd: string, resume?: string, fork?: string }): Promise<SessionMeta>,
  *   closeSession(session: string): Promise<void>,
  *   rpc(session: string, command: Record<string, unknown>): Promise<RpcResponse>,
  *   respondUi(session: string, response: Record<string, unknown>): Promise<void>,
@@ -308,8 +308,8 @@ export function createDaemonClient(env = {}) {
       });
       return config;
     },
-    async createSession({ cwd, resume }) {
-      const body = await request('/api/sessions', { method: 'POST', body: JSON.stringify({ cwd, resume }) });
+    async createSession({ cwd, resume, fork }) {
+      const body = await request('/api/sessions', { method: 'POST', body: JSON.stringify({ cwd, resume, fork }) });
       metas.set(body.session.id, body.session);
       return body.session;
     },

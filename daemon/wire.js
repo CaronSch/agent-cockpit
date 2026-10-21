@@ -8,7 +8,9 @@
  *   GET    /api/ui                     → { version }: the UI files' version now (see `ui-files.js`)
  *   GET    /api/history?q=words        → { sessions: PastSession[] } (unordered; every word must match)
  *   GET    /api/sessions               → { sessions: SessionMeta[] }
- *   POST   /api/sessions               { cwd, resume? } → 201 { session: SessionMeta }
+ *   POST   /api/sessions               { cwd, resume? | fork? } → 201 { session: SessionMeta }
+ *                                      (`resume` continues a journal, `fork` starts a new session
+ *                                      from a copy of one; either must be an existing file)
  *   DELETE /api/sessions/:id           → 204 (closes omp's stdin, kills it if it lingers)
  *   POST   /api/sessions/:id/rpc       omp command without `id` → the omp response frame, or
  *                                      202 { pending: true, id } when omp has not answered within
@@ -36,12 +38,15 @@
 /** @typedef {'starting' | 'ready' | 'exited' | 'failed'} SessionStatus */
 
 /**
- * One omp process the daemon launched. `sessionFile` is the journal it writes, learned from
- * omp's `get_state` answers (the resumed file until then); it changes on /new or /fork.
+ * One omp process the daemon launched, started from the journal `resume` (continuing it) or
+ * `fork` (a new session copied from it), or from nothing. `sessionFile` is the journal it
+ * writes, learned from omp's `get_state` answers (the resumed file until then); it changes
+ * on /new or /fork.
  * @typedef {{
  *   id: string,
  *   cwd: string,
  *   resume: string | null,
+ *   fork: string | null,
  *   sessionFile: string | null,
  *   status: SessionStatus,
  *   pid: number | null,

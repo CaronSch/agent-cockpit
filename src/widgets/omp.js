@@ -3,7 +3,8 @@
  * lets the user chat with it and set it up, rendered from omp's structured event stream.
  *
  * Params (persisted with the layout): `session` (daemon session id), `cwd`, and
- * `sessionFile` (omp's transcript file, for resuming after the process is gone).
+ * `sessionFile` (omp's transcript file, for resuming after the process is gone), plus
+ * `resume` or `fork` while the window is starting from another journal.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -21,9 +22,10 @@ import { awaitsUser } from '../omp/activity.js';
 /** @import { SlashCommand } from '../omp/transcript.js' */
 
 /**
- * `resume` is a journal to resume as soon as the window is placed (set by whoever created
- * it, e.g. the Sessions window); it is cleared once the session is running.
- * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, resume: string | null }} OmpParams
+ * `resume` is a journal to resume, `fork` one to fork into a new session, as soon as the
+ * window is placed (set by whoever created it: the Sessions window, another pane's Fork);
+ * either is cleared once the session is running, so a fork is never taken twice.
+ * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, resume: string | null, fork: string | null }} OmpParams
  */
 /** @typedef {{ label: string, detail?: string, current?: boolean, pick: () => void }} MenuEntry */
 
@@ -32,6 +34,8 @@ const BOTTOM_SLACK_PX = 24;
 /** Seen-up-to is saved this long after it last moved, not on every streamed token. */
 const READ_SAVE_MS = 1000;
 const REFUSED = 'The daemon refused this page.';
+const FORK_TITLE = 'Fork: continue a copy of this conversation in a new window';
+const NOTHING_TO_FORK = 'Nothing to fork yet: omp saves a conversation once the model has replied';
 
 export default {
   type: 'omp',
@@ -62,6 +66,7 @@ function createPane(body, ctx, daemon) {
     cwd: str(ctx.params.cwd),
     sessionFile: str(ctx.params.sessionFile),
     resume: str(ctx.params.resume),
+    fork: str(ctx.params.fork),
   });
 
   /** @type {string | null} */
@@ -176,7 +181,10 @@ function createPane(body, ctx, daemon) {
       mode = null; // the status text changes with the status: always redraw it
       return show('status', () => statusScreen(status));
     }
-    if (!p.session) return p.resume ? show(`resuming:${p.resume}`, resumingScreen) : show('setup', setupScreen);
+    if (!p.session) {
+      const from = p.resume ?? p.fork;
+      return from ? show(`from:${from}`, startFromScreen) : show('setup', setupScreen);
+    }
     if (!view) {
       if (!daemon.meta(p.session)) return show('ended', endedScreen);
       mode = null;
@@ -265,34 +273,37 @@ function createPane(body, ctx, daemon) {
     return [box];
   }
 
-  /** Resumes `params.resume` right away; on failure offers to retry or start fresh. */
-  function resumingScreen() {
-    const { resume: file, cwd } = params();
+  /** Resumes `params.resume`, or forks `params.fork`, right away; on failure offers to retry or start fresh. */
+  function startFromScreen() {
+    const { resume, fork, cwd } = params();
+    const [doing, failed] = resume ? ['Resuming session…', 'Could not resume'] : ['Forking session…', 'Could not fork'];
     const box = el('div', 'omp-center');
-    const status = el('p', 'omp-muted', 'Resuming session…');
+    const status = el('p', 'omp-muted', doing);
     box.append(status);
-    if (!file) return [box];
+    const from = resume ? { resume } : fork ? { fork } : null;
+    if (!from) return [box];
     const actions = el('div', 'omp-row');
     actions.hidden = true;
     const attempt = () => {
       status.className = 'omp-muted';
-      status.textContent = 'Resuming session…';
+      status.textContent = doing;
       actions.hidden = true;
       daemon
-        .createSession({ cwd: cwd ?? '~', resume: file })
+        .createSession({ cwd: cwd ?? '~', ...from })
         .then((meta) => {
-          ctx.setParams({ session: meta.id, cwd: meta.cwd, sessionFile: file, resume: null });
+          // A fork's own journal is not known until omp reports it (refreshState).
+          ctx.setParams({ session: meta.id, cwd: meta.cwd, sessionFile: meta.sessionFile, resume: null, fork: null });
           schedule();
         })
         .catch((err) => {
           status.className = 'omp-error';
-          status.textContent = `Could not resume: ${errorMessage(err)}`;
+          status.textContent = `${failed}: ${errorMessage(err)}`;
           actions.hidden = false;
         });
     };
     const retry = button('btn btn-accent', 'Try again', attempt);
     const fresh = button('btn', 'New session', () => {
-      ctx.setParams({ resume: null });
+      ctx.setParams({ resume: null, fork: null });
       schedule();
     });
     actions.append(retry, fresh);
@@ -302,7 +313,7 @@ function createPane(body, ctx, daemon) {
   }
 
   /**
-   * Resume / New session buttons. Resume goes through `resumingScreen`.
+   * Resume / New session buttons. Resume goes through `startFromScreen`.
    * @param {SessionMeta | null} meta
    */
   function sessionActions(meta) {
@@ -367,10 +378,11 @@ function createPane(body, ctx, daemon) {
     costEl.title = 'Cost of this session';
     const errorBadge = el('span', 'omp-badge-error', 'error');
     const spacer = el('span', 'omp-spacer');
+    const forkBtn = toolButton('Fork', FORK_TITLE);
     const loginBtn = toolButton('Login', 'Log in to a model provider');
     const stopBtn = toolButton('Stop', 'Stop the agent and restore queued messages (Esc)');
     const closeBtn = toolButton('Close', 'End this omp session');
-    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, contextEl, costEl, errorBadge, spacer, loginBtn, stopBtn, closeBtn);
+    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, contextEl, costEl, errorBadge, spacer, forkBtn, loginBtn, stopBtn, closeBtn);
 
     const strip = el('div', 'omp-strip');
     const loginStrip = el('div', 'omp-login');
@@ -430,6 +442,11 @@ function createPane(body, ctx, daemon) {
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
+    /**
+     * Whether omp has this conversation on disk, so it can be forked: a journal the session
+     * started from exists already, and omp writes a new session's once the model has replied.
+     */
+    const saved = () => Boolean(meta()?.resume || meta()?.fork) || state.items.some((i) => i.kind === 'assistant' && i.ended);
 
     // ── commands ──
     /**
@@ -608,6 +625,11 @@ function createPane(body, ctx, daemon) {
     );
 
     stopBtn.addEventListener('click', () => void stop());
+    // The copy is omp's own (`--fork`): a new session in a new window; this one carries on.
+    forkBtn.addEventListener('click', () => {
+      const m = meta();
+      if (m?.sessionFile) ctx.addWidget('omp', { fork: m.sessionFile, cwd: m.cwd, session: null, sessionFile: null });
+    });
     closeBtn.addEventListener('click', () => {
       closeBtn.disabled = true;
       daemon
@@ -847,6 +869,9 @@ function createPane(body, ctx, daemon) {
       for (const b of [modelBtn, thinkingBtn, loginBtn]) b.disabled = !live;
       stopBtn.disabled = !live || !state.streaming;
       closeBtn.hidden = !live && m?.status !== 'starting';
+      const forkable = Boolean(m?.sessionFile) && saved();
+      forkBtn.disabled = !forkable;
+      forkBtn.title = forkable ? FORK_TITLE : NOTHING_TO_FORK;
     }
 
     function drawComposer() {
@@ -872,8 +897,8 @@ function createPane(body, ctx, daemon) {
           readyHandled = true;
           refreshSeen = state.refreshSeq;
           void refreshState();
-          // A resumed process streams none of its earlier history: fetch it once.
-          if (meta()?.resume && !state.seeded && !messagesRequested) {
+          // A process started from a journal streams none of its earlier history: fetch it once.
+          if ((meta()?.resume || meta()?.fork) && !state.seeded && !messagesRequested) {
             messagesRequested = true;
             void rpc({ type: 'get_messages' });
           }

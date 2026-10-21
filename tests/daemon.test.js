@@ -1,6 +1,6 @@
 import { test, describe, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, stat } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHistory } from '../daemon/history.js';
@@ -281,7 +281,54 @@ describe('sessions', () => {
     const fresh = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
     assert.equal(fresh.json.session.sessionFile, null);
     const ready = await waitForStatus(fresh.json.session.id, 'ready');
-    assert.equal(ready.sessionFile, '/tmp/fake-omp-session.jsonl', 'learned from omp’s get_state before ready');
+    assert.match(String(ready.sessionFile), /\.jsonl$/, 'learned from omp’s get_state before ready');
+  });
+
+  test('a fork runs a new session on a copy of the journal and leaves the journal alone', async () => {
+    const journal = join(cwd, 'to-fork.jsonl');
+    const lines = [
+      { type: 'title', v: 1, title: 'Login work' },
+      { type: 'session', version: 3, id: 'source', timestamp: '2026-10-01T10:00:00.000Z', cwd },
+      { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'fix the login bug' }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'fixed it' }] } },
+    ];
+    const original = `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`;
+    await Bun.write(journal, original);
+
+    const { status, json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd, fork: journal } });
+    assert.equal(status, 201);
+    assert.equal(json.session.fork, journal);
+    assert.equal(json.session.resume, null);
+    const id = json.session.id;
+    const ready = await waitForStatus(id, 'ready');
+    assert.ok(ready.sessionFile && ready.sessionFile !== journal, 'the fork writes a journal of its own');
+    const copied = await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'get_messages' } });
+    const texts = copied.json.data.messages.map((/** @type {any} */ m) => m.content[0].text);
+    assert.deepEqual(texts, ['fix the login bug', 'fixed it'], 'the conversation so far');
+
+    await turn(id, 'now add tests');
+    assert.equal(await Bun.file(journal).text(), original, 'the source journal is untouched');
+    assert.match(await Bun.file(ready.sessionFile).text(), /now add tests/);
+    await rm(ready.sessionFile);
+  });
+
+  test('a fork needs an existing journal, and cannot also resume one', async () => {
+    const journal = join(cwd, 'fork-me.jsonl');
+    await Bun.write(journal, '');
+    const before = hub.list().length;
+    /** @type {Array<[Record<string, unknown>, RegExp]>} */
+    const refused = [
+      [{ cwd, fork: join(cwd, 'missing.jsonl') }, /^fork is not an existing file/],
+      [{ cwd, fork: cwd }, /^fork is not an existing file/],
+      [{ cwd, fork: ' ' }, /^fork is required/],
+      [{ cwd, fork: journal, resume: journal }, /^resume and fork cannot be combined/],
+    ];
+    for (const [body, error] of refused) {
+      const res = await call({ method: 'POST', path: '/api/sessions', body });
+      assert.equal(res.status, 400, JSON.stringify(body));
+      assert.match(res.json.error, error);
+    }
+    assert.equal(hub.list().length, before, 'nothing was launched');
   });
 
   /**
@@ -330,7 +377,7 @@ describe('sessions', () => {
 
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {
     const missing = createHub({ ompPath: join(cwd, 'no-such-omp') });
-    const meta = missing.create({ cwd, resume: null });
+    const meta = missing.create({ cwd, resume: null, fork: null });
     for (let i = 0; i < 100 && missing.list()[0].status === 'starting'; i++) await Bun.sleep(20);
     const [after] = missing.list();
     assert.equal(after.id, meta.id);

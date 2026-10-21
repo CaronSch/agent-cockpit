@@ -81,20 +81,25 @@ What runs today:
   tool calls with output, `!` bash), pick model and thinking level, log in to
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
   a running turn, and resume the conversation after a daemon restart. Several
-  panes can run side by side, each bound to its own session. The message box
-  grows with the prompt; selected reply text can be commented on (the comment goes
-  quoted with the next prompt) or asked about (omp's `btw` answers in the popup,
-  outside the chat); long pastes become editable cards and pasted or dropped
-  files are stored in `~/.cockpit/attachments/` and sent as omp `@"<path>"`
-  mentions. A pane whose agent finished its turn (or asks something) while its
-  user was not looking gets an electric-blue border until it is hovered,
-  scrolled, clicked or typed in.
+  panes can run side by side, each bound to its own session. **Fork** continues
+  a copy of a pane's conversation in a new pane, as a session of its own (omp's
+  `--fork`: a new journal, the original runs on untouched); it stays off until
+  omp has saved the conversation, which a new session does once the model has
+  replied. The message box grows with the prompt; selected reply text can be
+  commented on (the comment goes quoted with the next prompt) or asked about
+  (omp's `btw` answers in the popup, outside the chat); long pastes become
+  editable cards and pasted or dropped files are stored in
+  `~/.cockpit/attachments/` and sent as omp `@"<path>"` mentions. A pane whose
+  agent finished its turn (or asks something) while its user was not looking
+  gets an electric-blue border until it is hovered, scrolled, clicked or typed
+  in.
 - The Sessions window: every past omp conversation (read from omp's session
   files), searchable across titles, directories and prompts, sortable, and
   draggable onto the grid to resume it in a new omp pane. Sessions already open
   in a pane are marked and cannot be opened twice. Sessions the daemon runs get a
   summarising title: after a turn settles in an unnamed session it sends omp
-  `/rename`, which RPC mode otherwise never does by itself.
+  `/rename`, which RPC mode otherwise never does by itself. A fork is listed as a
+  session of its own, under the title it copied from its source.
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
   Markdown files in `~/.cockpit/scratchpads/`; pasted or dropped
