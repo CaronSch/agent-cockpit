@@ -1,10 +1,11 @@
-// Behaviour tests for the Sessions window: listing, search, sort, and resuming a past session
-// into a new omp window, against the real daemon reading journals from E2E_OMP_SESSIONS.
+// Behaviour tests for the Sessions window: listing, search, sort, resuming a past session
+// into a new omp window, and archiving, against the real daemon reading journals from
+// E2E_OMP_SESSIONS.
 import { test, expect } from '@playwright/test';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { E2E_OMP_SESSIONS, newWorkspace, workbenchPath } from './daemon.js';
+import { E2E_OMP_SESSIONS, E2E_STATE_DIR, newWorkspace, workbenchPath } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {import('@playwright/test').Locator} Locator */
@@ -26,12 +27,14 @@ const JOURNALS = [
 ];
 /** @param {string} name */
 const fileOf = (name) => join(E2E_OMP_SESSIONS, '-e2e-project', `2026-10-01_${name}.jsonl`);
+const ARCHIVE = join(E2E_STATE_DIR, 'archive', 'sessions');
 
 /** @type {string[]} */
 let problems = [];
 
 test.beforeEach(async ({ page }) => {
   rmSync(E2E_OMP_SESSIONS, { recursive: true, force: true });
+  rmSync(ARCHIVE, { recursive: true, force: true });
   mkdirSync(join(E2E_OMP_SESSIONS, '-e2e-project'), { recursive: true });
   for (const j of JOURNALS) {
     const lines = [
@@ -202,4 +205,99 @@ test('a session whose directory is gone says so instead of starting omp somewher
   await expect(pane.getByRole('button', { name: 'New session' })).toBeVisible();
   // A failed request logs a console error in the browser; that is the expected outcome here.
   problems = problems.filter((p) => !p.includes('400'));
+});
+
+test('Archive hides a session from the list (and from omp), Archived lists it, and Restore puts it back', async ({ page }) => {
+  mkdirSync(fileOf('zebra').replace(/\.jsonl$/, ''));
+  writeFileSync(join(fileOf('zebra').replace(/\.jsonl$/, ''), 'Explorer.jsonl'), '');
+  const window = await addSessionsWindow(page);
+  await row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' }).click();
+  await expect(titles(window)).toHaveText(['deploy staging', 'Fix the login flow']);
+  expect(existsSync(fileOf('zebra')), 'gone from where omp resumes sessions').toBe(false);
+  expect(existsSync(join(ARCHIVE, '-e2e-project', '2026-10-01_zebra', 'Explorer.jsonl')), 'kept, folder and all').toBe(true);
+
+  const toggle = window.getByRole('button', { name: 'Archived' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(titles(window)).toHaveText(['Zebra cleanup']);
+  await expect(window.locator('.sessions-status')).toHaveText('1 archived session');
+  const archived = row(window, 'Zebra cleanup');
+  await expect(archived.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+  await archived.dblclick();
+  await settle(page);
+  await expect(page.locator('.widget[data-widget="omp"]'), 'an archived session does not resume').toHaveCount(0);
+
+  await archived.getByRole('button', { name: 'Restore' }).click();
+  await expect(window.locator('.sessions-status')).toHaveText('No archived sessions.');
+  await toggle.click();
+  await expect(titles(window)).toHaveText(['Zebra cleanup', 'deploy staging', 'Fix the login flow']);
+  expect(existsSync(join(fileOf('zebra').replace(/\.jsonl$/, ''), 'Explorer.jsonl'))).toBe(true);
+});
+
+test('Archive does not drag the session out: pressed and moved onto the grid, it opens nothing', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  const from = await row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' }).boundingBox();
+  const grid = await page.locator('#grid').boundingBox();
+  if (!from || !grid) throw new Error('nothing to drag');
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
+  await expect(page.locator('.drop-indicator')).not.toHaveClass(/is-visible/);
+  await page.mouse.up();
+  await settle(page);
+  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(0);
+});
+
+test('a session open in a window cannot be archived, and says why', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  const archive = row(window, 'deploy staging').getByRole('button', { name: 'Archive' });
+  await expect(archive).toBeDisabled();
+  await expect(archive).toHaveAttribute('title', /close it to archive it/);
+  await expect(row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' })).toBeEnabled();
+});
+
+test('the directory menu narrows the list to one directory, with search, sort and the archive, and is kept per window', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  const menu = window.getByRole('combobox', { name: 'Directory' });
+  await expect(menu.locator('option')).toHaveText(['All directories', `${ALPHA} (2)`, `${BRAVO} (1)`]);
+  await expect(menu).toHaveValue('');
+
+  await menu.selectOption(ALPHA);
+  await expect(titles(window)).toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  await expect(window.locator('.sessions-status')).toHaveText('2 sessions');
+  await window.getByRole('combobox', { name: 'Sort by' }).selectOption('title');
+  await expect(titles(window)).toHaveText(['Fix the login flow', 'Zebra cleanup']);
+  await window.getByRole('searchbox', { name: 'Search sessions' }).fill('tests');
+  await expect(titles(window)).toHaveText(['Fix the login flow'], { timeout: 3000 });
+  await window.getByRole('searchbox', { name: 'Search sessions' }).fill('deploy');
+  await expect(window.locator('.sessions-status')).toHaveText('No session matches.');
+  await expect(menu, 'the choice stays while nothing there matches').toHaveValue(ALPHA);
+  await window.getByRole('searchbox', { name: 'Search sessions' }).fill('');
+
+  await row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' }).click();
+  await expect(titles(window)).toHaveText(['Fix the login flow']);
+  await window.getByRole('button', { name: 'Archived' }).click();
+  await expect(titles(window)).toHaveText(['Zebra cleanup']);
+  await expect(menu.locator('option')).toHaveText(['All directories', `${ALPHA} (1)`]);
+  await window.getByRole('button', { name: 'Archived' }).click();
+
+  // A second Sessions window starts on all directories and keeps a choice of its own.
+  const id = await window.getAttribute('data-id');
+  const first = page.locator(`.widget[data-id="${id}"]`);
+  await page.locator('#palette-toggle').click();
+  await page.locator('#palette [data-type="sessions"]').click();
+  await page.keyboard.press('Escape');
+  const other = page.locator(`.widget[data-widget="sessions"]:not([data-id="${id}"])`);
+  await expect(other).toHaveCount(1);
+  await expect(other.getByRole('combobox', { name: 'Directory' })).toHaveValue('');
+  await other.getByRole('combobox', { name: 'Directory' }).selectOption(BRAVO);
+  await expect(titles(other)).toHaveText(['deploy staging']);
+  await expect(titles(first)).toHaveText(['Fix the login flow']);
+
+  await page.reload();
+  await expect(first.getByRole('combobox', { name: 'Directory' })).toHaveValue(ALPHA);
+  await expect(titles(first)).toHaveText(['Fix the login flow']);
+  await expect(other.getByRole('combobox', { name: 'Directory' })).toHaveValue(BRAVO);
+  await expect(titles(other)).toHaveText(['deploy staging']);
 });

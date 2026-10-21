@@ -1,4 +1,4 @@
-/* Sessions window: past omp sessions, searchable, sortable, draggable onto the grid. */
+/* Sessions window: past omp sessions, searchable, sortable, draggable onto the grid, archivable. */
 
 .sessions {
   display: flex;
@@ -32,6 +32,12 @@
   flex: 1;
 }
 
+/* Paths can be long: the directory menu gives way to the search box first. */
+.sessions-directory {
+  flex: 0 1 auto;
+  max-width: 16em;
+}
+
 /* Drawn like the search box beside it: no native control chrome, a thin chevron. */
 .sessions-sort {
   appearance: none;
@@ -45,7 +51,7 @@
   cursor: pointer;
 }
 
-:is(.sessions-search, .sessions-sort, .sessions-icon-btn, .sessions-item):focus-visible {
+:is(.sessions-search, .sessions-sort, .sessions-icon-btn, .sessions-toggle, .sessions-item):focus-visible {
   outline: 1px solid var(--color-accent);
   outline-offset: -1px;
 }
@@ -64,6 +70,31 @@
 
 .sessions-icon-btn:hover {
   color: var(--color-text);
+}
+
+/* Archived ⇄ past sessions: lit while the window lists the archive. */
+.sessions-toggle {
+  flex: none;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-dim);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.sessions-toggle:hover {
+  color: var(--color-text);
+}
+
+.sessions-toggle[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-glow);
+  color: var(--color-accent);
 }
 
 .sessions-status {
@@ -105,7 +136,7 @@
   background: var(--color-surface-raised);
 }
 
-.sessions-item.is-open {
+.sessions-item:is(.is-open, .is-archived) {
   cursor: default;
 }
 
@@ -156,6 +187,20 @@
   color: var(--color-accent);
 }
 
-.sessions-resume {
+.sessions-resume,
+.sessions-restore {
   flex: none;
+}
+
+/* Quieter than Resume: a way to tidy up, not the row's main action. */
+.sessions-archive {
+  flex: none;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-weight: 400;
+}
+
+.sessions-archive:hover:not(:disabled) {
+  color: var(--color-text);
 }

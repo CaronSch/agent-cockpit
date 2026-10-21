@@ -103,7 +103,7 @@ beforeAll(async () => {
   hub = createHub({ ompPath: FAKE_OMP });
   server = createDaemonServer({
     hub,
-    history: createHistory({ root: join(cwd, 'no-sessions-yet') }),
+    history: createHistory({ root: join(cwd, 'omp-sessions'), archive: join(cwd, 'state', 'archive', 'sessions') }),
     scratchpads: createScratchpads({ dir: join(cwd, 'state', 'scratchpads') }),
     attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
     workspaces: createWorkspaces({ dir: join(cwd, 'state', 'workspaces') }),
@@ -502,6 +502,103 @@ describe('workspaces', () => {
     assert.match(read.json.error, /broken\.json is not a workspace file/);
     assert.equal((await call({ method: 'PUT', path: '/api/workspaces/broken/screens/s_0000000a', body: { tree, base: null } })).status, 500);
     assert.equal(await Bun.file(file).text(), '{not json');
+  });
+});
+
+describe('session archive', () => {
+  const sessionsDir = () => join(cwd, 'omp-sessions', '-p');
+  const archiveDir = () => join(cwd, 'state', 'archive', 'sessions', '-p');
+  /** A journal the Sessions window lists, with a subagent folder beside it. @param {string} name */
+  async function pastSession(name) {
+    const file = join(sessionsDir(), `${name}.jsonl`);
+    const lines = [
+      { type: 'session', version: 3, id: name, timestamp: '2026-10-01T10:00:00.000Z', cwd },
+      { type: 'message', message: { role: 'user', content: [{ type: 'text', text: `work on ${name}` }] } },
+    ];
+    await Bun.write(file, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
+    await Bun.write(join(sessionsDir(), name, 'Explorer.jsonl'), '');
+    return file;
+  }
+  /** @param {boolean} [archived] */
+  const ids = async (archived = false) =>
+    (await call({ path: `/api/history${archived ? '?archived=1' : ''}` })).json.sessions.map((/** @type {any} */ s) => s.id).sort();
+
+  test('like every API route, archive and restore need the token and the page’s Origin', async () => {
+    const file = await pastSession('guarded');
+    for (const path of ['/api/history/archive', '/api/history/restore']) {
+      assert.equal((await call({ method: 'POST', path, body: { file }, auth: false })).status, 401);
+      assert.equal((await call({ method: 'POST', path, body: { file }, origin: false })).status, 403);
+      assert.equal((await call({ method: 'POST', path, body: { file }, headers: { origin: 'http://evil.example' } })).status, 403);
+    }
+    assert.ok(await Bun.file(file).exists(), 'nothing moved');
+    await rm(file);
+    await rm(join(sessionsDir(), 'guarded'), { recursive: true });
+  });
+
+  test('an archived session leaves the list for the archived list, and restore brings it back', async () => {
+    const file = await pastSession('shelved');
+    const archived = await call({ method: 'POST', path: '/api/history/archive', body: { file } });
+    assert.equal(archived.status, 200);
+    assert.equal(archived.json.file, join(archiveDir(), 'shelved.jsonl'));
+    assert.ok(await Bun.file(join(archiveDir(), 'shelved', 'Explorer.jsonl')).exists(), 'its folder went with it');
+    assert.ok(!(await Bun.file(file).exists()));
+    assert.ok(!(await ids()).includes('shelved'));
+    assert.ok((await ids(true)).includes('shelved'));
+
+    const restored = await call({ method: 'POST', path: '/api/history/restore', body: { file: archived.json.file } });
+    assert.deepEqual(restored.json, { file });
+    assert.ok((await ids()).includes('shelved'));
+    assert.ok(!(await ids(true)).includes('shelved'));
+  });
+
+  test('restore refuses to replace a journal that is back at the same place', async () => {
+    const file = await pastSession('twice');
+    const { json } = await call({ method: 'POST', path: '/api/history/archive', body: { file } });
+    await Bun.write(file, 'newer');
+    const res = await call({ method: 'POST', path: '/api/history/restore', body: { file: json.file } });
+    assert.equal(res.status, 409);
+    assert.match(res.json.error, /already there, not replaced/);
+    assert.equal(await Bun.file(file).text(), 'newer');
+    assert.ok(await Bun.file(json.file).exists());
+  });
+
+  test('a session open in a window cannot be archived until it is closed', async () => {
+    const file = await pastSession('busy');
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: file } });
+    await waitForStatus(json.session.id, 'ready');
+    const refused = await call({ method: 'POST', path: '/api/history/archive', body: { file } });
+    assert.equal(refused.status, 409);
+    assert.match(refused.json.error, /open in a window/);
+    assert.ok(await Bun.file(file).exists());
+
+    await call({ method: 'DELETE', path: `/api/sessions/${json.session.id}` });
+    await waitForStatus(json.session.id, 'exited');
+    assert.equal((await call({ method: 'POST', path: '/api/history/archive', body: { file } })).status, 200);
+  });
+
+  test('only journals the Sessions window lists can move: traversal and other paths are refused', async () => {
+    const file = await pastSession('kept');
+    const token = join(cwd, 'state', 'token-like.jsonl');
+    await Bun.write(token, 'secret');
+    /** @type {Array<[string, unknown]>} */
+    const refused = [
+      ['/api/history/archive', join(sessionsDir(), '..', '..', 'state', 'token-like.jsonl')],
+      ['/api/history/archive', `${sessionsDir()}/../../state/token-like.jsonl`],
+      ['/api/history/archive', join(sessionsDir(), 'kept', 'Explorer.jsonl')],
+      ['/api/history/archive', join(archiveDir(), 'shelved.jsonl')],
+      ['/api/history/archive', 'kept.jsonl'],
+      ['/api/history/archive', { path: file }],
+      ['/api/history/restore', file],
+      ['/api/history/restore', join(archiveDir(), '..', '..', '..', 'token-like.jsonl')],
+    ];
+    for (const [path, target] of refused) {
+      const res = await call({ method: 'POST', path, body: { file: target } });
+      assert.equal(res.status, 400, `${path} ${JSON.stringify(target)}`);
+    }
+    assert.equal((await call({ method: 'POST', path: '/api/history/archive', raw: 'nope', headers: { 'content-type': 'application/json' } })).status, 400);
+    assert.equal((await call({ method: 'POST', path: '/api/history/archive', body: { file: join(sessionsDir(), 'gone.jsonl') } })).status, 404);
+    assert.equal(await Bun.file(token).text(), 'secret');
+    assert.ok(await Bun.file(file).exists());
   });
 });
 

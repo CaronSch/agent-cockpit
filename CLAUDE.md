@@ -135,10 +135,18 @@ What runs today:
 - The Sessions window: every past omp conversation (read from omp's session
   files), searchable across titles, directories and prompts, sortable, and
   draggable onto the grid (by its row or its Resume button) to resume it in a new
-  omp pane there; Resume clicked opens it beside the list. Sessions already open
-  in a pane are marked and cannot be opened twice; an untitled one is listed by
-  its first prompt. A fork is listed as a
-  session of its own, under the title it copied from its source.
+  omp pane there; Resume clicked opens it beside the list. A directory menu (every
+  directory with sessions, A→Z, with counts) narrows a window to one directory,
+  together with its search, sort and Archived toggle; like those, the choice is the
+  window's own. Sessions already open in a pane are marked and cannot be opened
+  twice; an untitled one is listed by its first prompt. A fork is listed as a
+  session of its own, under the title it copied from its source. **Archive** moves a
+  session's journal and its folder out of omp's sessions into
+  `~/.cockpit/archive/sessions/` at the same relative path, so neither the list nor omp's
+  own resume offers it; the **Archived** toggle lists archived sessions (searchable and
+  sortable the same way), each with **Restore**, which moves it back and never replaces a
+  file that is there now. A session open in any window cannot be archived. Nothing is
+  ever deleted: there is no delete.
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
   Markdown files in `~/.cockpit/scratchpads/`; pasted or dropped
