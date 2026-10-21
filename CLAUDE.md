@@ -169,8 +169,7 @@ What runs today:
   directory with sessions, A→Z, with counts) narrows a window to one directory
   (running sessions too), together with its search, sort and Archived toggle; like
   those, the choice is the window's own. An untitled session is listed by its first
-  prompt. The window is set in one font (mono), with row actions shown on hover or
-  focus. A fork is listed as a
+  prompt. Row actions show on hover or focus. A fork is listed as a
   session of its own, under the title it copied from its source. **Archive** moves a
   session's journal and its folder out of omp's sessions into
   `~/.cockpit/archive/sessions/` at the same relative path, so neither the list nor omp's
