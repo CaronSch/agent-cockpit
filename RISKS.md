@@ -47,7 +47,9 @@ is newer. The daemon prints its version at start.
 - **The fake omp drifts from the real one.** `tests/fixtures/fake-omp.js`
   copies frame shapes recorded from omp 18.12.3: startup, setup commands,
   `get_state`, models, thinking levels, login providers, `bash`, aborts,
-  builtin `/rename`, the start of a `btw`, failed prompts and `--resume`. The
+  builtin `/rename` (with no title, omp generates one in the background, so the
+  fake answers first and reports the outcome after; that order follows 18.12.3's
+  source), the start of a `btw`, failed prompts and `--resume`. The
   frames of a turn a model actually answers (a pre-filled assistant
   `message_start`, deltas, tool calls, `ask` dialogs, `btw_delta`, follow-up `btw`
   turns, a generated title) were checked against 18.12.3's source only, because no
@@ -68,11 +70,7 @@ is newer. The daemon prints its version at start.
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
-- **Auto-titles, attachments, `@` mentions, Ask, Fork, `!` commands, the responses-only view, window names and todo progress lean on omp internals.** Titles rely on
-  `/rename` with no title generating one in RPC mode (it is not gated by
-  `PI_NO_TITLE`), and on `session_settled` following only agent activity (if it
-  followed a builtin command too, the daemon's own `/rename` would trigger the next
-  one, up to the attempt cap). Attachments rely on `@"<absolute path>"` mentions
+- **Attachments, `@` mentions, Ask, Fork, `!` commands, the responses-only view, window names and todo progress lean on omp internals.** Attachments rely on `@"<absolute path>"` mentions
   being read when a prompt starts a turn; `@` mentions typed in the draft also rely on a
   bare `@path` ending at whitespace or `@`, with quotes, brackets and sentence
   punctuation trimmed from its ends (a path that would lose any is sent quoted), and on
@@ -101,7 +99,7 @@ is newer. The daemon prints its version at start.
   on every `todo` tool result carrying the agent's whole list in `details.phases`
   (`details.op` is `view` for a read), on `get_state`'s `todoPhases`, and on
   `todo_auto_clear` meaning the list changed. A
-  change shows up as sessions that stay untitled, files
+  change shows up as files
   that reach the model only as a bare path (or, for a typed `@` mention, not at all), side answers that never arrive or turn
   up in the chat, follow-ups answered under the wrong question or without knowing
   what was asked before, a forked pane that opens empty or shows its history twice, a
@@ -110,8 +108,7 @@ is newer. The daemon prints its version at start.
   the turn to end or show twice, a responses-only pane that shows tool work,
   drops a final reply or never stops "Working…", windows that stay unnamed, or a
   progress bar that never shows or lags the agent's list. *Response:* re-read
-  omp's `slash-commands/builtin-lifecycle.ts` (`rename`),
-  `modes/rpc/rpc-session-settle.ts`, `utils/file-mentions.ts`,
+  omp's `utils/file-mentions.ts`,
   `modes/rpc/rpc-btw.ts`, `session/btw-turn.ts`, `session/btw-history.ts`,
   `modes/rpc/rpc-mode.ts` (`BACKGROUND_COMMANDS`, `bash`, `get_state`), `session/bash-runner.ts`,
   `tools/todo.ts`,

@@ -260,6 +260,21 @@ const withoutIcons = (text) => text.replace(/\p{Co}/gu, '').replace(/ {2,}/g, ' 
  */
 export const handsTurnBack = (frame) => (typeof frame.yielded === 'boolean' ? frame.yielded : frame.isTerminal !== false);
 
+const NAME_CHARS = 80;
+
+/**
+ * What names the conversation: omp's title (set by a `/rename` the user runs), else the
+ * first thing the user asked, on one line, as the Sessions window does for untitled sessions.
+ * @param {Transcript} state @returns {string | null}
+ */
+export function conversationName(state) {
+  if (state.session.name) return state.session.name;
+  const first = state.items.find((i) => i.kind === 'user' && !i.byAgent && i.text.trim());
+  if (first?.kind !== 'user') return null;
+  const flat = first.text.replace(/\s+/g, ' ').trim();
+  return flat.length > NAME_CHARS ? `${flat.slice(0, NAME_CHARS - 1)}…` : flat;
+}
+
 /** @param {Transcript} state @param {Record<string, any>} frame */
 function applyFrame(state, frame) {
   const type = typeof frame?.type === 'string' ? frame.type : '';
