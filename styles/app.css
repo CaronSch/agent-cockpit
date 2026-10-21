@@ -18,7 +18,7 @@ body {
   overflow: hidden;
   background: var(--color-bg);
   color: var(--color-text);
-  font: 400 var(--text-base) / 1.4 var(--font-ui);
+  font: 400 var(--text-base) / 1.4 var(--font-mono);
 }
 
 button {
@@ -65,7 +65,7 @@ button {
 }
 
 .brand-name {
-  font: 600 var(--text-lg) / 1 var(--font-ui);
+  font: 600 var(--text-lg) / 1 var(--font-mono);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -249,7 +249,7 @@ button {
   border-radius: var(--radius-s);
   background: transparent;
   color: var(--color-text);
-  font: 600 var(--text-sm) / 1.4 var(--font-ui);
+  font: 600 var(--text-sm) / 1.4 var(--font-mono);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -487,7 +487,6 @@ button {
 .widget-label {
   margin-left: 4px;
   color: var(--color-text);
-  font-family: var(--font-ui);
   font-weight: 500;
   letter-spacing: normal;
   text-transform: none;

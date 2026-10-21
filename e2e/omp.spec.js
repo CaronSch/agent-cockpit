@@ -142,6 +142,30 @@ test('a streamed reply renders once, as markdown, even though omp pre-fills mess
   await expect(pane.getByText('idle')).toBeVisible();
 });
 
+test('the conversation reads like a terminal: no "you" label, one font for the whole app', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const user = pane.locator('.omp-user').last();
+  await expect(user).toHaveText('hello');
+  await expect(user.locator('.omp-role')).toHaveCount(0);
+  const reply = pane.locator('.omp-assistant').last().locator('.omp-md > p').first();
+  await expect(reply).toContainText('You said');
+  /** @param {import('@playwright/test').Locator} at */
+  const font = (at) => at.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { family: style.fontFamily, size: style.fontSize };
+  });
+  const box = pane.locator('textarea');
+  const text = await font(reply);
+  expect(text.family).toMatch(/^"IBM Plex Mono"/);
+  expect(await font(user.locator('.omp-md p'))).toEqual(text);
+  expect(await font(box)).toEqual(text);
+  for (const chrome of [pane.locator('.widget-title'), pane.getByRole('button', { name: 'Send' }), page.locator('#palette-toggle')]) {
+    expect((await font(chrome)).family).toBe(text.family);
+  }
+});
+
 test('a markdown table in a reply renders as a table, not as pipes', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

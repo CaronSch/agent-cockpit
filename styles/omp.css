@@ -13,6 +13,12 @@
   font-size: var(--text-sm);
 }
 
+/* The conversation reads like a terminal: one size and leading for every transcript item. */
+.omp-transcript,
+.omp-draft {
+  font: var(--text-md) / var(--leading-read) var(--font-mono);
+}
+
 .omp [hidden] {
   display: none !important;
 }
@@ -49,7 +55,6 @@
   background: var(--color-deck);
   color: var(--color-text);
   font: inherit;
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
 
@@ -63,10 +68,10 @@
   margin: 0;
   max-height: 24em;
   overflow: auto;
-  padding: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-s);
   background: var(--color-deck);
-  font: var(--text-xs) / 1.45 var(--font-mono);
+  font: inherit;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -262,7 +267,7 @@
   gap: var(--space-1);
   width: min(22rem, calc(100vw - 16px));
   max-height: min(60vh, calc(100% - 8px));
-  font: var(--text-sm) / 1.4 var(--font-ui);
+  font: var(--text-sm) / 1.4 var(--font-mono);
   padding: var(--space-2);
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-m);
@@ -377,13 +382,14 @@
 }
 
 /* ── Transcript ─────────────────────────────────────── */
+/* Terminal-like: no cards around messages; hierarchy comes from colour and weight. */
 .omp-transcript {
   flex: 1;
   min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   padding: var(--space-3);
 }
 
@@ -399,30 +405,34 @@
   gap: var(--space-2);
 }
 
+/* What the user sent: a faint band across the pane, with a prompt mark before the text. */
 .omp-user {
-  align-self: flex-end;
-  max-width: 85%;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-m);
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr);
+  gap: 0;
+  margin-inline: calc(-1 * var(--space-3));
+  padding: var(--space-1) var(--space-3);
   background: var(--color-surface-raised);
 }
 
+.omp-user::before {
+  content: '›';
+  grid-row: 1 / span 2;
+  color: var(--color-text-faint);
+  font-weight: 600;
+}
+
+/* A prompt one agent sent another: no band, and it says who sent it. */
 .omp-user.is-agent {
-  align-self: stretch;
-  max-width: none;
   background: transparent;
-  border: 1px dashed var(--color-line);
 }
 
 .omp-role {
   color: var(--color-text-faint);
-  font: 600 var(--text-2xs) / 1 var(--font-mono);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
+  font-size: var(--text-xs);
 }
 
 .omp-md {
-  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
@@ -438,17 +448,32 @@
 .omp-md ul,
 .omp-md ol,
 .omp-md blockquote,
-.omp-md pre {
+.omp-md pre,
+.omp-md .md-table-block {
   margin: 0 0 var(--space-2);
 }
 
-.omp-md ul,
+.omp-md strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* Markers sit in the gutter like a terminal's: `-` for bullets, numbers right after. */
+.omp-md ul {
+  padding-left: 2ch;
+  list-style: '- ';
+}
+
 .omp-md ol {
-  padding-left: 1.4em;
+  padding-left: 3ch;
+}
+
+.omp-md li::marker {
+  color: var(--color-text-dim);
 }
 
 .omp-md blockquote {
-  padding-left: var(--space-3);
+  padding-left: 1ch;
   border-left: 2px solid var(--color-line-strong);
   color: var(--color-text-dim);
 }
@@ -464,17 +489,31 @@
   border-top: 1px solid var(--color-line);
 }
 
+/* Headings stay at reading size: weight and a little space set them apart. */
 .md-heading {
-  margin: var(--space-3) 0 var(--space-2);
-  font-size: var(--text-base);
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 1em;
+  font-weight: 600;
 }
 
 .md-code {
   overflow: auto;
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-s);
   background: var(--color-deck);
-  font: var(--text-xs) / 1.45 var(--font-mono);
+  font: inherit;
+}
+
+.md-code[data-lang]::before {
+  content: attr(data-lang);
+  display: block;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+.md-inline-code {
+  color: var(--color-code);
+  font: inherit;
 }
 
 /* Sized to its table, so the Copy control lands on the table's own top-right corner. */
@@ -522,44 +561,31 @@
   overflow-x: auto;
 }
 
+/* Light rules only: a line under the header and faint ones between rows. */
 .md-table {
   border-collapse: collapse;
-  font-size: var(--text-sm);
-  line-height: 1.45;
 }
 
 .md-table th,
 .md-table td {
-  padding: 5px 10px;
-  border: 1px solid var(--color-line);
+  padding: 2px 2ch 2px 0;
   text-align: left;
   vertical-align: top;
 }
 
+.md-table th:last-child,
+.md-table td:last-child {
+  padding-right: 0;
+}
+
 .md-table th {
-  background: var(--color-surface-raised);
-  color: var(--color-text);
+  border-bottom: 1px solid var(--color-line-strong);
   font-weight: 600;
   white-space: nowrap;
 }
 
-.md-table tbody tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--color-surface-raised) 45%, transparent);
-}
-
-.md-code[data-lang]::before {
-  content: attr(data-lang);
-  display: block;
-  margin-bottom: var(--space-1);
-  color: var(--color-text-faint);
-  font-size: var(--text-2xs);
-}
-
-.md-inline-code {
-  padding: 0 3px;
-  border-radius: var(--radius-s);
-  background: var(--color-deck);
-  font: 0.92em var(--font-mono);
+.md-table tbody tr + tr td {
+  border-top: 1px solid var(--color-line);
 }
 
 .omp details > summary {
@@ -592,12 +618,12 @@
 .omp-thinking > summary,
 .omp-unrecognised > summary {
   color: var(--color-text-faint);
-  font: var(--text-xs) / 1.4 var(--font-mono);
 }
 
 .omp-thinking-text {
-  padding-left: var(--space-3);
-  border-left: 2px solid var(--color-line);
+  margin-left: 0.5em;
+  padding-left: calc(0.5em + var(--space-1));
+  border-left: 1px solid var(--color-line-strong);
   color: var(--color-text-dim);
   white-space: pre-wrap;
 }
@@ -606,13 +632,10 @@
   color: var(--color-accent);
 }
 
-.omp-tool,
-.omp-bash {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-s);
-  background: var(--color-surface);
-  font: var(--text-xs) / 1.45 var(--font-mono);
+/* Tool calls and shell runs: a header line, then what they took and gave, indented under it. */
+.omp-tool > :not(summary),
+.omp-bash > :not(.omp-bash-head) {
+  margin-left: 1em;
 }
 
 .omp-tool > summary {
@@ -648,11 +671,6 @@
   color: oklch(75% 0.12 150);
 }
 
-.omp-tool.is-error,
-.omp-bash.is-error {
-  border-color: oklch(69% 0.19 27 / 0.5);
-}
-
 .is-error > summary .omp-status,
 .omp-bash.is-error .omp-status {
   color: var(--color-danger);
@@ -673,12 +691,12 @@
 .omp-bash-cmd {
   flex: 1;
   min-width: 0;
+  font: inherit;
   overflow-wrap: anywhere;
 }
 
 .omp-note {
   color: var(--color-text-faint);
-  font: var(--text-xs) / 1.4 var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -933,7 +951,6 @@
   border-radius: var(--radius-s);
   background: var(--color-deck);
   color: var(--color-text);
-  font: var(--text-sm) / 1.55 var(--font-mono);
 }
 
 /* A placeholder that wrapped would make the empty box taller than one line. */
@@ -986,7 +1003,6 @@
   flex: none;
   margin-left: auto;
   color: var(--color-text-faint);
-  font-family: var(--font-ui);
 }
 
 /* ── comments on selected text, and the cards that go with the next message ── */
@@ -1100,7 +1116,7 @@
   border-radius: var(--radius-s);
   background: var(--color-deck);
   color: var(--color-text);
-  font: var(--text-sm) / 1.45 var(--font-ui);
+  font: var(--text-sm) / 1.45 var(--font-mono);
 }
 
 .omp-quote-input:focus-visible,
@@ -1120,7 +1136,7 @@
   flex-basis: 100%;
   margin: 0;
   color: var(--color-text-faint);
-  font: var(--text-xs) / 1.4 var(--font-ui);
+  font: var(--text-xs) / 1.4 var(--font-mono);
 }
 
 .omp-cards.is-held .omp-card {
@@ -1151,7 +1167,7 @@
   border: 0;
   background: transparent;
   color: var(--color-text);
-  font: var(--text-xs) / 1.4 var(--font-ui);
+  font: var(--text-xs) / 1.4 var(--font-mono);
   text-align: left;
   cursor: pointer;
 }
