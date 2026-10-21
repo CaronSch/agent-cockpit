@@ -175,6 +175,40 @@ test('a markdown table copies as Markdown, as CSV, and as a PNG image of the tab
   expect(Math.abs(image.height / (2 * box.height) - 1)).toBeLessThan(0.35);
 });
 
+test('the message box is set like scratchpad text and starts one line high, placeholder and all', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  /** @param {import('@playwright/test').Locator} node */
+  const font = (node) =>
+    node.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { family: s.fontFamily, size: s.fontSize, lineHeight: s.lineHeight };
+    });
+  const padText = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('textarea'));
+    probe.className = 'pad-text';
+    const s = getComputedStyle(probe);
+    const style = { family: s.fontFamily, size: s.fontSize, lineHeight: s.lineHeight };
+    probe.remove();
+    return style;
+  });
+  expect(await font(draft)).toEqual(padText);
+
+  // One line of text tall, even in a pane too narrow for the whole placeholder.
+  const lines = () =>
+    draft.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return (el.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom)) / parseFloat(s.lineHeight);
+    });
+  await expect(draft).toHaveAttribute('placeholder', /^Message omp/);
+  expect(await lines()).toBeCloseTo(1, 1);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await expect.poll(lines).toBeCloseTo(1, 1);
+  await draft.fill('one\ntwo');
+  await expect.poll(lines).toBeCloseTo(2, 1);
+});
+
 test('the message box grows with the prompt, up to half the pane, and shrinks again after sending', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

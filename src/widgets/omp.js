@@ -1014,8 +1014,8 @@ function createPane(body, ctx, daemon) {
       draft.placeholder = !live
         ? 'omp is not running'
         : state.streaming
-          ? 'Steer the agent… (Enter sends, Esc stops)'
-          : 'Message omp… (Enter sends, Shift+Enter newline, !cmd runs a shell command, / for commands)';
+          ? 'Steer the agent… (Esc stops)'
+          : 'Message omp… (@ files, / commands, ! shell)';
       if (state.editorText && state.editorText.seq > editorSeen) {
         editorSeen = state.editorText.seq;
         composer.setText(state.editorText.text);

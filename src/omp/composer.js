@@ -1,13 +1,13 @@
 /**
- * The omp pane's message box: a draft that grows with its text up to half the pane, cards for
- * what goes with the next message (comments on quoted transcript text, pasted text, files),
- * and the Send button.
+ * The omp pane's message box: a draft that starts one line high and grows with its text up
+ * to half the pane, cards for what goes with the next message (comments on quoted transcript
+ * text, pasted text, files), and the Send button.
  *
  * A paste past omp's size limit becomes a text card (click to edit) instead of filling the
  * draft. Files pasted into it or dropped anywhere on the pane are stored by the daemon as they
  * arrive, and go with the message as omp file mentions. A draft starting with `!` is a shell
- * command: the box switches to shell mode (monospace, marked with the directory it runs in,
- * Run for Send) and shows the cards as waiting, since a command goes without them.
+ * command: the box switches to shell mode (accent-coloured, marked with the directory it runs
+ * in, Run for Send) and shows the cards as waiting, since a command goes without them.
  */
 import { button, carriesFiles, el } from '../ui/dom.js';
 import { errorMessage } from '../ui/format.js';
@@ -67,7 +67,7 @@ export function createComposer({ pane, upload, onError, shellDir }) {
   mark.append(el('span', 'omp-shell-label', '$ shell'), markDir, el('span', 'omp-shell-hint', 'Enter runs it as a command, not a prompt'));
   const row = el('div', 'omp-compose-row');
   const draft = el('textarea', 'omp-draft');
-  draft.rows = 2;
+  draft.rows = 1;
   draft.setAttribute('aria-label', 'Message omp');
   const sendBtn = button('btn btn-accent', 'Send');
   row.append(draft, sendBtn);
