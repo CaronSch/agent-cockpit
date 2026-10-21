@@ -197,10 +197,20 @@ describe('notes', () => {
     assert.ok(stderr.kind === 'note' && stderr.detail === 'Decompression error: ZlibError\nsecond');
   });
 
-  test('a custom message without a messageId pairs its start and end', () => {
+  test('a message without a messageId shows once, whole, at its end', () => {
     const m = { role: 'custom', customType: 'mount-notice', content: 'tools changed', display: false, timestamp: 7 };
-    const state = run([frame({ type: 'message_start', message: m }), frame({ type: 'message_end', message: m })]);
-    assert.deepEqual(kinds(state), ['note']);
+    const reply = assistant([{ type: 'text', text: 'Hello' }]);
+    const state = run([
+      frame({ type: 'message_start', message: m }),
+      frame({ type: 'message_end', message: m }),
+      frame({ type: 'message_start', message: assistant([]) }),
+      frame({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Hel' }, message: { role: 'assistant' } }),
+      frame({ type: 'message_end', message: reply }),
+    ]);
+    assert.deepEqual(kinds(state), ['note', 'assistant']);
+    const item = state.items[1];
+    assert.ok(item.kind === 'assistant' && item.ended);
+    assert.deepEqual(item.blocks, [{ kind: 'text', text: 'Hello' }]);
   });
 
   test('a failed command response and its prompt_result show one error', () => {

@@ -572,14 +572,12 @@ function setBashResult(item, result) {
 
 // ── Messages ────────────────────────────────────────────
 
-/** @param {Record<string, any>} frame @returns {string | null} */
-function messageKey(frame) {
-  if (typeof frame.messageId === 'string') return `msg:${frame.messageId}`;
-  const m = frame.message;
-  // `custom` messages may come without a messageId: their timestamp pairs start and end.
-  if (m && typeof m.timestamp === 'number') return `msg:${m.role}@${m.timestamp}@${m.customType ?? ''}`;
-  return null;
-}
+/**
+ * omp stamps every message_start, message_update and message_end with the `messageId` of the
+ * message it belongs to (rpc-session-events.ts `#stamp`).
+ * @param {Record<string, any>} frame @returns {string | null}
+ */
+const messageKey = (frame) => (typeof frame.messageId === 'string' ? `msg:${frame.messageId}` : null);
 
 /**
  * @param {Transcript} state @param {any} message @param {string | null} key @param {boolean} final
@@ -671,7 +669,9 @@ function applyUpdate(state, frame) {
   const event = frame.assistantMessageEvent;
   const sub = typeof event?.type === 'string' ? event.type : '';
   if (KNOWN_STREAM_NOOPS.has(sub)) return;
-  const key = messageKey(frame) ?? `msg:stream-${state.nextKey}`;
+  const key = messageKey(frame);
+  // Without a key the update cannot be paired with its message: message_end shows it whole.
+  if (key === null) return;
   const item = upsert(state, key, emptyAssistant);
   if (item.kind !== 'assistant') return unrecognised(state, `message_update ${sub}`, frame);
   const at = Number.isInteger(event.contentIndex) && event.contentIndex >= 0 ? event.contentIndex : item.blocks.length;
