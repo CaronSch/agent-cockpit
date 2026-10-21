@@ -15,13 +15,16 @@
  *                                      not a journal they list, 404 for one that is gone
  *   GET    /api/sessions               → { sessions: SessionMeta[] }
  *   POST   /api/sessions               { cwd, resume? | fork? } → 201 { session: SessionMeta }
- *                                      (`resume` continues a journal, `fork` starts a new session
- *                                      from a copy of one; either must be an existing file)
+ *                                      (`cwd` relative to home, `~/…` or absolute; `resume`
+ *                                      continues a journal, `fork` starts a new session from a
+ *                                      copy of one; either must be an existing file)
  *   DELETE /api/sessions/:id           → 204 (closes omp's stdin, kills it if it lingers)
  *   POST   /api/sessions/:id/rpc       omp command without `id` → 202 { id }: the id the daemon gave
  *                                      the command; omp's response frame, carrying it, arrives on
  *                                      the stream
  *   POST   /api/sessions/:id/ui        omp `extension_ui_response` → 204
+ *   GET    /api/files?dir=path         → DirListing: the folder `dir` names (relative to home,
+ *                                      `~/…` or absolute, as `cwd` above), or 404
  *   GET    /api/sessions/:id/files?dir=path → DirListing: the folder `dir` names (relative to
  *                                      the session's directory, `~/…` or absolute), or 404
  *   GET    /api/scratchpads            → { pads: ScratchpadSummary[] } (most recently changed first)
@@ -116,7 +119,7 @@
 /** @typedef {{ defaultCwd: string, home: string, scratchpadDir: string }} DaemonConfig */
 
 /**
- * A folder's entries for `@` file mentions, by name; `dir` is the folder,
+ * A folder's entries for path suggestions, by name; `dir` is the folder,
  * resolved; `truncated` when it holds more than were listed (see `files.js`).
  * @typedef {{ dir: string, entries: Array<{ name: string, isDir: boolean }>, truncated: boolean }} DirListing
  */

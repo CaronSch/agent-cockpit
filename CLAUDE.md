@@ -93,7 +93,11 @@ What runs today:
   or deletes it (asking first; its omp agents end, as closing their windows
   would). A tab running older UI code than the daemon serves says so in the top
   bar and offers Reload (the files' version: `daemon/ui-files.js`).
-- The daemon and the `omp` pane: start omp in a directory, chat with it from its
+- The daemon and the `omp` pane: start omp in a directory (the Directory field
+  suggests folders as the path is typed, relative to home, `~/`, `../` or absolute,
+  and lists home's folders while empty or `~/`; Tab completes and opens a folder on its
+  own folders, arrows move, Enter picks, Esc closes, and Enter with no list starts omp;
+  a relative directory is found from home), chat with it from its
   structured event stream (streamed replies with Markdown and tables, thinking,
   tool calls with output), pick model and thinking level, log in to
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
@@ -316,8 +320,8 @@ particular, move a capability into "Current state" when it ships.
 - `src/omp/activity.js` — Which omp events turn an omp window "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
 - `src/omp/composer.js` — The omp pane's message box: a draft that starts one line high and grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, pasted text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
-- `src/omp/file-mention.js` — `@` file mentions in the omp draft: the path being typed at the caret, the folder entries that match it, and the text that completes it, kept free of the DOM so they can be tested.
-- `src/omp/file-suggest.js` — `@` file mentions in the omp pane's message box: while the caret ends an `@path`, the suggestion list shows the matching entries of the folder it names, and Tab, Enter or a click completes the path (see `file-mention.js`).
+- `src/omp/file-mention.js` — Paths typed in the omp pane, as `@` file mentions in its draft or plainly in its Directory field: the path being typed at the caret, the folder entries that match it, and the text that completes it, kept free of the DOM so they can be tested.
+- `src/omp/file-suggest.js` — Path suggestions in the omp pane's text boxes (`@` file mentions in its draft, its Directory field): while the caret ends a path, the suggestion list shows the matching entries of the folder it names, and Tab, Enter or a click completes the path (see `file-mention.js`).
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
@@ -350,7 +354,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/workspace/model.js` — Workspaces and their screens, kept free of the DOM and shared with the daemon: valid names and ids, which screen a new window claims, and how a screen is described.
 - `src/workspace/screen.js` — This window's screen of its workspace: claimed for as long as the window is open, loaded from the daemon, and saved back as its layout changes.
 - `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
-- `daemon/files.js` — Folder listings for the omp pane's `@` file mentions: each entry's name and whether it is a folder (a link to one counts), capped so a huge folder cannot flood the page.
+- `daemon/files.js` — Folder listings for path suggestions (the omp pane's `@` file mentions, its Directory field): each entry's name and whether it is a folder (a link to one counts), capped so a huge folder cannot flood the page; and how a typed path is read.
 - `daemon/frame-decoder.js` — Decodes omp's stdout: newline-delimited JSON frames, with protocol-v2 `rpc_chunk` sequences reassembled into the one frame they carry.
 - `daemon/guard.js` — Loopback guard: decides which requests may reach the daemon (CLAUDE.md, Invariants).
 - `daemon/history.js` — Past omp sessions, read from omp's session files: one summary per conversation, searchable by title, directory and what the user asked.

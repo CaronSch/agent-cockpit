@@ -20,6 +20,7 @@ import { composeAsk, composeFollowUp, isCommand, shellCommand } from '../omp/mes
 import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { createSuggestions } from '../omp/suggestions.js';
 import { createFileSuggest } from '../omp/file-suggest.js';
+import { MENTIONS, PLAIN_PATH } from '../omp/file-mention.js';
 import { awaitsUser } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
 import { turnProgress } from '../omp/todos.js';
@@ -262,9 +263,35 @@ function createPane(body, ctx, daemon) {
     const input = el('input', 'omp-field');
     input.type = 'text';
     input.spellcheck = false;
+    input.autocomplete = 'off';
     input.placeholder = '~/code/project';
     input.id = `omp-cwd-${Math.random().toString(36).slice(2)}`;
     label.htmlFor = input.id;
+    // Folders are suggested as the path is typed, read as the daemon reads a new session's
+    // directory (relative to home); an empty field lists home's own folders.
+    const suggestions = createSuggestions();
+    const folders = createFileSuggest({
+      draft: input,
+      syntax: PLAIN_PATH,
+      foldersOnly: true,
+      list: suggestions,
+      listDir: (dir) => daemon.listFiles(null, dir),
+      replace: (start, end, text) => input.setRangeText(text, start, end, 'end'),
+    });
+    input.addEventListener('focus', () => folders.update());
+    input.addEventListener('input', () => folders.update());
+    input.addEventListener('blur', () => folders.close());
+    input.addEventListener('keydown', (e) => {
+      if (e.isComposing) return;
+      if (suggestions.key(e)) {
+        // Enter takes the folder and closes the list, so the next Enter starts omp; Tab and a
+        // click go on into the folder's own folders.
+        if (e.key === 'Enter') folders.close();
+      } else if (e.key === 'Escape' && suggestions.open) {
+        e.preventDefault();
+        folders.close();
+      }
+    });
     const cwd = params().cwd;
     if (cwd) input.value = cwd;
     else {
@@ -277,7 +304,8 @@ function createPane(body, ctx, daemon) {
         .then((c) => {
           if (typed || input.value) return;
           input.value = c.defaultCwd;
-          if (document.activeElement === input) input.select();
+          input.select(); // kept when the field is focused later
+          folders.update();
         })
         .catch(() => {});
     }
@@ -289,6 +317,7 @@ function createPane(body, ctx, daemon) {
       e.preventDefault();
       const dir = input.value.trim();
       if (!dir) return;
+      folders.close();
       start.disabled = true;
       error.hidden = true;
       daemon
@@ -305,8 +334,11 @@ function createPane(body, ctx, daemon) {
           start.disabled = false;
         });
     });
+    // The list drops down over what is below the field, so nothing moves as it opens and closes.
+    const field = el('div', 'omp-setup-field');
+    field.append(input, suggestions.root);
     const row = el('div', 'omp-row');
-    row.append(input, start);
+    row.append(field, start);
     form.append(el('p', 'omp-setup-title', 'Start an omp agent'), label, row, error);
     queueMicrotask(() => input.focus());
     return [form];
@@ -707,6 +739,7 @@ function createPane(body, ctx, daemon) {
     // ── composer: `/` commands and `@` files suggested as they are typed ──
     const files = createFileSuggest({
       draft,
+      syntax: MENTIONS,
       list: suggestions,
       listDir: (dir) => daemon.listFiles(session, dir),
       replace: (start, end, text) => composer.replace(start, end, text),

@@ -1,12 +1,14 @@
 /**
- * `@` file mentions in the omp draft: the path being typed at the caret, the folder entries
- * that match it, and the text that completes it, kept free of the DOM so they can be tested.
+ * Paths typed in the omp pane, as `@` file mentions in its draft or plainly in its Directory
+ * field: the path being typed at the caret, the folder entries that match it, and the text that
+ * completes it, kept free of the DOM so they can be tested.
  *
  * The path is what follows `@`, read the way omp reads a mention (`utils/file-mentions.ts`):
  * relative to the session's directory, from home with `~/`, or absolute. Its folder part
  * (through the last `/`) names the folder to list; its last segment filters the entries. A
  * path omp would cut short unquoted (a space, an `@`, quotes, punctuation it trims from the
- * ends) is written quoted, `@"…"`, which omp takes verbatim.
+ * ends) is written quoted, `@"…"`, which omp takes verbatim. A plain field holds one path,
+ * its whole text, read the same way, and is never quoted.
  */
 
 /** One entry of a folder. @typedef {{ name: string, isDir: boolean }} DirEntry */
@@ -15,6 +17,16 @@
  * it opened with, if any; `dir` its folder part as typed ('' for the session's own folder),
  * `segment` the rest.
  * @typedef {{ start: number, end: number, quote: '' | '"' | "'", dir: string, segment: string }} MentionQuery
+ */
+/**
+ * How paths are written in one kind of text: `at` finds the one the caret ends; `complete` and
+ * `extend` give the text that replaces it (`start`…`end`) once an entry is chosen, or once Tab
+ * extends its last segment.
+ * @typedef {{
+ *   at: (text: string, caret: number) => MentionQuery | null,
+ *   complete: (query: MentionQuery, entry: DirEntry) => string,
+ *   extend: (query: MentionQuery, segment: string) => string,
+ * }} PathSyntax
  */
 
 /** An `@` at the start or after whitespace, then an open quoted path or a bare one, up to the caret. */
@@ -99,3 +111,21 @@ export function extendSegment(query, segment) {
   const path = `${query.dir}${segment}`;
   return `@${quoteFor(path, query.quote, false)}${path}`;
 }
+
+/** `@` mentions in the omp draft. @type {PathSyntax} */
+export const MENTIONS = { at: mentionAt, complete: completeEntry, extend: extendSegment };
+
+/**
+ * A field that holds one path: all of its text, while the caret is at its end, with no `@` and
+ * no quotes; a folder chosen stays open, ending in `/`.
+ * @type {PathSyntax}
+ */
+export const PLAIN_PATH = {
+  at(text, caret) {
+    if (caret !== text.length) return null;
+    const cut = text.lastIndexOf('/') + 1;
+    return { start: 0, end: caret, quote: '', dir: text.slice(0, cut), segment: text.slice(cut) };
+  },
+  complete: (query, entry) => `${query.dir}${entry.name}${entry.isDir ? '/' : ''}`,
+  extend: (query, segment) => `${query.dir}${segment}`,
+};

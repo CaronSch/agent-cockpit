@@ -1,13 +1,23 @@
 /**
- * Folder listings for the omp pane's `@` file mentions: each entry's name and whether it is a
- * folder (a link to one counts), capped so a huge folder cannot flood the page.
+ * Folder listings for path suggestions (the omp pane's `@` file mentions, its Directory field):
+ * each entry's name and whether it is a folder (a link to one counts), capped so a huge folder
+ * cannot flood the page; and how a typed path is read.
  */
 import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 /** @import { DirListing } from './wire.js' */
 
 /** Past this many entries a listing is cut short (by name), and says so. */
 export const MAX_ENTRIES = 5000;
+
+/**
+ * The absolute path `input` names, read as omp reads one: from home with `~/`, as given when
+ * absolute, else relative to `base`.
+ * @param {string} input @param {string} base
+ */
+export const resolvePath = (input, base) =>
+  resolve(base, input === '~' || input.startsWith('~/') ? homedir() + input.slice(1) : input);
 
 /**
  * The entries of folder `dir`; throws when it is not a folder that can be read.

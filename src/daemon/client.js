@@ -56,7 +56,7 @@ export class DaemonError extends Error {
  *   closeSession(session: string): Promise<void>,
  *   rpc(session: string, command: Record<string, unknown>): Promise<RpcResponse>,
  *   respondUi(session: string, response: Record<string, unknown>): Promise<void>,
- *   listFiles(session: string, dir: string): Promise<DirListing>,
+ *   listFiles(session: string | null, dir: string): Promise<DirListing>,
  *   onUiChange(fn: (outdated: boolean) => void): () => void,
  *   checkUi(): Promise<void>,
  * }} DaemonClient
@@ -367,7 +367,8 @@ export function createDaemonClient(env = {}) {
     async respondUi(session, response) {
       await request(`${sessionPath(session)}/ui`, { method: 'POST', body: JSON.stringify(response) });
     },
-    listFiles: (session, dir) => request(`${sessionPath(session)}/files?dir=${encodeURIComponent(dir)}`),
+    // Without a session, a folder is found relative to home, as a new session's directory is.
+    listFiles: (session, dir) => request(`${session ? sessionPath(session) : '/api'}/files?dir=${encodeURIComponent(dir)}`),
   };
 }
 

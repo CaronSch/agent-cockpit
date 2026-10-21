@@ -57,7 +57,8 @@ bun start     # daemon on http://cockpit.localhost:4777
    the browser keeps as a cookie. Cookies and browser storage belong to one
    address, so the first visit at a new one (say `cockpit.localhost` after
    `127.0.0.1`, which still works) needs that printed URL once more.
-2. **＋ Widget → omp**, pick a directory, start chatting.
+2. **＋ Widget → omp**, pick a directory (folders are suggested as you type, from
+   your home folder; Tab completes), start chatting.
 3. To connect a model provider (Anthropic/Claude, for example), press **Login**
    in the pane's toolbar (omp's `/login`).
 
