@@ -35,6 +35,7 @@ export class DaemonError extends Error {
  *   onReset(fn: () => void): () => void,
  *   subscribe(session: string, fn: (event: SessionEvent) => void): () => void,
  *   meta(session: string): SessionMeta | null,
+ *   lastEventAt(session: string | null): number,
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
  *   history(query?: string, options?: { archived?: boolean }): Promise<PastSession[]>,
@@ -280,6 +281,8 @@ export function createDaemonClient(env = {}) {
     },
     subscribe,
     meta: (session) => metas.get(session) ?? null,
+    /** When the daemon stamped the newest event this page holds for `session`, in daemon time; 0 for none. */
+    lastEventAt: (session) => (session ? (buffers.get(session)?.at(-1)?.at ?? 0) : 0),
     sessions: () => [...metas.values()],
     onSessions(fn) {
       sessionListeners.add(fn);

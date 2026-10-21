@@ -140,8 +140,11 @@ function createPane(body, ctx, daemon) {
   });
 
   // ── unread: a final response or question the user has not looked at (omp/activity.js) ──
-  /** The newest of those the user has seen, in daemon time; saved with the window. */
-  let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : Date.now();
+  /**
+   * The newest of those the user has seen, in daemon time; saved with the window. A window
+   * without one has seen what its session did so far (nothing, for a new session).
+   */
+  let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : daemon.lastEventAt(str(ctx.params.session));
   let latest = readAt;
   let unread = false;
   let pointerInside = false;

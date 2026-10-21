@@ -730,6 +730,17 @@ test('a final response that lands while you are elsewhere lights the pane until 
   await expect(pane).toHaveClass(/is-unread/);
 });
 
+test('unread follows the daemon’s clock, whatever time the browser thinks it is', async ({ page }) => {
+  await page.clock.setFixedTime(Date.now() + 60 * 60 * 1000); // the browser runs an hour fast
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await page.mouse.move(5, 5); // the top bar, outside the pane
+  await pane.locator('textarea').fill('first');
+  await pane.locator('textarea').press('Enter');
+  await expect(pane.locator('.omp-assistant').last()).toContainText('first');
+  await expect(pane).toHaveClass(/is-unread/);
+});
+
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

@@ -193,10 +193,6 @@ is newer. The daemon prints its version at start.
 - **No real auth.** The loopback guard (token plus Origin check) assumes one user
   on one machine. *Response:* real authentication, TLS, and per-user isolation of
   sessions and telemetry.
-- **Unread marks compare two clocks.** A window's seen-up-to time starts at the
-  browser's clock and is compared with the daemon's event times; skew between two
-  machines would mark output read or unread wrongly. *Response:* take the starting
-  time from the daemon (the newest event's `at`).
 - **The telemetry store holds secrets.** Prompts, file contents, env values and
   tool output are stored in plain text, with the same trust as omp's own
   `~/.omp` session files. *Response:* redaction before storage or display to
