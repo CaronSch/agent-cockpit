@@ -49,9 +49,9 @@ is newer. The daemon prints its version at start.
   `get_state`, models, thinking levels, login providers, `bash`, aborts,
   builtin `/rename`, the start of a `btw`, failed prompts and `--resume`. The
   frames of a turn a model actually answers (a pre-filled assistant
-  `message_start`, deltas, tool calls, `ask` dialogs, `btw_delta`, a generated
-  title) were checked against 18.12.3's source only, because no model call
-  succeeded during the recording; their recorded shapes are still 18.10.3's.
+  `message_start`, deltas, tool calls, `ask` dialogs, `btw_delta`, follow-up `btw`
+  turns, a generated title) were checked against 18.12.3's source only, because no
+  model call succeeded during the recording; their recorded shapes are still 18.10.3's.
   The fake's `--fork` and the journals it writes follow omp 18.10.3's source
   (`SessionManager.forkFrom`), not a recording.
   Tests stay green while a newer omp sends something else. *Response:*
@@ -73,23 +73,29 @@ is newer. The daemon prints its version at start.
   one, up to the attempt cap). Attachments rely on `@"<absolute path>"` mentions
   being read when a prompt starts a turn. Ask relies on the `btw` / `btw_cancel`
   commands and the `btw_record` / `btw_delta` frames, and on `btw` answering from
-  an ephemeral turn that leaves the session's history alone. Fork relies on
+  an ephemeral turn that leaves the session's history alone. Its follow-ups rely on
+  `btw` with a `recordId` appending a turn to that topic's record (the record is the
+  first turn, `followUps` the later ones, newest last), on its response carrying that
+  record, on `btw_delta` streaming into the newest turn, and on omp replaying the
+  topic's earlier turns as context. Fork relies on
   `omp --fork <file>` copying the journal into a new one (new id, copied title)
   without touching the source, on the forked process streaming none of the copied
   history (the pane fetches it with `get_messages`, as for `--resume`), and on omp
   writing a new session's journal only once it holds a model reply (until then
   the Fork button is off). A change shows up as sessions that stay untitled, files
   that reach the model only as a bare path, side answers that never arrive or turn
-  up in the chat, a forked pane that opens empty or shows its history twice, or a
+  up in the chat, follow-ups answered under the wrong question or without knowing
+  what was asked before, a forked pane that opens empty or shows its history twice, or a
   Fork button that stays off with the journal on disk (or is on without it, and the
   daemon refuses the fork: `fork is not an existing file`). *Response:* re-read
   omp's `slash-commands/builtin-lifecycle.ts` (`rename`),
   `modes/rpc/rpc-session-settle.ts`, `utils/file-mentions.ts`,
-  `modes/rpc/rpc-btw.ts`, and `main.ts` (`createSessionManager`) with
-  `session/session-manager.ts` (`forkFrom`, `#shouldHaveSessionFile`) (in
-  `packages/coding-agent/src/` of github.com/can1357/oh-my-pi at the installed
-  version's tag), then update `daemon/omp-session.js`, `src/omp/message.js`,
-  `src/omp/transcript.js`, `src/widgets/omp.js` and the fake.
+  `modes/rpc/rpc-btw.ts`, `session/btw-turn.ts`, `session/btw-history.ts`, and `main.ts`
+  (`createSessionManager`) with `session/session-manager.ts` (`forkFrom`,
+  `#shouldHaveSessionFile`) (in `packages/coding-agent/src/` of
+  github.com/can1357/oh-my-pi at the installed version's tag), then update
+  `daemon/omp-session.js`, `src/omp/message.js`, `src/omp/transcript.js`,
+  `src/widgets/omp.js` (Ask's `send`) and the fake.
 
 ## When the session history reaches thousands of journals
 

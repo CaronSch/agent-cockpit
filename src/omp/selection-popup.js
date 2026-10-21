@@ -2,7 +2,8 @@
  * Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons
  * appear at the end of the selection. Comment opens a box for a comment, handed to the
  * composer with the selected text as its quote. Ask opens a box for a side question about it,
- * whose short answer streams into the popup and never enters the chat (omp's `btw`).
+ * whose short answer streams into the popup and never enters the chat (omp's `btw`); follow-up
+ * questions continue the same topic there, one at a time.
  */
 import { button, el } from '../ui/dom.js';
 import { autosize } from '../ui/autosize.js';
@@ -14,13 +15,21 @@ const EDGE_PX = 8;
 const INPUT_MAX_PX = 160;
 
 /**
- * How Ask reaches omp: `send` starts a side question about `quote` and answers with omp's id
- * for it (or why it could not); `answer` reads the answer so far; `cancel` stops one running.
+ * How Ask reaches omp: `send` asks a side question about `quote`, or a follow-up in topic
+ * `topic`, and answers with omp's id for the topic and the question's turn in it (or why it
+ * could not); `answers` reads a topic's answers so far, one per turn; `cancel` stops the one
+ * running in a topic.
  * @typedef {{
- *   send(quote: string, question: string): Promise<{ id: string } | { error: string }>,
- *   answer(id: string): SideAnswer | undefined,
+ *   send(quote: string, question: string, topic?: string): Promise<{ id: string, turn: number } | { error: string }>,
+ *   answers(id: string): SideAnswer[] | undefined,
  *   cancel(id: string): void,
  * }} SideQuestions
+ */
+
+/**
+ * A question asked in the shown thread: its turn in omp's topic once omp has taken it, or why
+ * it could not be asked.
+ * @typedef {{ question: string, turn: number | null, error: string | null }} Asked
  */
 
 /** What each action's box says. */
@@ -36,29 +45,40 @@ const ACTIONS = {
  *   onComment: (quote: string, comment: string) => void,
  *   ask: SideQuestions,
  * }} options `host`: the positioned element the popup lives in; `transcript`: where selections count.
- * Call `refresh()` whenever the session's state changes, so a shown answer keeps up.
+ * Call `refresh()` whenever the session's state changes, so a shown thread keeps up.
  */
 export function attachSelectionPopup({ host, transcript, onComment, ask }) {
   const pop = el('div', 'omp-quote-pop');
   pop.hidden = true;
   host.append(pop);
-  /** @type {'closed' | 'buttons' | 'editing' | 'answer'} */
+  /** @type {'closed' | 'buttons' | 'editing' | 'thread'} */
   let mode = 'closed';
   let quote = '';
-  /** omp's id for the side question shown, once it has taken it. @type {string | null} */
-  let askId = null;
+  /** omp's id for the side topic shown, once it has taken a question in it. @type {string | null} */
+  let topic = null;
+  /** The questions asked in the shown thread, oldest first. @type {Asked[]} */
+  let asked = [];
   /** Bumped on close, so a question still on its way is cancelled once omp names it. */
   let generation = 0;
-  /** Redraws the shown answer; null unless one is shown. @type {(() => void) | null} */
-  let drawAnswer = null;
+  /** Redraws the shown thread; null unless one is shown. @type {(() => void) | null} */
+  let drawThread = null;
 
-  const running = () => mode === 'answer' && (askId === null || ask.answer(askId)?.status === 'running');
+  /** omp's answer to `entry` so far; undefined until omp has taken it and said so. @param {Asked} entry */
+  const answerTo = (entry) => (entry.turn === null || topic === null ? undefined : ask.answers(topic)?.[entry.turn]);
+  /** Whether the thread's newest question is still on its way or being answered: omp runs one at a time. */
+  const running = () => {
+    const newest = asked.at(-1);
+    return mode === 'thread' && newest !== undefined && newest.error === null && (answerTo(newest)?.status ?? 'running') === 'running';
+  };
+  /** Whether the popup's box holds something written and not sent yet. */
+  const drafted = () => Boolean(pop.querySelector('textarea')?.value.trim());
 
   function close() {
-    if (askId !== null && ask.answer(askId)?.status === 'running') ask.cancel(askId);
+    if (topic !== null && running()) ask.cancel(topic);
     generation++;
-    askId = null;
-    drawAnswer = null;
+    topic = null;
+    asked = [];
+    drawThread = null;
     mode = 'closed';
     pop.hidden = true;
     pop.classList.remove('is-answer');
@@ -102,8 +122,9 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
   function offerButtons() {
     if (mode === 'editing') return;
     const found = selection();
-    // A shown answer stays until it is closed, or replaced by a new selection once complete.
-    if (mode === 'answer' && (!found || running())) return;
+    // A shown thread stays until it is closed, or replaced by a new selection once nothing in
+    // it is running or written and not sent.
+    if (mode === 'thread' && (!found || running() || drafted())) return;
     if (!found) return close();
     close();
     quote = found.text;
@@ -115,35 +136,13 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
     place(found.end);
   }
 
-  /** @param {DOMRect} anchor @param {keyof typeof ACTIONS} action */
-  function openEditor(anchor, action) {
-    const words = ACTIONS[action];
-    mode = 'editing';
-    const preview = el('blockquote', 'omp-quote-preview', quote);
-    const box = el('textarea', 'omp-quote-input');
-    box.rows = 2;
-    box.placeholder = words.placeholder;
-    box.setAttribute('aria-label', words.label);
-    const submitBtn = button('btn btn-accent', words.submit);
+  /**
+   * Wires a box and its button: the button sends once something is written, Enter sends and
+   * Shift+Enter starts a new line, as in the composer.
+   * @param {HTMLTextAreaElement} box @param {HTMLButtonElement} submitBtn @param {() => void} submit
+   */
+  function wireBox(box, submitBtn, submit) {
     submitBtn.disabled = true;
-    const cancel = button('btn', 'Cancel');
-    const actions = el('div', 'omp-row');
-    actions.append(submitBtn, cancel);
-    pop.replaceChildren(preview, box, actions);
-    place(anchor);
-    box.focus();
-
-    const submit = () => {
-      const text = box.value.trim();
-      if (!text) return;
-      document.getSelection()?.removeAllRanges();
-      if (action === 'comment') {
-        onComment(quote, text);
-        close();
-      } else {
-        showAnswer(anchor, text);
-      }
-    };
     box.addEventListener('input', () => {
       submitBtn.disabled = !box.value.trim();
       autosize(box, { max: INPUT_MAX_PX });
@@ -156,48 +155,143 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
       }
     });
     submitBtn.addEventListener('click', submit);
-    cancel.addEventListener('click', close);
   }
 
-  /** Asks omp the side question and shows its answer as it streams in. @param {DOMRect} anchor @param {string} question */
-  function showAnswer(anchor, question) {
-    mode = 'answer';
+  /** @param {DOMRect} anchor @param {keyof typeof ACTIONS} action */
+  function openEditor(anchor, action) {
+    const words = ACTIONS[action];
+    mode = 'editing';
+    const preview = el('blockquote', 'omp-quote-preview', quote);
+    const box = el('textarea', 'omp-quote-input');
+    box.rows = 2;
+    box.placeholder = words.placeholder;
+    box.setAttribute('aria-label', words.label);
+    const submitBtn = button('btn btn-accent', words.submit);
+    const cancel = button('btn', 'Cancel', close);
+    const actions = el('div', 'omp-row');
+    actions.append(submitBtn, cancel);
+    pop.replaceChildren(preview, box, actions);
+    place(anchor);
+    box.focus();
+    wireBox(box, submitBtn, () => {
+      const text = box.value.trim();
+      if (!text) return;
+      document.getSelection()?.removeAllRanges();
+      if (action === 'comment') {
+        onComment(quote, text);
+        close();
+      } else {
+        openThread(anchor);
+        askInThread(text);
+      }
+    });
+  }
+
+  /**
+   * Shows the side questions about the quote, each with its answer as it streams in, and a box
+   * for a follow-up that is available whenever no answer is on its way.
+   * @param {DOMRect} anchor
+   */
+  function openThread(anchor) {
+    mode = 'thread';
     pop.classList.add('is-answer');
-    const body = el('div', 'omp-ask-answer');
-    body.setAttribute('aria-live', 'polite');
+    const thread = el('div', 'omp-ask-thread');
+    thread.setAttribute('aria-live', 'polite');
+    const box = el('textarea', 'omp-quote-input');
+    box.rows = 1;
+    box.placeholder = 'Ask a follow-up…';
+    box.setAttribute('aria-label', 'Ask a follow-up');
+    const askBtn = button('btn btn-accent', 'Ask');
     const closeBtn = button('btn', 'Close', close);
     const actions = el('div', 'omp-row');
-    actions.append(closeBtn);
-    pop.replaceChildren(el('blockquote', 'omp-quote-preview', quote), el('p', 'omp-ask-question', question), body, actions);
-    closeBtn.focus(); // Esc closes from here
+    actions.append(askBtn, closeBtn);
+    pop.replaceChildren(el('blockquote', 'omp-quote-preview', quote), thread, box, actions);
+    closeBtn.focus(); // Esc closes from here while the box is unavailable
+    wireBox(box, askBtn, () => {
+      const text = box.value.trim();
+      if (!text) return;
+      box.value = '';
+      askBtn.disabled = true;
+      autosize(box, { max: INPUT_MAX_PX });
+      closeBtn.focus();
+      askInThread(text);
+    });
 
-    let drawn = '';
-    /** @param {string} key @param {() => Node} build */
-    const show = (key, build) => {
-      if (key === drawn) return;
-      drawn = key;
-      body.replaceChildren(build());
+    /** Each question's answer as drawn, by its place in `asked`. @type {{ body: HTMLElement, key: string }[]} */
+    const drawn = [];
+    let wasRunning = false;
+    drawThread = () => {
+      const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 4;
+      let changed = false;
+      asked.forEach((entry, i) => {
+        let view = drawn[i];
+        if (!view) {
+          view = drawn[i] = { body: el('div', 'omp-ask-answer'), key: '' };
+          thread.append(el('p', 'omp-ask-question', entry.question), view.body);
+        }
+        const [key, build] = answerView(entry);
+        if (key === view.key) return;
+        view.key = key;
+        view.body.replaceChildren(...build());
+        changed = true;
+      });
+      // omp answers one side question at a time: the box waits while one is on its way.
+      const busy = running();
+      box.disabled = busy;
+      // Once the answer is in, the box takes over from Close, unless the reader moved on.
+      if (wasRunning && !busy && document.activeElement === closeBtn) box.focus();
+      wasRunning = busy;
+      if (!changed) return;
       place(anchor);
+      if (atBottom) thread.scrollTop = thread.scrollHeight;
     };
-    const status = (/** @type {string} */ text, cls = 'omp-ask-status') => () => el('p', cls, text);
-    drawAnswer = () => {
-      const answer = askId === null ? undefined : ask.answer(askId);
-      if (!answer || (answer.status === 'running' && !answer.answer)) return show('waiting', status('Thinking…'));
-      if (answer.status === 'error') return show(`error:${answer.error}`, status(answer.error ?? 'The question failed.', 'omp-ask-error'));
-      if (!answer.answer) return show('stopped', status('Stopped before it answered.'));
-      show(`${answer.status}:${answer.answer}`, () => renderMarkdown(answer.answer));
-    };
-    drawAnswer();
+  }
 
-    const asked = generation;
-    void ask.send(quote, question).then((result) => {
-      if ('error' in result) {
-        if (asked === generation) show(`failed:${result.error}`, status(result.error, 'omp-ask-error'));
+  /**
+   * What the thread shows under a question, and a key that changes whenever that does.
+   * @param {Asked} entry @returns {[string, () => Node[]]}
+   */
+  function answerView(entry) {
+    const line = (/** @type {string} */ text, cls = 'omp-ask-status') => el('p', cls, text);
+    const failed = entry.error;
+    if (failed !== null) return [`failed:${failed}`, () => [line(failed, 'omp-ask-error')]];
+    const answer = answerTo(entry);
+    if (!answer || (answer.status === 'running' && !answer.answer)) return ['waiting', () => [line('Thinking…')]];
+    const { answer: text, status, error } = answer;
+    return [
+      `${status}:${error}:${text}`,
+      () => {
+        /** @type {Node[]} */
+        const parts = text ? [renderMarkdown(text)] : [];
+        if (status === 'error') parts.push(line(error ?? 'The question failed.', 'omp-ask-error'));
+        else if (status === 'cancelled' || status === 'interrupted') parts.push(line(text ? 'Stopped.' : 'Stopped before it answered.'));
+        return parts;
+      },
+    ];
+  }
+
+  /**
+   * Asks `question` in the shown thread: about the quote, or as a follow-up once omp has a
+   * topic for the thread.
+   * @param {string} question
+   */
+  function askInThread(question) {
+    /** @type {Asked} */
+    const entry = { question, turn: null, error: null };
+    asked.push(entry);
+    drawThread?.();
+    const sent = generation;
+    void ask.send(quote, question, topic ?? undefined).then((result) => {
+      if (sent !== generation) {
+        if ('id' in result) ask.cancel(result.id); // closed before omp took it
         return;
       }
-      if (asked !== generation) return ask.cancel(result.id); // closed before omp took it
-      askId = result.id;
-      drawAnswer?.();
+      if ('error' in result) entry.error = result.error;
+      else {
+        topic = result.id;
+        entry.turn = result.turn;
+      }
+      drawThread?.();
     });
   }
 
@@ -223,8 +317,8 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
   const onOutside = (e) => {
     if (pop.contains(/** @type {Node} */ (e.target))) return;
     // A half-written box and an answer still coming are not thrown away by a stray click.
-    if (mode === 'editing' && /** @type {HTMLTextAreaElement | null} */ (pop.querySelector('textarea'))?.value.trim()) return;
-    if ((mode === 'editing' || mode === 'answer') && !running()) close();
+    if (drafted()) return;
+    if ((mode === 'editing' || mode === 'thread') && !running()) close();
   };
   document.addEventListener('mouseup', onMouseUp);
   transcript.addEventListener('keyup', onKeyUp);
@@ -234,9 +328,9 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
   document.addEventListener('pointerdown', onOutside, true);
 
   return {
-    /** Redraws a shown answer from the latest session state. */
+    /** Redraws a shown thread from the latest session state. */
     refresh() {
-      drawAnswer?.();
+      drawThread?.();
     },
     destroy() {
       close();

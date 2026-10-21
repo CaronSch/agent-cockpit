@@ -152,6 +152,12 @@ button {
   background: oklch(86% 0.15 75);
 }
 
+/* A button that cannot be pressed now says so. */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ── Popovers ────────────────────────────────────────── */
 /* Menus are popovers: in the top layer, placed beside the button that opens them (its
    implicit anchor) and kept on screen by position-try-fallbacks. */

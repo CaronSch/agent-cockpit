@@ -424,17 +424,21 @@ function createPane(body, ctx, daemon) {
       },
       // Side questions go to omp's `btw`: answered from the session's context, never added to it.
       ask: {
-        async send(quote, question) {
+        async send(quote, question, topic) {
           if (!ready()) return { error: 'omp is not running.' };
+          // A follow-up goes as written: omp replays its topic's earlier turns, quote included.
+          const command = topic === undefined ? { type: 'btw', question: composeAsk(quote, question) } : { type: 'btw', question, recordId: topic };
           try {
-            const res = await daemon.rpc(session, { type: 'btw', question: composeAsk(quote, question) });
-            const id = res.success ? res.data?.record?.id : null;
-            return typeof id === 'string' ? { id } : { error: res.error ?? 'omp did not take the question.' };
+            const res = await daemon.rpc(session, command);
+            const record = res.success ? res.data?.record : null;
+            if (typeof record?.id !== 'string') return { error: res.error ?? 'omp did not take the question.' };
+            // omp's record is the topic's first turn; the question just taken is its newest.
+            return { id: record.id, turn: Array.isArray(record.followUps) ? record.followUps.length : 0 };
           } catch (err) {
             return { error: errorMessage(err) };
           }
         },
-        answer: (id) => state.sideAnswers.get(id),
+        answers: (id) => state.sideAnswers.get(id),
         cancel: (id) => void daemon.rpc(session, { type: 'btw_cancel', recordId: id }).catch(() => {}),
       },
     });
