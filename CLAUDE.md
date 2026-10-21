@@ -57,7 +57,10 @@ Planned capabilities:
   (`garbled`) and session status changes. The browser replays it on load, so a
   window shows the same history whether it was open all along or not.
   `src/daemon/client.js` is the browser side; widgets never open their own
-  connections.
+  connections. The daemon also does omp's housekeeping once for every window: its
+  setup fetches a resumed or forked session's history before the session is ready,
+  and it asks for `get_state` again after anything that changes it. Windows render
+  the stream and send only what their user asks for.
 - **Windows keep their own settings** in `leaf.params` (e.g. which session an
   omp pane shows), saved with the layout. **User data lives with the daemon**,
   not in the layout: anything that must outlive a window, a browser profile or

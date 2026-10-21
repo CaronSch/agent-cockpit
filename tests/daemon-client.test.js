@@ -109,6 +109,16 @@ describe('daemon client', () => {
     assert.deepEqual(heard, [true, true, false]);
   });
 
+  test('the newest event time of a session is the daemon’s, 0 before any', async () => {
+    const { client, source } = await connectedClient();
+    source.deliver(hello('b1', [meta('s1')]));
+    assert.equal(client.lastEventAt('s1'), 0);
+    source.deliver({ ...frame('s1', 1), at: 500 });
+    source.deliver({ ...frame('s2', 2), at: 900 });
+    assert.equal(client.lastEventAt('s1'), 500);
+    assert.equal(client.lastEventAt(null), 0);
+  });
+
   test('session metadata follows the stream', async () => {
     const { client, source } = await connectedClient();
     source.deliver(hello('b1', [meta('s1', 'starting')]));

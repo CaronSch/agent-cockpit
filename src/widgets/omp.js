@@ -12,7 +12,7 @@
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
-import { addNote, applyEvent, conversationName, createTranscript, removeDialog } from '../omp/transcript.js';
+import { addNote, applyEvent, conversationName, createTranscript } from '../omp/transcript.js';
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
@@ -140,8 +140,11 @@ function createPane(body, ctx, daemon) {
   });
 
   // ── unread: a final response or question the user has not looked at (omp/activity.js) ──
-  /** The newest of those the user has seen, in daemon time; saved with the window. */
-  let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : Date.now();
+  /**
+   * The newest of those the user has seen, in daemon time; saved with the window. A window
+   * without one has seen what its session did so far (nothing, for a new session).
+   */
+  let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : daemon.lastEventAt(str(ctx.params.session));
   let latest = readAt;
   let unread = false;
   let pointerInside = false;
@@ -160,9 +163,8 @@ function createPane(body, ctx, daemon) {
     const save = () => {
       if (!destroyed && ctx.params.readAt !== readAt) ctx.setParams({ readAt });
     };
-    // Never during mount: a commit while the grid is still drawing this window would re-enter it.
     if (soon) readSave = setTimeout(save, READ_SAVE_MS);
-    else queueMicrotask(save);
+    else save();
   }
 
   function markRead() {
@@ -335,7 +337,7 @@ function createPane(body, ctx, daemon) {
       daemon
         .createSession({ cwd: cwd ?? '~', ...from })
         .then((meta) => {
-          // A fork's own journal is not known until omp reports it (refreshState).
+          // A fork's own journal is not known until omp reports it; update() saves it then.
           ctx.setParams({ session: meta.id, cwd: meta.cwd, sessionFile: meta.sessionFile, resume: null, fork: null });
           schedule();
         })
@@ -401,13 +403,6 @@ function createPane(body, ctx, daemon) {
     });
     // The subscription replayed history synchronously: requests in it are already handled.
     let editorSeen = state.editorText?.seq ?? 0;
-    let refreshSeen = state.refreshSeq;
-    let readyHandled = false;
-    let messagesRequested = false;
-    let refreshing = false;
-    let refreshAgain = false;
-    /** Set once this view is destroyed: work still on its way must not touch the window. */
-    let closed = false;
     /** @type {Set<string>} */
     const openDetails = new Set();
 
@@ -521,25 +516,6 @@ function createPane(body, ctx, daemon) {
         addNote(state, 'error', String(command.type), errorMessage(err));
         schedule();
         return null;
-      }
-    }
-
-    async function refreshState() {
-      if (refreshing) {
-        refreshAgain = true;
-        return;
-      }
-      refreshing = true;
-      try {
-        const res = await rpc({ type: 'get_state' });
-        const file = str(res?.success ? res.data?.sessionFile : null);
-        if (file && file !== params().sessionFile && params().session === session) ctx.setParams({ sessionFile: file });
-      } finally {
-        refreshing = false;
-        if (refreshAgain) {
-          refreshAgain = false;
-          void refreshState();
-        }
       }
     }
 
@@ -680,11 +656,7 @@ function createPane(body, ctx, daemon) {
             label: String(p?.name ?? p?.id),
             detail: p?.authenticated ? '✓ logged in' : undefined,
             current: Boolean(p?.authenticated),
-            pick: () => {
-              addNote(state, 'muted', 'login', `Logging in to ${p?.name ?? p?.id}…`);
-              schedule();
-              void rpc({ type: 'login', providerId: p?.id });
-            },
+            pick: () => void rpc({ type: 'login', providerId: p?.id }),
           })),
       { filter: true },
     );
@@ -891,17 +863,12 @@ function createPane(body, ctx, daemon) {
       }
       for (const dialog of state.dialogs) {
         if (dialogNodes.has(dialog.id)) continue;
+        // The daemon reports the answer as `sent` before it replies, which removes the dialog.
         const n = renderDialog(dialog, (payload) => {
-          daemon
-            .respondUi(session, { type: 'extension_ui_response', id: dialog.id, ...payload })
-            .then(() => {
-              removeDialog(state, dialog.id);
-              schedule();
-            })
-            .catch((err) => {
-              addNote(state, 'error', 'dialog', errorMessage(err));
-              schedule();
-            });
+          daemon.respondUi(session, { type: 'extension_ui_response', id: dialog.id, ...payload }).catch((err) => {
+            addNote(state, 'error', 'dialog', errorMessage(err));
+            schedule();
+          });
         });
         dialogNodes.set(dialog.id, n);
         dialogs.append(n);
@@ -1033,36 +1000,23 @@ function createPane(body, ctx, daemon) {
      */
     function sendCarried() {
       const { prompt } = params();
-      if (closed || !prompt || params().session !== session) return;
+      if (!prompt) return;
       ctx.setParams({ prompt: null });
       composer.setText(prompt);
       if (meta()?.fork) void send();
     }
 
     function update() {
-      if (ready()) {
-        if (!readyHandled) {
-          readyHandled = true;
-          refreshSeen = state.refreshSeq;
-          void refreshState();
-          // A process started from a journal streams none of its earlier history: fetch it
-          // once, and only then send anything new, so that the history goes above it.
-          const earlier = Boolean(meta()?.resume || meta()?.fork) && !state.seeded && !messagesRequested;
-          if (earlier) messagesRequested = true;
-          void (earlier ? rpc({ type: 'get_messages' }) : Promise.resolve(null)).then(sendCarried);
-        } else if (state.refreshSeq !== refreshSeen) {
-          refreshSeen = state.refreshSeq;
-          void refreshState();
-        }
-      }
-      // The conversation's name names the window, and is saved with it for when omp is gone.
+      // A ready session holds its earlier history already (the daemon fetched it first).
+      if (ready()) sendCarried();
+      // The journal and the conversation's name are saved with the window for when omp is
+      // gone: the journal to resume, the name to label the window.
+      const file = meta()?.sessionFile;
+      if (file && file !== params().sessionFile) ctx.setParams({ sessionFile: file });
       const name = conversationName(state);
       if (name && name !== params().name) {
-        queueMicrotask(() => {
-          if (closed || params().session !== session) return;
-          ctx.setParams({ name });
-          schedule();
-        });
+        ctx.setParams({ name });
+        schedule(); // the next draw labels the window with it
       }
       drawToolbar();
       drawStrips();
@@ -1079,7 +1033,6 @@ function createPane(body, ctx, daemon) {
       root: node,
       update,
       destroy() {
-        closed = true;
         subscription();
         resizes.disconnect();
         composer.destroy();

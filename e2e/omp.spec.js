@@ -463,6 +463,16 @@ test('the toolbar menus open under their button, close on Esc or a click outside
   await expect(thinkingBtn).toHaveText(/high/);
 });
 
+test('a login under way is shown from the stream, so a reload still shows it', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await pane.getByRole('button', { name: 'Login', exact: true }).click();
+  await pane.locator('.omp-menu:popover-open').getByRole('button', { name: /Fake Provider/ }).click();
+  await expect(pane.getByText('Logging in to fake…')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.widget[data-widget="omp"]').getByText('Logging in to fake…')).toBeVisible();
+});
+
 test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
@@ -720,6 +730,17 @@ test('a final response that lands while you are elsewhere lights the pane until 
   await expect(pane).toHaveClass(/is-unread/);
 });
 
+test('unread follows the daemon’s clock, whatever time the browser thinks it is', async ({ page }) => {
+  await page.clock.setFixedTime(Date.now() + 60 * 60 * 1000); // the browser runs an hour fast
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await page.mouse.move(5, 5); // the top bar, outside the pane
+  await pane.locator('textarea').fill('first');
+  await pane.locator('textarea').press('Enter');
+  await expect(pane.locator('.omp-assistant').last()).toContainText('first');
+  await expect(pane).toHaveClass(/is-unread/);
+});
+
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
@@ -856,6 +877,27 @@ test('Fork continues a copy of the conversation in a new pane, as a session of i
   expect(theirs.sessionFile).toMatch(/\.jsonl$/);
   expect(mine.sessionFile).not.toBe(theirs.sessionFile);
   expect(mine.fork).toBeNull();
+});
+
+test('windows only render: the daemon asks omp for the state and a fork’s history, never the page', async ({ page }) => {
+  /** @type {string[]} */
+  const asked = [];
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc')) asked.push(r.postDataJSON()?.type);
+  });
+  await openWorkbench(page);
+  const source = await startedPane(page);
+  await send(source, 'shared start');
+  await expect(source.locator('.omp-assistant').last()).toContainText('You said: shared start');
+  const thinking = source.getByTitle('Choose thinking level');
+  await thinking.click();
+  await source.locator('.omp-menu:popover-open').getByRole('button', { name: 'high', exact: true }).click();
+  await expect(thinking).toHaveText(/high/);
+
+  const forked = await paneAddedBy(page, () => source.getByRole('button', { name: 'Fork', exact: true }).click());
+  await expect(forked.locator('.omp-assistant')).toHaveText([/You said: shared start/]);
+  await expect(forked.getByText('Fake Model')).toBeVisible();
+  expect(asked).toEqual(['prompt', 'get_available_thinking_levels', 'set_thinking_level']);
 });
 
 test('dragging Send sends the message in a fork placed where it is dropped, and empties this box', async ({ page }) => {

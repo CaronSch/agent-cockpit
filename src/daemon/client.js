@@ -35,8 +35,10 @@ export class DaemonError extends Error {
  *   onReset(fn: () => void): () => void,
  *   subscribe(session: string, fn: (event: SessionEvent) => void): () => void,
  *   meta(session: string): SessionMeta | null,
+ *   lastEventAt(session: string | null): number,
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
+ *   onHistory(fn: () => void): () => void,
  *   history(query?: string, options?: { archived?: boolean }): Promise<PastSession[]>,
  *   archivePastSession(file: string): Promise<string>,
  *   restorePastSession(file: string): Promise<string>,
@@ -92,6 +94,8 @@ export function createDaemonClient(env = {}) {
   const sessionListeners = new Set();
   /** @type {Set<(id: string, pad: Scratchpad) => void>} */
   const scratchpadListeners = new Set();
+  /** @type {Set<() => void>} */
+  const historyListeners = new Set();
   /** @type {Set<(outdated: boolean) => void>} */
   const uiListeners = new Set();
   /** The UI version this page loaded: the first one heard. @type {string | null} */
@@ -139,6 +143,10 @@ export function createDaemonClient(env = {}) {
     if (event.kind === 'hello') return onHello(event);
     if (event.kind === 'scratchpad') {
       for (const fn of scratchpadListeners) fn(event.id, { text: event.text, rev: event.rev });
+      return;
+    }
+    if (event.kind === 'history') {
+      for (const fn of historyListeners) fn();
       return;
     }
     if (event.kind === 'session') {
@@ -280,10 +288,16 @@ export function createDaemonClient(env = {}) {
     },
     subscribe,
     meta: (session) => metas.get(session) ?? null,
+    /** When the daemon stamped the newest event this page holds for `session`, in daemon time; 0 for none. */
+    lastEventAt: (session) => (session ? (buffers.get(session)?.at(-1)?.at ?? 0) : 0),
     sessions: () => [...metas.values()],
     onSessions(fn) {
       sessionListeners.add(fn);
       return () => sessionListeners.delete(fn);
+    },
+    onHistory(fn) {
+      historyListeners.add(fn);
+      return () => historyListeners.delete(fn);
     },
     async history(query = '', { archived = false } = {}) {
       const params = new URLSearchParams({ ...(query ? { q: query } : {}), ...(archived ? { archived: '1' } : {}) });

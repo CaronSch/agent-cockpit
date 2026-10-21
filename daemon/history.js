@@ -13,8 +13,11 @@
  * moves them back. That is what omp's own `omp gc` archive moves (`moveSessionWithArtifacts`,
  * which leaves the inert `.<name>.lock.os` lock sidecar where it is). Both directories are
  * listed the same way.
+ *
+ * `watch` hears when either directory's journals change (omp writing one, a session archived
+ * or restored), at most once per COALESCE_MS, so the Sessions window refreshes without polling.
  */
-import { createReadStream } from 'node:fs';
+import { createReadStream, mkdirSync, watch } from 'node:fs';
 import { link, lstat, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -22,6 +25,8 @@ import { createInterface } from 'node:readline';
 
 const SEARCH_CHARS = 17 * 1024; // per session; enough for every prompt of a long session
 const PREVIEW_CHARS = 280;
+/** omp appends to a journal after every message: changes this close together are one. */
+const COALESCE_MS = 300;
 
 /** @typedef {PastSession & { search: string }} Summary */
 
@@ -219,7 +224,57 @@ async function moveSession(fromRoot, toRoot, rel) {
 export function createHistory({ root, archive }) {
   const sessions = createShelf(root);
   const archived = createShelf(archive);
+  /** @type {Set<() => void>} */
+  const listeners = new Set();
+  /** @type {import('node:fs').FSWatcher[]} */
+  let watchers = [];
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let pending;
+
+  /**
+   * @param {string | null} rel the changed path under a watched directory, null when the
+   *   platform could not say which (then anything may have changed)
+   */
+  function changed(rel) {
+    // A journal is `<project>/<name>.jsonl`; deeper files are subagents' and artifacts'.
+    const parts = rel?.split(sep);
+    if (pending || (parts && (parts.length !== 2 || !parts[1].endsWith('.jsonl')))) return;
+    pending = setTimeout(() => {
+      pending = undefined;
+      for (const fn of listeners) fn();
+    }, COALESCE_MS);
+  }
+
+  function startWatching() {
+    watchers = [root, archive].flatMap((dir) => {
+      try {
+        mkdirSync(dir, { recursive: true }); // a directory that is not there yet cannot be watched
+        return [watch(dir, { recursive: true }, (_type, name) => changed(name ? String(name) : null))];
+      } catch (err) {
+        console.error(`[history] not watching ${dir}; the Sessions window refreshes only on request:`, err);
+        return [];
+      }
+    });
+  }
+
   return {
+    /**
+     * Calls `fn` (coalesced) whenever a journal in omp's sessions or the archive changes,
+     * appears or goes, until the returned function is called.
+     * @param {() => void} fn @returns {() => void}
+     */
+    watch(fn) {
+      if (listeners.size === 0) startWatching();
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+        if (listeners.size > 0) return;
+        for (const w of watchers) w.close();
+        watchers = [];
+        clearTimeout(pending);
+        pending = undefined;
+      };
+    },
     /**
      * Every past conversation with at least one prompt (archived ones with `archived`),
      * matching all words of `query` (case-insensitive) when one is given. Unordered: the

@@ -10,8 +10,8 @@ import { createFrameDecoder } from './frame-decoder.js';
 
 /**
  * Sent by the daemon before a session counts as ready, so every widget sees the same
- * protocol (lossless v2 framing, delta-only message updates, `ask` dialogs enabled) and the
- * daemon knows which journal the session writes before anything else asks.
+ * protocol (lossless v2 framing, delta-only message updates, `ask` dialogs enabled), and the
+ * log holds the session's state (and so the journal it writes) before anything else asks.
  */
 export const SETUP_COMMANDS = Object.freeze([
   { type: 'negotiate_protocol', protocolVersion: 2 },
@@ -19,6 +19,26 @@ export const SETUP_COMMANDS = Object.freeze([
   { type: 'set_ask_dialog', enabled: true },
   { type: 'get_state' },
 ]);
+
+/**
+ * Added to the setup of a session started from a journal (resumed or forked): omp streams
+ * none of the conversation so far, so its answer puts that history in the log, ahead of
+ * anything the session does once it is ready.
+ */
+export const HISTORY_COMMAND = Object.freeze({ type: 'get_messages' });
+
+/** Successful responses after which `get_state` reports something else. */
+const STATE_CHANGING_COMMANDS = new Set(['set_model', 'cycle_model', 'set_thinking_level', 'cycle_thinking_level', 'login', 'new_session', 'switch_session', 'fork', 'branch', 'compact']);
+
+/**
+ * Frames after which `get_state` reports something else: a turn's end (context use, todos),
+ * the model or thinking level changing, and omp emptying the todo list (`todo_auto_clear`).
+ */
+const STATE_CHANGING_FRAMES = new Set(['agent_end', 'model_changed', 'thinking_level_changed', 'config_update', 'todo_auto_clear']);
+
+/** @param {Record<string, any>} frame */
+const changesState = (frame) =>
+  frame.type === 'response' ? frame.success === true && STATE_CHANGING_COMMANDS.has(frame.command) : STATE_CHANGING_FRAMES.has(frame.type);
 
 /** The test fake (and omp installed through bun) start with `#!/usr/bin/env bun`: let them find the bun running the daemon. */
 export const OMP_ENV = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ''}` };
@@ -107,6 +127,9 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
     const { frame } = decoded;
     emit({ kind: 'frame', frame });
     if (frame.type === 'ready' && meta.status === 'starting') void setup();
+    // Every window shows the session's state from the log: the daemon asks for it again
+    // whenever it changes, once for all of them.
+    if (meta.status === 'ready' && changesState(frame)) send({ type: 'get_state' }).response.catch(() => {});
     if (frame.type === 'response' && frame.command === 'get_state' && frame.success) {
       const file = frame.data?.sessionFile;
       if (typeof file === 'string' && file !== meta.sessionFile) update({ sessionFile: file });
@@ -161,7 +184,8 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
   async function setup() {
     // A refused setup command leaves its failure in the log; the session still works on
     // the protocol omp does support, so it becomes ready either way.
-    for (const command of SETUP_COMMANDS) await send(command).response.catch(() => {});
+    const commands = resume || fork ? [...SETUP_COMMANDS, HISTORY_COMMAND] : SETUP_COMMANDS;
+    for (const command of commands) await send(command).response.catch(() => {});
     if (!finished) update({ status: 'ready' });
   }
 

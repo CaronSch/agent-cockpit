@@ -10,7 +10,7 @@ import { createScratchpads } from '../daemon/scratchpad.js';
 import { createWorkspaces } from '../daemon/workspace.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { listDirectory } from '../daemon/files.js';
-import { SETUP_COMMANDS } from '../daemon/omp-session.js';
+import { HISTORY_COMMAND, SETUP_COMMANDS } from '../daemon/omp-session.js';
 /** @import { StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
 
 const ROOT = resolve(import.meta.dir, '..');
@@ -96,7 +96,7 @@ async function waitForStatus(id, status) {
 
 /** @param {StreamEvent[]} events @param {string} session @returns {SessionEvent[]} */
 const forSession = (events, session) =>
-  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.session === session));
+  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.kind !== 'history' && e.session === session));
 
 beforeAll(async () => {
   cwd = await mkdtemp(join(tmpdir(), 'ac-daemon-test-'));
@@ -201,6 +201,43 @@ describe('sessions', () => {
     const readyAt = mine.findIndex((e) => e.kind === 'session' && e.meta.status === 'ready');
     const sent = mine.slice(0, readyAt).flatMap((e) => (e.kind === 'sent' ? [e.command.type] : []));
     assert.deepEqual(sent, SETUP_COMMANDS.map((c) => c.type));
+  });
+
+  test('a session started from a journal has its earlier history in the log before it is ready', async () => {
+    const journal = join(cwd, 'history-first.jsonl');
+    await Bun.write(journal, '');
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
+    const id = json.session.id;
+    await waitForStatus(id, 'ready');
+
+    const { events } = await readStream({ ms: 300 });
+    const mine = forSession(events, id);
+    const readyAt = mine.findIndex((e) => e.kind === 'session' && e.meta.status === 'ready');
+    const before = mine.slice(0, readyAt);
+    assert.deepEqual(
+      before.flatMap((e) => (e.kind === 'sent' ? [e.command.type] : [])),
+      [...SETUP_COMMANDS, HISTORY_COMMAND].map((c) => c.type),
+    );
+    const history = before.find((e) => e.kind === 'frame' && e.frame.command === 'get_messages');
+    assert.ok(history?.kind === 'frame' && history.frame.data.messages.length === 2, 'its answer too');
+  });
+
+  test('the daemon asks omp for its state again after anything that changes it, once for every window', async () => {
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    const id = json.session.id;
+    await waitForStatus(id, 'ready');
+    const { events: setup } = await readStream({ ms: 100 });
+    const after = forSession(setup, id).at(-1)?.seq ?? 0;
+    /** @param {StreamEvent[]} all */
+    const sentTypes = (all) => forSession(all, id).flatMap((e) => (e.kind === 'sent' && e.seq > after ? [e.command.type] : []));
+
+    await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'set_thinking_level', level: 'high' } });
+    const { events } = await readStream({
+      done: (all) => forSession(all, id).some((e) => e.kind === 'frame' && e.frame.command === 'get_state' && e.seq > after),
+    });
+    const stated = forSession(events, id).findLast((e) => e.kind === 'frame' && e.frame.command === 'get_state');
+    assert.ok(stated?.kind === 'frame' && stated.frame.data.thinkingLevel === 'high');
+    assert.deepEqual(sentTypes(events).slice(0, 2), ['set_thinking_level', 'get_state']);
   });
 
   test('commands return omp’s response, and everything omp prints lands in the log in order', async () => {
@@ -371,13 +408,13 @@ describe('sessions', () => {
     return forSession((await readStream({ ms: 100 })).events, id);
   }
 
-  test('the daemon never names a session by itself: after a turn it sends omp nothing', async () => {
+  test('the daemon never names a session by itself: after a turn it only asks for the state', async () => {
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
     const id = json.session.id;
     await waitForStatus(id, 'ready');
     const log = await turn(id, 'fix the login bug');
     const after = log.slice(log.findIndex((e) => e.kind === 'sent' && e.command.type === 'prompt'));
-    assert.deepEqual(after.flatMap((e) => (e.kind === 'sent' ? [e.command.message] : [])), ['fix the login bug']);
+    assert.deepEqual(after.flatMap((e) => (e.kind === 'sent' ? [e.command.type] : [])), ['prompt', 'get_state']);
   });
 
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {

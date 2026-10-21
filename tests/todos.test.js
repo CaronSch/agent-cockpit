@@ -82,15 +82,13 @@ describe('progress from the agent’s todo list', () => {
     assert.deepEqual(turnProgress(state), { done: 1, total: 2, current: null });
   });
 
-  test('get_state’s list fills in a resumed session’s, and omp clearing it asks for get_state again', () => {
+  test('get_state’s list fills in a resumed session’s, and omp clearing it is no unknown frame', () => {
     const state = run([
       frame({ type: 'response', id: 'r1', command: 'get_state', success: true, data: { todoPhases: [{ name: 'W', tasks: [task('a', 'in_progress')] }] } }),
       frame({ type: 'agent_start' }),
     ]);
     assert.deepEqual(turnProgress(state), { done: 0, total: 1, current: 'a' });
-    const before = state.refreshSeq;
     applyEvent(state, frame({ type: 'todo_auto_clear' }));
-    assert.equal(state.refreshSeq, before + 1);
     assert.equal(state.items.length, 0, 'not an unrecognised frame');
   });
 });

@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { addNote, applyEvent, askAnswers, conversationName, createTranscript, removeDialog } from '../src/omp/transcript.js';
+import { addNote, applyEvent, askAnswers, conversationName, createTranscript } from '../src/omp/transcript.js';
 /** @import { SessionEvent } from '../daemon/wire.js' */
 /** @import { Transcript } from '../src/omp/transcript.js' */
 
@@ -197,10 +197,20 @@ describe('notes', () => {
     assert.ok(stderr.kind === 'note' && stderr.detail === 'Decompression error: ZlibError\nsecond');
   });
 
-  test('a custom message without a messageId pairs its start and end', () => {
+  test('a message without a messageId shows once, whole, at its end', () => {
     const m = { role: 'custom', customType: 'mount-notice', content: 'tools changed', display: false, timestamp: 7 };
-    const state = run([frame({ type: 'message_start', message: m }), frame({ type: 'message_end', message: m })]);
-    assert.deepEqual(kinds(state), ['note']);
+    const reply = assistant([{ type: 'text', text: 'Hello' }]);
+    const state = run([
+      frame({ type: 'message_start', message: m }),
+      frame({ type: 'message_end', message: m }),
+      frame({ type: 'message_start', message: assistant([]) }),
+      frame({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Hel' }, message: { role: 'assistant' } }),
+      frame({ type: 'message_end', message: reply }),
+    ]);
+    assert.deepEqual(kinds(state), ['note', 'assistant']);
+    const item = state.items[1];
+    assert.ok(item.kind === 'assistant' && item.ended);
+    assert.deepEqual(item.blocks, [{ kind: 'text', text: 'Hello' }]);
   });
 
   test('a failed command response and its prompt_result show one error', () => {
@@ -210,6 +220,11 @@ describe('notes', () => {
     ]);
     assert.equal(state.items.filter((i) => i.kind === 'note' && i.level === 'error').length, 1);
     assert.equal(state.lastError, 'no model');
+  });
+
+  test('a login under way is a note, from the command the daemon sent', () => {
+    const state = run([sent({ type: 'login', providerId: 'anthropic', id: 'ac_7' })]);
+    assert.ok(state.items[0].kind === 'note' && state.items[0].text === 'Logging in to anthropic…');
   });
 
   test('the pane can add its own notes', () => {
@@ -232,9 +247,6 @@ describe('dialogs', () => {
     assert.equal(state.dialogs.length, 1);
     applyEvent(state, sent({ type: 'extension_ui_response', id: 'u1', confirmed: true }));
     assert.deepEqual(state.dialogs, []);
-    const local = run([frame(confirm)]);
-    removeDialog(local, 'u1');
-    assert.deepEqual(local.dialogs, []);
   });
 
   test('ask answers have the exact rpc.md shape', () => {
@@ -385,16 +397,10 @@ describe('bash and resume', () => {
   });
   const messagesReply = (/** @type {string} */ id) => frame({ type: 'response', id, command: 'get_messages', success: true, data: { messages: history } });
 
-  test('a resumed session is seeded from get_messages ahead of live notes, once', () => {
-    const state = run([session('/s/old.jsonl'), frame({ type: 'notice', level: 'info', message: 'hello' }), messagesReply('ac_3'), messagesReply('ac_9')]);
+  test('a resumed session is seeded from get_messages ahead of live notes', () => {
+    const state = run([session('/s/old.jsonl'), frame({ type: 'notice', level: 'info', message: 'hello' }), messagesReply('ac_3')]);
     assert.deepEqual(kinds(state), ['user', 'assistant', 'note']);
     assert.equal(state.tools.get('c1')?.status, 'ok');
-    assert.equal(state.seeded, true);
-  });
-
-  test('get_messages in a session that streamed its own history seeds nothing', () => {
-    const state = run([session(null), frame({ type: 'message_end', message: history[0], messageId: 'm1' }), messagesReply('ac_3')]);
-    assert.deepEqual(kinds(state), ['user']);
   });
 });
 

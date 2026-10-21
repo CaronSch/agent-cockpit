@@ -21,7 +21,6 @@ import { SORT_KEYS, directoryCounts, displayTitle, isSortKey, naturalDir, relati
 /** @import { PastSession } from '../../daemon/wire.js' */
 /** @import { SortDir, SortKey } from '../sessions/order.js' */
 
-const REFRESH_MS = 15_000;
 const SEARCH_DEBOUNCE_MS = 200;
 
 export default {
@@ -360,16 +359,15 @@ function createSessionsWindow(body, ctx, daemon) {
   const offStatus = daemon.onStatus((s) => {
     if (s === 'open') void load();
   });
-  const timer = setInterval(() => {
-    if (document.visibilityState === 'visible') void load();
-  }, REFRESH_MS);
+  // The daemon says when a journal changes: omp wrote one, or a session was archived or restored.
+  const offHistory = daemon.onHistory(() => void load());
 
   draw();
   void load();
 
   return {
     destroy() {
-      clearInterval(timer);
+      offHistory();
       clearTimeout(searchTimer);
       requestSeq++; // drop any answer still on its way
       offSessions();

@@ -126,6 +126,7 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
     // it is running or written and not sent.
     if (mode === 'thread' && (!found || running() || drafted())) return;
     if (!found) return close();
+    if (mode === 'buttons' && found.text === quote) return; // already offered for it
     close();
     quote = found.text;
     pop.replaceChildren(
@@ -295,14 +296,22 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
     });
   }
 
-  // A selection is finished when the mouse or a Shift+arrow key lets go.
-  const onMouseUp = () => setTimeout(offerButtons);
-  /** @param {KeyboardEvent} e */
-  const onKeyUp = (e) => {
-    if (e.shiftKey) offerButtons();
+  // A selection is finished once no pointer button holds it: when the button lets go, and
+  // on every change made without one (Shift+arrows, a click that collapses it on release).
+  let pressed = false;
+  const onPointerDown = () => {
+    pressed = true;
+  };
+  const onPointerUp = () => {
+    pressed = false;
+    offerButtons();
+  };
+  const onPointerCancel = () => {
+    pressed = false;
   };
   const onSelectionChange = () => {
-    if (mode === 'buttons' && !selection()) close();
+    if (!pressed) offerButtons();
+    else if (mode === 'buttons' && !selection()) close();
   };
   const onScroll = () => {
     if (mode === 'buttons') close();
@@ -320,8 +329,9 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
     if (drafted()) return;
     if ((mode === 'editing' || mode === 'thread') && !running()) close();
   };
-  document.addEventListener('mouseup', onMouseUp);
-  transcript.addEventListener('keyup', onKeyUp);
+  document.addEventListener('pointerdown', onPointerDown, true);
+  document.addEventListener('pointerup', onPointerUp, true);
+  document.addEventListener('pointercancel', onPointerCancel, true);
   transcript.addEventListener('scroll', onScroll);
   pop.addEventListener('keydown', onKeyDown);
   document.addEventListener('selectionchange', onSelectionChange);
@@ -334,8 +344,9 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
     },
     destroy() {
       close();
-      document.removeEventListener('mouseup', onMouseUp);
-      transcript.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('pointerup', onPointerUp, true);
+      document.removeEventListener('pointercancel', onPointerCancel, true);
       transcript.removeEventListener('scroll', onScroll);
       document.removeEventListener('selectionchange', onSelectionChange);
       document.removeEventListener('pointerdown', onOutside, true);
