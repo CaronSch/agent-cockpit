@@ -18,6 +18,8 @@ import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
 import { composeAsk, composeFollowUp, isCommand, shellCommand } from '../omp/message.js';
 import { attachSelectionPopup } from '../omp/selection-popup.js';
+import { createSuggestions } from '../omp/suggestions.js';
+import { createFileSuggest } from '../omp/file-suggest.js';
 import { awaitsUser } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
 import { turnProgress } from '../omp/todos.js';
@@ -456,8 +458,7 @@ function createPane(body, ctx, daemon) {
     resizes.observe(transcript);
     const dialogs = el('div', 'omp-dialogs');
     const queue = el('div', 'omp-queue');
-    const suggest = el('div', 'omp-suggest');
-    suggest.setAttribute('role', 'listbox');
+    const suggestions = createSuggestions();
     const composer = createComposer({
       pane: node,
       upload: (file, name) => daemon.uploadAttachment(file, name),
@@ -494,7 +495,7 @@ function createPane(body, ctx, daemon) {
         cancel: (id) => void daemon.rpc(session, { type: 'btw_cancel', recordId: id }).catch(() => {}),
       },
     });
-    node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
+    node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, queue, suggestions.root, composer.root);
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
@@ -731,39 +732,38 @@ function createPane(body, ctx, daemon) {
         });
     });
 
-    // ── composer ──
-    /** @type {SlashCommand[]} */
-    let suggestions = [];
-    let selected = 0;
+    // ── composer: `/` commands and `@` files suggested as they are typed ──
+    const files = createFileSuggest({
+      draft,
+      list: suggestions,
+      listDir: (dir) => daemon.listFiles(session, dir),
+      replace: (start, end, text) => composer.replace(start, end, text),
+    });
 
     function hideSuggestions() {
-      suggestions = [];
-      suggest.replaceChildren();
-      suggest.hidden = true;
+      files.close();
+      suggestions.hide();
     }
 
+    /** Suggests what the draft is starting to name: a slash command, or a file after `@`. */
     function updateSuggestions() {
       const match = /^\/(\S*)$/.exec(draft.value);
-      if (!match) return hideSuggestions();
+      if (!match) {
+        if (!files.update()) suggestions.hide();
+        return;
+      }
+      files.close();
       const q = match[1].toLowerCase();
       const starts = (/** @type {SlashCommand} */ c) => [c.name, ...c.aliases].some((n) => n.toLowerCase().startsWith(q));
       const contains = (/** @type {SlashCommand} */ c) => [c.name, ...c.aliases].some((n) => n.toLowerCase().includes(q));
-      suggestions = [...state.commands.filter(starts), ...state.commands.filter((c) => !starts(c) && contains(c))].slice(0, MAX_SUGGESTIONS);
-      selected = Math.min(selected, Math.max(0, suggestions.length - 1));
-      if (!suggestions.length) return hideSuggestions();
-      suggest.hidden = false;
-      suggest.replaceChildren(
-        ...suggestions.map((c, i) => {
-          const row = button(`omp-suggestion${i === selected ? ' is-selected' : ''}`);
-          row.setAttribute('role', 'option');
-          row.setAttribute('aria-selected', String(i === selected));
-          row.append(el('span', 'omp-suggestion-name', `/${c.name}`));
-          if (c.aliases.length) row.append(el('span', 'omp-muted', c.aliases.map((a) => `/${a}`).join(' ')));
-          if (c.hint) row.append(el('span', 'omp-suggestion-hint', c.hint));
-          if (c.description) row.append(el('span', 'omp-suggestion-desc', c.description));
-          row.addEventListener('pointerdown', (e) => e.preventDefault()); // keep focus in the draft
-          row.addEventListener('click', () => complete(c));
-          return row;
+      const commands = [...state.commands.filter(starts), ...state.commands.filter((c) => !starts(c) && contains(c))].slice(0, MAX_SUGGESTIONS);
+      suggestions.show(
+        commands.map((c) => {
+          const cells = [el('span', 'omp-suggestion-name', `/${c.name}`)];
+          if (c.aliases.length) cells.push(el('span', 'omp-muted', c.aliases.map((a) => `/${a}`).join(' ')));
+          if (c.hint) cells.push(el('span', 'omp-suggestion-hint', c.hint));
+          if (c.description) cells.push(el('span', 'omp-suggestion-desc', c.description));
+          return { cells, pick: () => complete(c) };
         }),
       );
     }
@@ -776,24 +776,11 @@ function createPane(body, ctx, daemon) {
     }
 
     const history = createPromptHistory(() => sentPrompts(state.items));
-    draft.addEventListener('input', () => {
-      selected = 0;
-      updateSuggestions();
-    });
+    draft.addEventListener('input', updateSuggestions);
     draft.addEventListener('keydown', (e) => {
-      if (e.isComposing) return;
-      if (suggestions.length) {
-        if (e.key === 'Tab') {
-          e.preventDefault();
-          return complete(suggestions[selected]);
-        }
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-          e.preventDefault();
-          selected = (selected + (e.key === 'ArrowDown' ? 1 : suggestions.length - 1)) % suggestions.length;
-          return updateSuggestions();
-        }
-      }
-      // Up and Down step through what was sent, as in omp's own editor (omp/prompt-history.js).
+      // An open suggestion list takes the arrows, Tab and Enter first; closed, Up and Down
+      // step through what was sent, as in omp's own editor (omp/prompt-history.js).
+      if (e.isComposing || suggestions.key(e)) return;
       const plain = !(e.shiftKey || e.altKey || e.metaKey || e.ctrlKey);
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && plain && draft.selectionStart === draft.selectionEnd) {
         const older = e.key === 'ArrowUp';
@@ -811,7 +798,7 @@ function createPane(body, ctx, daemon) {
         e.preventDefault();
         void send();
       } else if (e.key === 'Escape') {
-        if (suggestions.length) hideSuggestions();
+        if (suggestions.open) hideSuggestions();
         else if (state.streaming) void stop();
       }
     });
@@ -1085,7 +1072,6 @@ function createPane(body, ctx, daemon) {
       selectionPopup.refresh();
     }
 
-    hideSuggestions();
     return {
       session,
       root: node,

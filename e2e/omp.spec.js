@@ -1,6 +1,6 @@
 // Behaviour tests for the omp pane against the real daemon driving tests/fixtures/fake-omp.js.
 import { test, expect } from '@playwright/test';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { E2E_STATE_DIR, newWorkspace, savedLayout, workbenchPath } from './daemon.js';
@@ -59,10 +59,10 @@ async function addOmpPane(page) {
   });
 }
 
-/** Starts omp in the test project and waits until it accepts prompts. @param {Page} page */
-async function startedPane(page) {
+/** Starts omp in `dir` (the test project) and waits until it accepts prompts. @param {Page} page @param {string} [dir] */
+async function startedPane(page, dir = PROJECT) {
   const pane = await addOmpPane(page);
-  await pane.locator('input').fill(PROJECT);
+  await pane.locator('input').fill(dir);
   await pane.getByRole('button', { name: 'Start omp' }).click();
   await expect(pane.locator('textarea')).toBeVisible();
   await expect(pane.getByText('Fake Model')).toBeVisible(); // get_state answered: the session is ready
@@ -197,6 +197,66 @@ test('the message box grows with the prompt, up to half the pane, and shrinks ag
 
   await draft.press('Enter');
   await expect.poll(async () => (await box()).height).toBe(empty.height);
+});
+
+test('@ suggests files from the session directory; Tab, arrows, Enter and clicks complete them into mentions', async ({ page }) => {
+  const root = mkdtempSync(join(tmpdir(), 'ac-e2e-mentions-'));
+  const project = join(root, 'proj');
+  mkdirSync(join(project, 'src'), { recursive: true });
+  mkdirSync(join(project, 'docs'));
+  for (const name of ['src/app.js', 'src/api.js', 'README.md', 'notes with space.md', '.env']) writeFileSync(join(project, name), name);
+  writeFileSync(join(root, 'sibling.txt'), 'hi');
+  await openWorkbench(page);
+  const pane = await startedPane(page, project);
+  const draft = pane.locator('textarea');
+  const list = pane.locator('.omp-suggest');
+  const rows = list.getByRole('option');
+
+  // `@` lists the session's directory: folders first and marked, dotfiles hidden.
+  await draft.pressSequentially('read @');
+  await expect(rows).toHaveText(['docs/', 'src/', 'notes with space.md', 'README.md']);
+  await draft.pressSequentially('.');
+  await expect(rows).toHaveText(['.env', 'notes with space.md', 'README.md']);
+  await draft.press('Backspace');
+
+  // Tab completes a folder with its slash and lists what is in it; then the common prefix, then the one left.
+  await draft.pressSequentially('sr');
+  await expect(rows).toHaveText(['src/']);
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('read @src/');
+  await expect(rows).toHaveText(['api.js', 'app.js']);
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('read @src/ap');
+  await draft.pressSequentially('p');
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('read @src/app.js ');
+  await expect(list).toBeHidden();
+
+  // `@../` walks up; arrows move and Enter picks.
+  await draft.pressSequentially('and @../');
+  await expect(rows).toHaveText(['proj/', 'sibling.txt']);
+  await draft.press('ArrowDown');
+  await expect(rows.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await draft.press('Enter');
+  await expect(draft).toHaveValue('read @src/app.js and @../sibling.txt ');
+
+  // A click picks too; a name with spaces goes quoted, as omp reads it whole.
+  await draft.pressSequentially('and @no');
+  await rows.filter({ hasText: 'notes with space.md' }).click();
+  await expect(draft).toHaveValue('read @src/app.js and @../sibling.txt and @"notes with space.md" ');
+  await expect(draft).toBeFocused();
+
+  // Esc closes the list without touching the draft.
+  await draft.pressSequentially('@');
+  await expect(list).toBeVisible();
+  await draft.press('Escape');
+  await expect(list).toBeHidden();
+  await draft.press('Backspace');
+
+  // The mentions go to omp as typed: it reads them relative to the session's directory.
+  const sent = rpcSent(page, 'prompt');
+  await draft.press('Enter');
+  expect((await sent).postDataJSON().message).toBe('read @src/app.js and @../sibling.txt and @"notes with space.md"');
 });
 
 test('a comment on selected reply text goes with the next prompt, quoting what it is about', async ({ page }) => {

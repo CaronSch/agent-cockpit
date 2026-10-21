@@ -10,7 +10,7 @@
  * reports is the code this page loaded, and `onUiChange` hears when the files served stop
  * being, or become again, those.
  */
-/** @import { DaemonConfig, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, Screen, SessionEvent, SessionMeta, StreamEvent, Workspace } from '../../daemon/wire.js' */
+/** @import { DaemonConfig, DirListing, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, Screen, SessionEvent, SessionMeta, StreamEvent, Workspace } from '../../daemon/wire.js' */
 /** @import { Tree } from '../layout/grid-model.js' */
 /** @typedef {{ ok: true, rev: string } | { ok: false, current: Scratchpad }} ScratchpadSave */
 /** @typedef {{ ok: true, rev: number | null } | { ok: false, current: Screen | null }} ScreenSave */
@@ -52,6 +52,7 @@ export class DaemonError extends Error {
  *   closeSession(session: string): Promise<void>,
  *   rpc(session: string, command: Record<string, unknown>): Promise<RpcResponse>,
  *   respondUi(session: string, response: Record<string, unknown>): Promise<void>,
+ *   listFiles(session: string, dir: string): Promise<DirListing>,
  *   onUiChange(fn: (outdated: boolean) => void): () => void,
  *   checkUi(): Promise<void>,
  * }} DaemonClient
@@ -344,6 +345,7 @@ export function createDaemonClient(env = {}) {
     async respondUi(session, response) {
       await request(`${sessionPath(session)}/ui`, { method: 'POST', body: JSON.stringify(response) });
     },
+    listFiles: (session, dir) => request(`${sessionPath(session)}/files?dir=${encodeURIComponent(dir)}`),
   };
 }
 

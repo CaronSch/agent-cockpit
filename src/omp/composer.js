@@ -295,6 +295,11 @@ export function createComposer({ pane, upload, onError, shellDir }) {
       draft.value = text;
       changed();
     },
+    /** Puts `text` in place of the draft's `start`…`end`, the caret after it. @param {number} start @param {number} end @param {string} text */
+    replace(start, end, text) {
+      draft.setRangeText(text, start, end, 'end');
+      changed();
+    },
     /** Adds a comment on `quote` to go with the next message. @param {string} quote @param {string} comment */
     addComment(quote, comment) {
       items = [...items, { kind: 'comment', quote, comment }];

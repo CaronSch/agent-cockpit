@@ -870,6 +870,18 @@
   color: var(--color-accent);
 }
 
+/* `@` file entries: folders (ending in `/`) in the accent, like commands; files plain. */
+.omp-suggestion-file {
+  color: var(--color-text);
+}
+
+.omp-suggest-note {
+  margin: 0;
+  padding: 3px 8px;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
 .omp-suggestion-hint {
   color: var(--color-text-dim);
 }
