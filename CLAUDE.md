@@ -43,7 +43,8 @@ Planned capabilities:
 
 - **Browser UI** (`src/`): the window grid and the widgets. No build step.
 - **Local daemon** (`daemon/`, Bun): the only process that touches the machine.
-  `bun start` runs it; it serves the UI on `127.0.0.1:4777` (`Bun.serve`) and
+  `bun start` runs it; it serves the UI on `127.0.0.1:4777` (`Bun.serve`), opened as
+  `http://cockpit.localhost:4777/` and
   launches each omp session as `omp --mode rpc-ui` in the chosen directory
   (`Bun.spawn`), owning those processes. omp is the `omp` on PATH unless `--omp`
   says otherwise. Prefer Bun's own APIs where they make the code smaller.
@@ -149,8 +150,9 @@ telemetry views, cmux-parity features beyond the above.
 
 ## Invariants (current stage)
 
-- The daemon binds `127.0.0.1` only, checks every request's `Host` (DNS
-  rebinding), requires the token cookie on every API request, and refuses any
+- The daemon binds `127.0.0.1` only, checks every request's `Host` against an
+  explicit list of loopback names (`127.0.0.1`, `localhost`, `cockpit.localhost`
+  with its port; DNS rebinding; `*.localhost` is loopback in browsers per RFC 6761), requires the token cookie on every API request, and refuses any
   foreign `Origin` or cross-site `Sec-Fetch-Site`. The token is random, stored
   owner-only in `~/.cockpit/token`, and reaches the browser once through
   the URL the daemon prints (it becomes an HttpOnly, SameSite=Strict cookie).
@@ -189,8 +191,10 @@ telemetry views, cmux-parity features beyond the above.
 - Several agent sessions may share this checkout. Make changes in a worktree
   (`git worktree add ../cockpit-<topic> -b <branch> main`), never by
   switching branches or stashing in the shared tree.
-- Run it: `bun install`, then `bun start`, then open the URL it prints once (it
-  carries the token; the browser keeps a cookie afterwards). `--port`,
+- Run it: `bun install`, then `bun start`, then open the URL it prints once,
+  `http://cockpit.localhost:4777/?token=…` (it carries the token; the browser
+  keeps a cookie afterwards). Cookies and browser storage are per address, so a
+  new address (`127.0.0.1` still works) needs the printed URL once. `--port`,
   `--omp <path>` (or `COCKPIT_OMP`) and `COCKPIT_STATE_DIR` override
   the defaults.
 - Before committing, all of these must pass (CI in `.github/workflows/ci.yml`
