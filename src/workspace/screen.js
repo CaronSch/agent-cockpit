@@ -3,11 +3,12 @@
  * from the daemon, and saved back as its layout changes.
  *
  * Claiming: a window holds the Web Lock `cockpit:<workspace>:<screen>` until it goes away,
- * and tries screens in `claimOrder`: the one its tab showed before (kept in sessionStorage,
- * so a reload keeps it while a duplicated tab finds it held and moves on), then each saved
- * screen, else a new one. The lock keeps windows that open at once (a restored browser
- * session) off each other's screens. Locks are per origin: windows open at two different
- * addresses at the same time do not see each other's claims.
+ * and tries screens in `claimOrder`: the one its tab showed before (kept in sessionStorage),
+ * then each saved screen, else a new one. For the tab's own screen it waits a moment, since
+ * on a reload the page going away may still hold that lock; a duplicated tab finds it still
+ * held after the wait and moves on. The lock keeps windows that open at once (a restored
+ * browser session) off each other's screens. Locks are per origin: windows open at two
+ * different addresses at the same time do not see each other's claims.
  *
  * Saving: a change is saved after a short pause, and a page going away sends its last
  * change in a keepalive request. A screen is stored once it holds a window and deleted when
@@ -47,6 +48,8 @@ import { DEFAULT_WORKSPACE, SCREEN_ID, claimOrder, lockName, newScreenId, worksp
 
 const SAVE_DELAY_MS = 250;
 const RETRY_MS = 2000;
+/** How long a window waits for its tab's own screen to be let go (a reload's old page). */
+const OWN_SCREEN_WAIT_MS = 1500;
 const SIGNED_OUT =
   'This browser is not signed in, so this layout lasts only until the page closes. Open the URL printed by `bun start` to sign in.';
 /** Where versions before workspaces kept the layout (see `legacyLayout`). */
@@ -54,15 +57,18 @@ const LEGACY_LAYOUT_KEY = 'cockpit.layout.v1';
 
 /**
  * Takes lock `name` and holds it until the page goes away or the returned release is called;
- * null when another window holds it.
- * @param {string} name @returns {Promise<(() => void) | null>}
+ * null when another window holds it (after `waitMs`, if given, has passed).
+ * @param {string} name @param {number} [waitMs] @returns {Promise<(() => void) | null>}
  */
-function hold(name) {
+function hold(name, waitMs = 0) {
   return new Promise((resolve) => {
-    void navigator.locks.request(name, { ifAvailable: true }, (lock) => {
-      if (!lock) return resolve(null);
-      return new Promise((release) => resolve(() => release(undefined)));
-    });
+    const options = waitMs ? { signal: AbortSignal.timeout(waitMs) } : { ifAvailable: true };
+    navigator.locks
+      .request(name, options, (lock) => {
+        if (!lock) return resolve(null);
+        return new Promise((release) => resolve(() => release(undefined)));
+      })
+      .catch(() => resolve(null)); // the wait ran out: another window has it
   });
 }
 
@@ -123,9 +129,9 @@ async function claimScreen(daemon, workspace, saved) {
 
   async function claim() {
     const remembered = sessionStorage.getItem(tabKey);
-    const order = claimOrder(remembered && SCREEN_ID.test(remembered) ? remembered : null, saved.map((s) => s.id));
-    for (const id of order) {
-      const got = await hold(lockName(workspace, id));
+    const own = remembered && SCREEN_ID.test(remembered) ? remembered : null;
+    for (const id of claimOrder(own, saved.map((s) => s.id))) {
+      const got = await hold(lockName(workspace, id), id === own ? OWN_SCREEN_WAIT_MS : 0);
       if (got) {
         release = got;
         return id;

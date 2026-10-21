@@ -25,11 +25,11 @@ test.afterEach(() => {
 });
 
 /**
- * Opens another browser window on the workbench. `tabScreen` is the screen this tab showed
- * before, as a duplicated tab carries over the one it was copied from.
- * @param {BrowserContext} context @param {string} path @param {{ tabScreen?: { workspace: string, id: string } }} [options]
+ * A new browser window, not loaded yet. `tabScreen` is the screen this tab showed before, as
+ * a reloaded tab, or a duplicated one, carries over.
+ * @param {BrowserContext} context @param {{ tabScreen?: { workspace: string, id: string } }} [options]
  */
-async function openWindow(context, path, { tabScreen } = {}) {
+async function newWindow(context, { tabScreen } = {}) {
   const page = await context.newPage();
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
   page.on('console', (msg) => {
@@ -39,6 +39,12 @@ async function openWindow(context, path, { tabScreen } = {}) {
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
   );
   if (tabScreen) await page.addInitScript(({ workspace, id }) => sessionStorage.setItem(`cockpit.screen.${workspace}`, id), tabScreen);
+  return page;
+}
+
+/** Opens another browser window on the workbench (see `newWindow`). @param {BrowserContext} context @param {string} path @param {{ tabScreen?: { workspace: string, id: string } }} [options] */
+async function openWindow(context, path, options) {
+  const page = await newWindow(context, options);
   await page.goto(path);
   await expect(page.locator('.screen-switch')).toBeVisible(); // the app has started
   return page;
@@ -142,6 +148,30 @@ test('a window opened after another was closed brings its screen back, and a rel
   await three.reload();
   await expect(switcher(three)).toHaveText('Screen 2 of 2');
   await expect.poll(() => shownIds(three)).toEqual([c]);
+});
+
+test('a tab gets its own screen back even if the page it replaces lets go of it only after it asked', async ({ context }) => {
+  const workspace = newWorkspace();
+  const path = workbenchPath(workspace);
+  const one = await openWindow(context, path);
+  const a = await addWindow(one);
+  await expect.poll(() => storedIds(one, workspace)).toEqual([[a]]);
+  const [screen] = await storedScreens(one, workspace);
+
+  // As in a reload: the new page names the screen while the old one still holds it, and the
+  // old one goes away a moment later.
+  const two = await newWindow(context, { tabScreen: { workspace, id: screen.id } });
+  const loading = two.goto(path);
+  const lock = `cockpit:${workspace}:${screen.id}`;
+  const asked = () => one.evaluate(async (name) => (await navigator.locks.query()).pending?.some((l) => l.name === name) ?? false, lock);
+  let waited = false;
+  for (const start = Date.now(); !waited && Date.now() - start < 1000; ) waited = await asked();
+  await one.close();
+  await loading;
+
+  await expect(switcher(two)).toHaveText('Screen 1 of 1');
+  await expect.poll(() => shownIds(two)).toEqual([a]);
+  expect(waited, 'the new page asked for its screen while the old one held it').toBe(true);
 });
 
 test('the switcher opens a screen open nowhere in this window, keeping agents running, and deletes one, ending its agents', async ({ context }) => {
