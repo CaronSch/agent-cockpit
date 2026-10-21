@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { awaitsUser } from '../src/omp/activity.js';
+import { awaitedAfter, awaitsUser } from '../src/omp/activity.js';
 /** @import { SessionEvent } from '../daemon/wire.js' */
 
 /** @param {Record<string, unknown>} frame @returns {SessionEvent} */
@@ -33,5 +33,21 @@ describe('what makes an omp window unread', () => {
       assert.equal(awaitsUser(frame(f)), false, JSON.stringify(f));
     }
     assert.equal(awaitsUser({ kind: 'stderr', line: 'boom', seq: 1, at: 1, session: 's' }), false);
+  });
+});
+
+describe('when a session last waited on its user', () => {
+  test('moves to the newest event that awaits the user, in daemon time, and nothing else moves it', () => {
+    const end = { type: 'agent_end', messages: [], isTerminal: true, yielded: true };
+    const at = (/** @type {Record<string, unknown>} */ f, /** @type {number} */ t) => ({ ...frame(f), at: t });
+    let awaited = 0;
+    awaited = awaitedAfter(awaited, at({ type: 'agent_start' }, 5));
+    assert.equal(awaited, 0);
+    awaited = awaitedAfter(awaited, at(end, 10));
+    assert.equal(awaited, 10);
+    awaited = awaitedAfter(awaited, at({ type: 'message_update' }, 20));
+    assert.equal(awaited, 10);
+    awaited = awaitedAfter(awaited, at({ type: 'extension_ui_request', id: 'u', method: 'ask' }, 30));
+    assert.equal(awaited, 30);
   });
 });

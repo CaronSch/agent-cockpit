@@ -10,15 +10,19 @@ import { createFrameDecoder } from './frame-decoder.js';
 /**
  * Sent by the daemon before a session counts as ready, so every widget sees the same
  * protocol (lossless v2 framing, delta-only message updates, `ask` dialogs enabled), and the
- * log holds the session's state (and so the journal it writes) before anything else asks.
+ * log holds the session's state (and so the journal it writes) and which providers omp is
+ * logged in to (does its model need a login?) before anything else asks.
  */
 export const SETUP_COMMANDS = Object.freeze([
   { type: 'negotiate_protocol', protocolVersion: 2 },
   { type: 'set_event_filter', events: null, messageUpdates: 'delta' },
   { type: 'set_ask_dialog', enabled: true },
+  { type: 'get_login_providers' },
   { type: 'get_state' },
 ]);
 
+/** Successful responses after which omp is logged in to other providers. */
+const LOGIN_CHANGING_COMMANDS = new Set(['login', 'logout']);
 
 /**
  * Added to the setup of a session started from a journal (resumed or forked): omp streams
@@ -129,6 +133,9 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
     // Every window shows the session's state from the log: the daemon asks for it again
     // whenever it changes, once for all of them.
     if (meta.status === 'ready' && changesState(frame)) send({ type: 'get_state' }).response.catch(() => {});
+    if (meta.status === 'ready' && frame.type === 'response' && frame.success === true && LOGIN_CHANGING_COMMANDS.has(frame.command)) {
+      send({ type: 'get_login_providers' }).response.catch(() => {});
+    }
     if (frame.type === 'response' && frame.command === 'get_state' && frame.success) {
       const file = frame.data?.sessionFile;
       if (typeof file === 'string' && file !== meta.sessionFile) update({ sessionFile: file });

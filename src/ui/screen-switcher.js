@@ -3,7 +3,8 @@
  * menu of every screen, with what it holds and where it is open, to open one here or delete it.
  *
  * Screens are numbered in the order they were created. Deleting a screen closes its windows,
- * so it ends what they own (their agents) exactly as closing them would, after asking.
+ * after asking; as closing a window never does, it ends no agent (they run on, listed in the
+ * Sessions window).
  */
 import { button, el } from './dom.js';
 import { errorMessage } from './format.js';
@@ -11,9 +12,9 @@ import { errorMessage } from './format.js';
 /** @import { Tree } from '../layout/grid-model.js' */
 
 /**
- * @param {{ opened: OpenedScreen, describe: (tree: Tree) => string, closeWindows: (tree: Tree) => void }} options
+ * @param {{ opened: OpenedScreen, describe: (tree: Tree) => string }} options
  */
-export function createScreenSwitcher({ opened, describe, closeWindows }) {
+export function createScreenSwitcher({ opened, describe }) {
   const root = el('div', 'screen-switcher');
   const toggle = button('screen-switch');
   toggle.setAttribute('aria-haspopup', 'true');
@@ -94,7 +95,7 @@ export function createScreenSwitcher({ opened, describe, closeWindows }) {
     const actions = el('div', 'screen-actions');
     actions.append(yes, no);
     menu.replaceChildren(
-      el('p', 'screen-note', `Delete Screen ${number} and close its windows (${describe(entry.tree)})? Agents running in them are ended.`),
+      el('p', 'screen-note', `Delete Screen ${number} and close its windows (${describe(entry.tree)})? Agents shown in them keep running.`),
       actions,
     );
     yes.addEventListener('click', () => {
@@ -102,7 +103,6 @@ export function createScreenSwitcher({ opened, describe, closeWindows }) {
       screen
         .remove(entry)
         .then((removed) => {
-          if (removed) closeWindows(entry.tree);
           note = removed ? '' : `Screen ${number} was opened or changed in another window, so it was not deleted.`;
         })
         .catch((err) => {

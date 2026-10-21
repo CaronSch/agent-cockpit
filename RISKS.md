@@ -112,7 +112,10 @@ is newer. The daemon prints its version at start.
   `sessionName` and `session_info_update`'s `title`. The toolbar's progress relies
   on every `todo` tool result carrying the agent's whole list in `details.phases`
   (`details.op` is `view` for a read), on `get_state`'s `todoPhases`, and on
-  `todo_auto_clear` meaning the list changed. A
+  `todo_auto_clear` meaning the list changed. The toolbar's Login relies on
+  `get_login_providers` listing the providers omp logs in to with `authenticated`,
+  and on omp starting with, or switching to, only a model whose provider has
+  credentials (with none, `omp --mode rpc-ui` exits: "No default model selected"). A
   change shows up as files
   that reach the model only as a bare path (or, for a typed `@` mention, not at all), side answers that never arrive or turn
   up in the chat, follow-ups answered under the wrong question or without knowing
@@ -120,8 +123,9 @@ is newer. The daemon prints its version at start.
   Fork button that stays off with the journal on disk (or is on without it, and the
   daemon refuses the fork: `fork is not an existing file`), `!` runs that wait for
   the turn to end or show twice, a responses-only pane that shows tool work,
-  drops a final reply or never stops "Working…", windows that stay unnamed, or a
-  progress bar that never shows or lags the agent's list. *Response:* re-read
+  drops a final reply or never stops "Working…", windows that stay unnamed, a
+  progress bar that never shows or lags the agent's list, or a Login button shown
+  while logged in (or missing while a login is needed). *Response:* re-read
   omp's `utils/file-mentions.ts`,
   `modes/rpc/rpc-btw.ts`, `session/btw-turn.ts`, `session/btw-history.ts`,
   `modes/rpc/rpc-mode.ts` (`BACKGROUND_COMMANDS`, `bash`, `get_state`), `session/bash-runner.ts`,
@@ -133,6 +137,16 @@ is newer. The daemon prints its version at start.
   `src/omp/message.js`, `src/omp/file-mention.js`,
   `src/omp/transcript.js`, `src/omp/todos.js`,
   `src/omp/visibility.js`, `src/widgets/omp.js` and the fake.
+
+## When running sessions start to pile up
+
+- **Forgotten sessions keep running.** Sessions outlive their windows: one shown
+  by no window keeps its omp process (and anything it started) until the user
+  stops it in Sessions or the daemon exits. A session idle at its prompt costs
+  memory, not model calls. *Threshold detail:* the owner finds sessions running
+  that they had forgotten, or the daemon's omp processes use noticeable memory.
+  *Response:* show each running session's age and memory in Sessions; offer to
+  stop sessions that no window shows and that have been idle for a day.
 
 ## When the session history reaches thousands of journals
 

@@ -62,7 +62,12 @@ Planned capabilities:
   and it asks for `get_state` again after anything that changes it. Windows render
   the stream and send only what their user asks for.
 - **Windows keep their own settings** in `leaf.params` (e.g. which session an
-  omp pane shows), saved with the layout. **User data lives with the daemon**,
+  omp pane shows), saved with the layout. **Sessions belong to the daemon, not to
+  windows:** a window only shows one, two windows may show the same one, and
+  switching or closing a window never ends it; it runs until the user stops it
+  (End in the omp pane, Stop in Sessions) or the daemon exits. What the user has
+  seen of a session (`seenAt`) is kept with it in the daemon, so every window
+  agrees on what needs attention. **User data lives with the daemon**,
   not in the layout: anything that must outlive a window, a browser profile or
   a port change (the scratchpad's notes) is a file in the state directory
   (`~/.cockpit`). Closing a window must never delete it.
@@ -90,8 +95,7 @@ What runs today:
   workspace, saved by the daemon; the top bar's switcher says which screen this
   window is, lists every screen with what it holds and where it is open, and opens
   one that is open nowhere in this window (a reload, so its agents keep running)
-  or deletes it (asking first; its omp agents end, as closing their windows
-  would). A tab running older UI code than the daemon serves says so in the top
+  or deletes it (asking first; the agents it showed keep running). A tab running older UI code than the daemon serves says so in the top
   bar and offers Reload (the files' version: `daemon/ui-files.js`).
 - The daemon and the `omp` pane: start omp in a directory (the Directory field
   suggests folders as the path is typed, relative to home, `~/`, `../` or absolute,
@@ -101,8 +105,16 @@ What runs today:
   structured event stream (streamed replies with Markdown and tables, thinking,
   tool calls with output), pick model and thinking level, log in to
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
-  a running turn, and resume the conversation after a daemon restart. Several
-  panes can run side by side, each bound to its own session; the window's top
+  a running turn, and resume the conversation after a daemon restart. A pane
+  shows one session at a time: **New** (toolbar) starts another one there, in the
+  same directory unless the setup screen's Directory is changed, while the one
+  shown before keeps running; **End** stops the shown session (asking first while
+  a turn runs). Closing the pane leaves its session running. The toolbar keeps to
+  one line: the directory gives way first, and Fork, Config, Login and End sit in
+  its More menu (⋯). Login also shows in the toolbar while the session's model
+  needs a login (no model, or its provider is one omp logs in to and is logged
+  out; the daemon asks omp's `get_login_providers` at setup and after a login). Several panes can
+  show different sessions side by side, or the same one; the window's top
   bar names its conversation (omp's session title, or the first prompt while it
   has none, saved with the window, so it still shows once the session has ended).
   The daemon never names a session by itself: a title comes from a `/rename` the
@@ -141,20 +153,29 @@ What runs today:
   in. Each pane's Config menu holds its own settings (saved with the window);
   the first shows only prompts and final responses, hiding thinking, tool calls
   and the messages in between, with one "Working…" line while a turn runs.
-- The Sessions window: every past omp conversation (read from omp's session
-  files), searchable across titles, directories and prompts, sortable, and
-  draggable onto the grid (by its row or its Resume button) to resume it in a new
-  omp pane there; Resume clicked opens it beside the list. A directory menu (every
-  directory with sessions, A→Z, with counts) narrows a window to one directory,
-  together with its search, sort and Archived toggle; like those, the choice is the
-  window's own. Sessions already open in a pane are marked and cannot be opened
-  twice; an untitled one is listed by its first prompt. A fork is listed as a
+- The Sessions window: first the daemon's **running** sessions (whatever screen
+  shows them, or none), newest first, each with how it is doing (starting,
+  working, idle, or *needs you*: it finished or asks something nobody has looked
+  at) and **Stop** (asking first while a turn runs); then every past omp
+  conversation (read from omp's session files), searchable across titles,
+  directories and prompts, and sortable. A click on a session (or Resume, or
+  Enter) shows it in the omp window this screen used last (pressed or focused
+  last), or a new one if there is none; dragging it onto the middle of an omp
+  window shows it there, and onto the grid elsewhere opens a new omp window where
+  it is dropped. A past session is resumed when shown, unless a running session
+  writes its journal: then the daemon hands over that one, never starting a second
+  omp on it. A directory menu (every
+  directory with sessions, A→Z, with counts) narrows a window to one directory
+  (running sessions too), together with its search, sort and Archived toggle; like
+  those, the choice is the window's own. An untitled session is listed by its first
+  prompt. The window is set in one font (mono), with row actions shown on hover or
+  focus. A fork is listed as a
   session of its own, under the title it copied from its source. **Archive** moves a
   session's journal and its folder out of omp's sessions into
   `~/.cockpit/archive/sessions/` at the same relative path, so neither the list nor omp's
   own resume offers it; the **Archived** toggle lists archived sessions (searchable and
   sortable the same way), each with **Restore**, which moves it back and never replaces a
-  file that is there now. A session open in any window cannot be archived. Nothing is
+  file that is there now. A running session cannot be archived. Nothing is
   ever deleted: there is no delete.
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
@@ -218,8 +239,8 @@ telemetry views, cmux-parity features beyond the above.
 - `src/layout/` stays pure (no DOM, no globals beyond `crypto`): it is where the
   layout logic is unit-tested.
 - New windows are widgets: one module in `src/widgets/` registered in
-  `src/widgets/registry.js` (contract documented there, including `close`: what
-  closing a window that is not mounted ends, used when a screen is deleted).
+  `src/widgets/registry.js` (contract documented there). A window owns nothing
+  but its settings: closing it ends nothing.
 - Every module opens with a `/** … */` comment whose first sentence says what it
   is for; the module map below is built from it.
 
@@ -342,8 +363,10 @@ particular, move a capability into "Current state" when it ships.
 - `src/scratchpad/blocks.js` — A scratchpad's text as blocks to edit: runs of text, and the images and files it references, kept free of the DOM so the round trip can be tested.
 - `src/scratchpad/store.js` — The page's copy of one scratchpad: every window in the page showing that pad edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
 - `src/sessions/order.js` — Sorting and labels for the Sessions window, kept free of the DOM so they can be tested.
+- `src/sessions/running.js` — The daemon's running sessions as the Sessions window lists them, kept free of the DOM so they can be tested: which sessions run, in what order, how each is doing, and what an omp window is given to show one.
 - `src/state/atom.js` — Tiny observable cell: get/set/subscribe.
 - `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
+- `src/ui/confirm.js` — Asking before an action that cannot be undone: a small popover beside the button that asked for it, saying what will happen, with the action and Cancel (Esc or a click elsewhere cancel too).
 - `src/ui/dom.js` — Element construction helpers: elements, buttons that never submit a form, and file-drag checks.
 - `src/ui/format.js` — Text formatters shared across the UI: error messages, home-relative paths and JSON dumps, with no DOM.
 - `src/ui/indent.js` — Tab and Shift+Tab indent and outdent text in a textarea, as in a code editor; Esc then Tab leaves the field instead, so keyboard users are never trapped in it.
@@ -354,7 +377,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
 - `src/widgets/scratchpad.js` — Notes beside the agents: text with screenshots and files in it.
-- `src/widgets/sessions.js` — Past omp sessions, searchable and sortable: drag one (or its Resume button) onto the grid to continue it in a new omp window there, or press Resume to open it beside the list.
+- `src/widgets/sessions.js` — omp sessions: the daemon's running ones on top, with how each is doing and Stop, then past ones, searchable and sortable.
 - `src/workspace/model.js` — Workspaces and their screens, kept free of the DOM and shared with the daemon: valid names and ids, which screen a new window claims, and how a screen is described.
 - `src/workspace/screen.js` — This window's screen of its workspace: claimed for as long as the window is open, loaded from the daemon, and saved back as its layout changes.
 - `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
@@ -376,7 +399,7 @@ particular, move a capability into "Current state" when it ships.
 
 - `pane` — Pane: An empty window
 - `omp` — omp: Chat with an omp coding agent
-- `sessions` — Sessions: Past omp sessions: search, sort, drag one out to resume it
+- `sessions` — Sessions: Running and past omp sessions: click or drag one to show it in an omp window
 - `scratchpad` — Scratchpad: Notes with screenshots and files; each new window starts its own pad
 
 ### Scripts
@@ -392,6 +415,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/sessions-running.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->

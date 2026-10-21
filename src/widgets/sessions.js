@@ -1,24 +1,32 @@
 /**
- * Past omp sessions, searchable and sortable: drag one (or its Resume button) onto the grid to
- * continue it in a new omp window there, or press Resume to open it beside the list.
+ * omp sessions: the daemon's running ones on top, with how each is doing and Stop, then past
+ * ones, searchable and sortable. A click shows a session in the omp window this screen used
+ * last (or a new one); dragging it shows it in the omp window it is dropped on, or in a new
+ * window where it is dropped.
+ *
+ * Running sessions are every one the daemon runs, whichever screen shows them, or none
+ * (sessions/running.js). A past session is resumed when shown, unless a running session
+ * writes its journal: then the daemon hands over that one, never a second omp on it.
  *
  * Search runs in the daemon (every word must match the title, directory or a prompt); sorting
- * runs here, and so does narrowing to one directory. The query, directory and sort order are
- * this window's own settings, so two Sessions windows can show different slices. A session
- * already open in a window is marked and cannot be resumed a second time: omp would fork it
- * rather than share it.
+ * runs here, and so does narrowing to one directory (running sessions too). The query,
+ * directory and sort order are this window's own settings, so two Sessions windows can show
+ * different slices.
  *
  * Archive moves a session out of omp's sessions into the daemon's archive (omp's own resume
  * no longer offers it); "Archived" switches the window to the archived sessions, each with
- * Restore. An open session cannot be archived: omp is still writing its journal.
+ * Restore. A running session cannot be archived: omp is still writing its journal.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
 import { SORT_KEYS, directoryCounts, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
+import { STATE_LABELS, follow, followedName, isRunning, noteEvent, runningSessions, runningState, showPast, showRunning } from '../sessions/running.js';
+import { confirmBeside } from '../ui/confirm.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
-/** @import { PastSession } from '../../daemon/wire.js' */
+/** @import { PastSession, SessionMeta } from '../../daemon/wire.js' */
+/** @import { Followed } from '../sessions/running.js' */
 /** @import { SortDir, SortKey } from '../sessions/order.js' */
 
 const SEARCH_DEBOUNCE_MS = 200;
@@ -27,7 +35,7 @@ export default {
   type: 'sessions',
   title: 'Sessions',
   glyph: '☰',
-  description: 'Past omp sessions: search, sort, drag one out to resume it',
+  description: 'Running and past omp sessions: click or drag one to show it in an omp window',
 
   /** @param {HTMLElement} body @param {WidgetContext} ctx */
   mount(body, ctx) {
@@ -77,9 +85,15 @@ function createSessionsWindow(body, ctx, daemon) {
   bar.append(search, directories, sort, direction, archivedToggle, refresh);
   const status = el('p', 'sessions-status');
   status.setAttribute('aria-live', 'polite');
+  const runningHead = el('h3', 'sessions-heading', 'Running');
+  const runningList = el('ul', 'sessions-running');
+  runningList.setAttribute('aria-label', 'Running sessions');
+  const pastHeading = el('h3', 'sessions-heading');
+  const pastHead = el('div', 'sessions-head');
+  pastHead.append(pastHeading, status);
   const list = el('ul', 'sessions-list');
   list.setAttribute('aria-label', 'Past sessions');
-  root.append(bar, status, list);
+  root.append(bar, runningHead, runningList, pastHead, list);
 
   /** @type {PastSession[]} */
   let sessions = [];
@@ -96,6 +110,18 @@ function createSessionsWindow(body, ctx, daemon) {
   let home = null;
   /** @type {Map<string, { signature: string, node: HTMLElement }>} */
   const rows = new Map();
+  /** Running rows, by session id. @type {Map<string, { signature: string, node: HTMLElement }>} */
+  const runningRows = new Map();
+  /** What this window follows of each running session, from its events. @type {Map<string, { followed: Followed, off: () => void }>} */
+  const followed = new Map();
+  let frame = 0;
+  /** Redraws once per frame however many events arrive. */
+  const scheduleDraw = () => {
+    frame ||= requestAnimationFrame(() => {
+      frame = 0;
+      draw();
+    });
+  };
 
   daemon
     .config()
@@ -106,13 +132,26 @@ function createSessionsWindow(body, ctx, daemon) {
     .catch(() => {});
 
   /** Journals the daemon's running sessions write. */
-  const openFiles = () =>
-    new Set(
-      daemon
-        .sessions()
-        .filter((m) => m.status === 'starting' || m.status === 'ready')
-        .flatMap((m) => (m.sessionFile ? [m.sessionFile] : [])),
-    );
+  const openFiles = () => new Set(daemon.sessions().flatMap((m) => (isRunning(m) && m.sessionFile ? [m.sessionFile] : [])));
+
+  /** Follows every running session's events (to tell how it is doing), and lets go of stopped ones. */
+  function syncFollowed() {
+    const running = new Set(daemon.sessions().filter(isRunning).map((m) => m.id));
+    for (const [id, entry] of followed) {
+      if (running.has(id)) continue;
+      entry.off();
+      followed.delete(id);
+    }
+    for (const id of running) {
+      if (followed.has(id)) continue;
+      const entry = { followed: follow(), off: () => {} };
+      followed.set(id, entry);
+      entry.off = daemon.subscribe(id, (event) => {
+        noteEvent(entry.followed, event);
+        scheduleDraw();
+      });
+    }
+  }
 
   async function load() {
     const seq = ++requestSeq;
@@ -142,13 +181,44 @@ function createSessionsWindow(body, ctx, daemon) {
     return tildeHome(cwd, home);
   }
 
-  /** @param {PastSession} s */
-  const paneParams = (s) => ({ resume: s.file, cwd: s.cwd, session: null, sessionFile: null, name: s.title });
+  /** @param {SessionMeta} meta */
+  const runningName = (meta) => {
+    const f = followed.get(meta.id)?.followed;
+    return (f && followedName(f)) ?? null;
+  };
 
-  /** @param {PastSession} s */
-  function resume(s) {
-    if (showArchived() || openFiles().has(s.file)) return;
-    ctx.addWidget('omp', paneParams(s));
+  /**
+   * The omp window settings that show the row's session, or null for an archived one (it
+   * must be restored first).
+   * @param {HTMLElement} row @returns {import('../layout/grid-model.js').LeafParams | null}
+   */
+  function paramsFor(row) {
+    const meta = row.dataset.session ? daemon.meta(row.dataset.session) : null;
+    if (meta) return isRunning(meta) ? showRunning(meta, runningName(meta)) : null;
+    const s = byFile.get(row.dataset.file ?? '');
+    return s && !showArchived() ? showPast(s) : null;
+  }
+
+  /** Shows the row's session in the omp window this screen used last. @param {HTMLElement} row */
+  function show(row) {
+    const params = paramsFor(row);
+    if (params) ctx.showWidget('omp', params);
+  }
+
+  /** Stops a running session, asking first while it works on a turn. @param {SessionMeta} meta @param {HTMLButtonElement} control */
+  function stop(meta, control) {
+    const run = () => {
+      control.disabled = true;
+      daemon.closeSession(meta.id).catch((err) => {
+        moveError = `Could not stop “${runningName(meta) ?? meta.cwd}”: ${errorMessage(err)}`;
+        control.disabled = false;
+        draw();
+      });
+    };
+    const f = followed.get(meta.id)?.followed;
+    if (f && runningState(f, meta) === 'working') {
+      confirmBeside(control, { message: 'The agent is working on a turn. Stop the session anyway?', action: 'Stop session', run });
+    } else run();
   }
 
   /**
@@ -167,40 +237,66 @@ function createSessionsWindow(body, ctx, daemon) {
     await load();
   }
 
-  /** @param {PastSession} s @param {boolean} open @param {number} now */
-  function renderRow(s, open, now) {
+  /**
+   * A row's text: its title on one line, and a dimmer line of facts below it.
+   * @param {string} title @param {string[]} facts
+   */
+  function rowText(title, facts) {
+    const main = el('div', 'sessions-main');
+    const meta = el('div', 'sessions-meta');
+    // The spaces keep the facts separate words for copy and screen readers; flex layout ignores them.
+    facts.forEach((fact, i) => meta.append(...(i ? [' '] : []), el('span', i === 0 ? 'sessions-dir' : '', fact)));
+    main.append(el('div', 'sessions-title', title), meta);
+    return main;
+  }
+
+  /** @param {SessionMeta} meta */
+  function renderRunningRow(meta) {
+    const f = followed.get(meta.id)?.followed;
+    const state = f ? runningState(f, meta) : 'starting';
+    const row = el('li', `sessions-item is-running is-${state}`);
+    row.tabIndex = 0;
+    row.dataset.session = meta.id;
+    row.title = `${meta.cwd}\nStarted ${new Date(meta.startedAt).toLocaleString()}\nClick to show it in the last omp window used, or drag it onto one`;
+    const dot = el('span', 'sessions-dot');
+    dot.setAttribute('aria-hidden', 'true');
+    const word = el('span', 'sessions-state', STATE_LABELS[state]);
+    const main = rowText(runningName(meta) ?? 'New session', [shortDir(meta.cwd)]);
+    main.querySelector('.sessions-meta')?.append(' ', word);
+    const actions = el('div', 'sessions-actions');
+    const stopBtn = button('sessions-action sessions-stop', 'Stop');
+    stopBtn.title = 'End this session';
+    actions.append(stopBtn);
+    row.append(dot, main, actions);
+    return row;
+  }
+
+  /** @param {PastSession} s @param {boolean} running @param {number} now */
+  function renderRow(s, running, now) {
     const archived = showArchived();
-    const row = el('li', `sessions-item${open ? ' is-open' : ''}${archived ? ' is-archived' : ''}`);
+    const row = el('li', `sessions-item${running ? ' is-open' : ''}${archived ? ' is-archived' : ''}`);
     row.tabIndex = 0;
     row.dataset.file = s.file;
-    const hint = archived ? 'Archived: Restore to resume it' : open ? 'Open in a window' : 'Drag onto the grid to resume';
-    row.title = `${s.file}\nLast active ${new Date(s.modifiedAt).toLocaleString()}\n${hint}`;
-    const main = el('div', 'sessions-main');
-    main.append(el('div', 'sessions-title', displayTitle(s)));
-    if (s.title && s.firstPrompt) main.append(el('div', 'sessions-preview', s.firstPrompt));
-    const meta = el('div', 'sessions-meta');
-    // The spaces keep the parts separate words for copy and screen readers; flex layout ignores them.
-    meta.append(
-      el('span', 'sessions-dir', shortDir(s.cwd)),
-      ' ',
-      el('span', '', relativeTime(s.modifiedAt, now)),
-      ' ',
-      el('span', '', `${s.prompts} prompt${s.prompts === 1 ? '' : 's'}`),
-    );
-    if (open) meta.append(' ', el('span', 'sessions-badge', 'open'));
-    main.append(meta);
-    row.append(main);
+    const hint = archived ? 'Archived: Restore to resume it' : running ? 'Running: click to show it' : 'Click to resume it in the last omp window used, or drag it onto one';
+    row.title = `${s.title && s.firstPrompt ? `${s.firstPrompt}\n` : ''}${s.file}\nLast active ${new Date(s.modifiedAt).toLocaleString()}\n${hint}`;
+    const dot = el('span', 'sessions-dot');
+    dot.setAttribute('aria-hidden', 'true');
+    const facts = [shortDir(s.cwd), relativeTime(s.modifiedAt, now), `${s.prompts} prompt${s.prompts === 1 ? '' : 's'}`];
+    const main = rowText(displayTitle(s), facts);
+    if (running) main.querySelector('.sessions-meta')?.append(' ', el('span', 'sessions-state', 'running'));
+    const actions = el('div', 'sessions-actions');
     if (archived) {
-      row.append(button('btn sessions-restore', 'Restore'));
+      actions.append(button('sessions-action sessions-restore', 'Restore'));
     } else {
-      if (!open) row.append(button('btn sessions-resume', 'Resume'));
-      const archive = button('btn sessions-archive', 'Archive');
-      if (open) {
+      actions.append(button('sessions-action sessions-resume', running ? 'Show' : 'Resume'));
+      const archive = button('sessions-action sessions-archive', 'Archive');
+      if (running) {
         archive.disabled = true;
-        archive.title = 'Open in a window: close it to archive it';
+        archive.title = 'Running: stop it to archive it';
       }
-      row.append(archive);
+      actions.append(archive);
     }
+    row.append(dot, main, actions);
     return row;
   }
 
@@ -232,12 +328,48 @@ function createSessionsWindow(body, ctx, daemon) {
   function drawStatus() {
     const shown = shownSessions().length;
     const kind = showArchived() ? 'archived session' : 'session';
+    pastHeading.textContent = showArchived() ? 'Archived' : 'Past';
     status.classList.toggle('is-error', error !== null || moveError !== null);
     if (error) status.textContent = `Could not list sessions: ${error}`;
     else if (moveError) status.textContent = moveError;
     else if (!loaded) status.textContent = 'Loading sessions…';
     else if (shown === 0) status.textContent = query() || directory() ? 'No session matches.' : showArchived() ? 'No archived sessions.' : 'No past sessions yet.';
     else status.textContent = `${shown} ${kind}${shown === 1 ? '' : 's'}${loading ? ' · refreshing…' : ''}`;
+  }
+
+  /**
+   * Puts `items`' rows into `into` in order, building only those whose signature changed, so a
+   * redraw does not steal focus from the row being used.
+   * @template T
+   * @param {HTMLElement} into @param {Map<string, { signature: string, node: HTMLElement }>} cache
+   * @param {T[]} items @param {(item: T) => string} keyOf @param {(item: T) => string} signatureOf @param {(item: T) => HTMLElement} render
+   */
+  function syncRows(into, cache, items, keyOf, signatureOf, render) {
+    const live = new Set();
+    items.forEach((item, i) => {
+      const key = keyOf(item);
+      live.add(key);
+      const signature = signatureOf(item);
+      let entry = cache.get(key);
+      if (!entry || entry.signature !== signature) {
+        const node = render(item);
+        if (entry) {
+          const hadFocus = entry.node.contains(document.activeElement);
+          entry.node.replaceWith(node);
+          if (hadFocus) node.focus();
+        }
+        entry = { signature, node };
+        cache.set(key, entry);
+      }
+      const at = into.children[i];
+      if (at !== entry.node) into.insertBefore(entry.node, at ?? null);
+    });
+    for (const [key, entry] of cache) {
+      if (!live.has(key)) {
+        entry.node.remove();
+        cache.delete(key);
+      }
+    }
   }
 
   function draw() {
@@ -250,74 +382,66 @@ function createSessionsWindow(body, ctx, daemon) {
     drawDirectories();
     drawStatus();
 
+    const running = showArchived() ? [] : runningSessions(daemon.sessions(), directory());
+    runningHead.hidden = runningList.hidden = running.length === 0;
+    syncRows(
+      runningList,
+      runningRows,
+      running,
+      (m) => m.id,
+      (m) => {
+        const f = followed.get(m.id)?.followed;
+        return JSON.stringify([runningName(m), m.cwd, f ? runningState(f, m) : 'starting', home]);
+      },
+      renderRunningRow,
+    );
+
     const open = openFiles();
     const now = Date.now();
-    const ordered = sortSessions(shownSessions(), sortKey(), dir);
-    const live = new Set();
-    ordered.forEach((s, i) => {
-      live.add(s.file);
-      const isOpen = open.has(s.file);
-      // Rows are kept by file so a refresh does not steal focus from the one being used.
-      const signature = JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), isOpen, home, showArchived()]);
-      let entry = rows.get(s.file);
-      if (!entry || entry.signature !== signature) {
-        const node = renderRow(s, isOpen, now);
-        if (entry) {
-          const hadFocus = entry.node.contains(document.activeElement);
-          entry.node.replaceWith(node);
-          if (hadFocus) node.focus();
-        }
-        entry = { signature, node };
-        rows.set(s.file, entry);
-      }
-      const at = list.children[i];
-      if (at !== entry.node) list.insertBefore(entry.node, at ?? null);
-    });
-    for (const [file, entry] of rows) {
-      if (!live.has(file)) {
-        entry.node.remove();
-        rows.delete(file);
-      }
-    }
+    syncRows(
+      list,
+      rows,
+      sortSessions(shownSessions(), sortKey(), dir),
+      (s) => s.file,
+      (s) => JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), open.has(s.file), home, showArchived()]),
+      (s) => renderRow(s, open.has(s.file), now),
+    );
   }
 
   // ── interaction ──
-  /** @param {EventTarget | null} target @returns {PastSession | null} */
-  const sessionAt = (target) => {
-    const row = /** @type {HTMLElement | null} */ (/** @type {Element} */ (target)?.closest?.('.sessions-item'));
-    return row ? (byFile.get(row.dataset.file ?? '') ?? null) : null;
-  };
+  /** @param {EventTarget | null} target @returns {HTMLElement | null} */
+  const rowAt = (target) => /** @type {HTMLElement | null} */ (/** @type {Element} */ (target)?.closest?.('.sessions-item'));
 
-  // A row drags out from anywhere on it, its Resume button included (a click on Resume opens it
-  // beside the list); Archive only archives.
-  list.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive')) return;
-    const s = sessionAt(event.target);
-    if (!s || showArchived() || openFiles().has(s.file)) return;
-    ctx.dragWidget('omp', paneParams(s), event, { label: displayTitle(s) });
+  // A row drags out from anywhere on it, its Resume button included; its other actions only act.
+  root.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive, .sessions-stop')) return;
+    const row = rowAt(event.target);
+    const params = row && paramsFor(row);
+    if (!row || !params) return;
+    const label = row.querySelector('.sessions-title')?.textContent ?? 'omp';
+    ctx.dragWidget('omp', params, event, { label, into: true });
   });
-  list.addEventListener('click', (event) => {
+  root.addEventListener('click', (event) => {
+    const row = rowAt(event.target);
+    if (!row) return;
     const control = /** @type {Element} */ (event.target).closest('button');
-    const s = sessionAt(event.target);
-    if (!control || !s) return;
-    if (control.classList.contains('sessions-resume')) resume(s);
-    else if (control.classList.contains('sessions-archive') || control.classList.contains('sessions-restore')) void move(s, control);
+    const meta = row.dataset.session ? daemon.meta(row.dataset.session) : null;
+    const s = byFile.get(row.dataset.file ?? '');
+    if (!control || control.classList.contains('sessions-resume')) show(row);
+    else if (control.classList.contains('sessions-stop') && meta) stop(meta, /** @type {HTMLButtonElement} */ (control));
+    else if (s && (control.classList.contains('sessions-archive') || control.classList.contains('sessions-restore'))) void move(s, /** @type {HTMLButtonElement} */ (control));
   });
-  list.addEventListener('dblclick', (event) => {
-    const s = sessionAt(event.target);
-    if (s) resume(s);
-  });
-  list.addEventListener('keydown', (event) => {
+  root.addEventListener('keydown', (event) => {
     const row = /** @type {HTMLElement} */ (event.target);
     if (!row.classList?.contains('sessions-item')) return;
     if (event.key === 'Enter') {
       event.preventDefault();
-      const s = sessionAt(row);
-      if (s) resume(s);
+      show(row);
     } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      const next = event.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling;
-      /** @type {HTMLElement | null} */ (next)?.focus();
+      const rowsShown = [...root.querySelectorAll('.sessions-item')];
+      const next = rowsShown[rowsShown.indexOf(row) + (event.key === 'ArrowDown' ? 1 : -1)];
+      /** @type {HTMLElement | undefined} */ (next)?.focus();
     }
   });
 
@@ -355,7 +479,11 @@ function createSessionsWindow(body, ctx, daemon) {
     void load();
   });
 
-  const offSessions = daemon.onSessions(draw);
+  const offSessions = daemon.onSessions(() => {
+    syncFollowed();
+    scheduleDraw();
+  });
+  syncFollowed();
   const offStatus = daemon.onStatus((s) => {
     if (s === 'open') void load();
   });
@@ -372,6 +500,8 @@ function createSessionsWindow(body, ctx, daemon) {
       requestSeq++; // drop any answer still on its way
       offSessions();
       offStatus();
+      for (const entry of followed.values()) entry.off();
+      cancelAnimationFrame(frame);
       root.remove();
     },
   };

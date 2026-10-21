@@ -1,11 +1,11 @@
-// Behaviour tests for the Sessions window: listing, search, sort, resuming a past session
-// into a new omp window, and archiving, against the real daemon reading journals from
-// E2E_OMP_SESSIONS.
+// Behaviour tests for the Sessions window: running sessions with their status and Stop,
+// listing, search, sort, showing a session in an omp window, and archiving, against the real
+// daemon reading journals from E2E_OMP_SESSIONS.
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { E2E_OMP_SESSIONS, E2E_STATE_DIR, newWorkspace, workbenchPath } from './daemon.js';
+import { E2E_OMP_SESSIONS, E2E_STATE_DIR, newWorkspace, savedLayout, workbenchPath } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {import('@playwright/test').Locator} Locator */
@@ -31,6 +31,8 @@ const ARCHIVE = join(E2E_STATE_DIR, 'archive', 'sessions');
 
 /** @type {string[]} */
 let problems = [];
+/** The workspace this test lays out its windows in. */
+let workspace = '';
 
 /**
  * Empties `dir`, keeping the directory itself: the daemon watches it for changes, and a
@@ -68,7 +70,8 @@ test.beforeEach(async ({ page }) => {
   await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
   );
-  await page.goto(workbenchPath(newWorkspace()));
+  workspace = newWorkspace();
+  await page.goto(workbenchPath(workspace));
   await expect(page.locator('.screen-switch')).toBeVisible(); // the app has started
 });
 
@@ -93,11 +96,44 @@ async function addSessionsWindow(page) {
   return window;
 }
 
-/** Row titles in display order. @param {Locator} window */
-const titles = (window) => window.locator('.sessions-title');
+/** Past rows' titles in display order. @param {Locator} window */
+const titles = (window) => window.locator('.sessions-list .sessions-title');
 
-/** @param {Locator} window @param {string} title */
-const row = (window, title) => window.locator('.sessions-item', { has: window.page().locator('.sessions-title', { hasText: title }) });
+/** A past session's row. @param {Locator} window @param {string} title */
+const row = (window, title) => window.locator('.sessions-list .sessions-item', { has: window.page().locator('.sessions-title', { hasText: title }) });
+
+/**
+ * A running session's row. Tests run in parallel against one daemon, so the Running list also
+ * holds other tests' sessions: rows are found by session id.
+ * @param {Locator} window @param {string} session
+ */
+const runningRow = (window, session) => window.locator(`.sessions-running .sessions-item[data-session="${session}"]`);
+
+/** @param {Page} page */
+const daemonSessions = async (page) => (await (await page.request.get('/api/sessions')).json()).sessions;
+
+/** The session omp window `pane` shows, once the layout saved with it says. @param {Page} page @param {Locator} pane @returns {Promise<string>} */
+async function shownSession(page, pane) {
+  const id = await pane.getAttribute('data-id');
+  /** @param {any} node @returns {any} */
+  const find = (node) => (node?.id === id ? node : (node?.children ?? []).map(find).find(Boolean));
+  let session = null;
+  await expect.poll(async () => (session = find(await savedLayout(page.request, workspace))?.params?.session ?? null)).toBeTruthy();
+  return /** @type {string} */ (/** @type {unknown} */ (session));
+}
+
+/** Starts omp in a new omp window (added through the palette), in `dir`. @param {Page} page @param {string} dir */
+async function startedPane(page, dir) {
+  const before = await page.locator('.widget[data-widget="omp"]').count();
+  await page.locator('#palette-toggle').click();
+  await page.locator('#palette [data-type="omp"]').click();
+  await page.keyboard.press('Escape');
+  const pane = page.locator('.widget[data-widget="omp"]').nth(before);
+  await pane.locator('input').fill(dir);
+  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await expect(pane.getByText('Fake Model')).toBeVisible();
+  return pane;
+}
 
 /** @param {Page} page */
 async function settle(page) {
@@ -106,15 +142,28 @@ async function settle(page) {
   );
 }
 
-/** Real pointer drag from a row to a grid point, checking the drop preview is up before release. @param {Page} page @param {Locator} from */
-async function dragToGridRight(page, from) {
+/** Real pointer drag from a row to a point, holding the button there. @param {Page} page @param {Locator} from @param {{ x: number, y: number }} to */
+async function dragTo(page, from, to) {
   const box = await from.boundingBox();
-  const grid = await page.locator('#grid').boundingBox();
-  if (!box || !grid) throw new Error('nothing to drag');
+  if (!box) throw new Error('nothing to drag');
   await page.mouse.move(box.x + 40, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(grid.x + grid.width - 40, grid.y + grid.height / 2, { steps: 12 });
+  await page.mouse.move(to.x, to.y, { steps: 12 });
   await settle(page);
+}
+
+/** Real pointer drag from a row to the grid's right edge. @param {Page} page @param {Locator} from */
+async function dragToGridRight(page, from) {
+  const grid = await page.locator('#grid').boundingBox();
+  if (!grid) throw new Error('no grid');
+  await dragTo(page, from, { x: grid.x + grid.width - 40, y: grid.y + grid.height / 2 });
+}
+
+/** The middle of a window. @param {Locator} window */
+async function middleOf(window) {
+  const box = await window.boundingBox();
+  if (!box) throw new Error('window not laid out');
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
 test('past sessions are listed newest first, searchable across prompts and directories, and sortable', async ({ page }) => {
@@ -152,7 +201,7 @@ test('a session omp writes while the window is open shows up by itself', async (
   await expect(titles(window)).toHaveText(['Fresh work', 'Zebra cleanup', 'deploy staging', 'Fix the login flow']);
 });
 
-test('dragging a session onto the grid resumes it in a new omp window, and it cannot be opened twice', async ({ page }) => {
+test('dragging a session onto the grid resumes it in a new omp window; dragged again, a second window shows the same session', async ({ page }) => {
   const window = await addSessionsWindow(page);
   const deploy = row(window, 'deploy staging');
   await dragToGridRight(page, deploy);
@@ -164,19 +213,19 @@ test('dragging a session onto the grid resumes it in a new omp window, and it ca
   await expect(pane).toHaveCount(1);
   await expect(pane.locator('.omp-user')).toContainText('earlier question');
   await expect(pane.locator('.omp-assistant')).toContainText('earlier answer');
-  const sessions = async () => (await (await page.request.get('/api/sessions')).json()).sessions;
-  const live = (await sessions()).filter((/** @type {any} */ s) => s.sessionFile === fileOf('deploy') && s.status !== 'exited');
-  expect(live).toHaveLength(1);
-  expect(live[0].cwd).toBe(BRAVO);
+  const live = async () => (await daemonSessions(page)).filter((/** @type {any} */ s) => s.sessionFile === fileOf('deploy') && s.status !== 'exited');
+  expect(await live()).toHaveLength(1);
+  expect((await live())[0].cwd).toBe(BRAVO);
+  await expect(deploy.locator('.sessions-state')).toHaveText('running');
 
-  await expect(deploy.locator('.sessions-badge')).toHaveText('open');
-  await expect(deploy.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+  // Running, it is shown again rather than resumed a second time: one omp, two windows.
   await dragToGridRight(page, deploy);
-  await expect(page.locator('.drop-indicator')).not.toHaveClass(/is-visible/);
+  await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
   await page.mouse.up();
-  await deploy.dblclick();
-  await settle(page);
-  await expect(pane).toHaveCount(1);
+  await expect(pane).toHaveCount(2);
+  await expect(pane.nth(1).locator('.omp-assistant')).toContainText('earlier answer');
+  expect(await shownSession(page, pane.nth(1))).toBe(await shownSession(page, pane.nth(0)));
+  expect(await live()).toHaveLength(1);
 });
 
 test('the Resume button drags out too, resuming the session where it is dropped', async ({ page }) => {
@@ -199,16 +248,20 @@ test('the Resume button drags out too, resuming the session where it is dropped'
   expect(placed && list && placed.x < list.x).toBe(true);
 });
 
-test('Resume opens the session beside the list, and Enter does the same from the keyboard', async ({ page }) => {
+test('Resume opens the session in a new omp window when there is none, then in the last one used; Enter does the same', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' }).click();
-  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(1);
-  await expect(page.locator('.widget[data-widget="omp"] .omp-user')).toContainText('earlier question');
+  const pane = page.locator('.widget[data-widget="omp"]');
+  await expect(pane).toHaveCount(1);
+  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  const login = await shownSession(page, pane);
 
   await row(window, 'Zebra cleanup').focus();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(2);
-  await expect(row(window, 'Zebra cleanup').locator('.sessions-badge')).toHaveText('open');
+  await expect.poll(() => shownSession(page, pane)).not.toBe(login);
+  await expect(pane, 'shown in the window there is, not a new one').toHaveCount(1);
+  await expect(row(window, 'Zebra cleanup').locator('.sessions-state')).toHaveText('running');
+  await expect(runningRow(window, login), 'the session it showed before runs on').toBeVisible();
   await expect(page.locator('.widget[data-widget="sessions"]'), 'the list stays').toHaveCount(1);
 });
 
@@ -268,13 +321,73 @@ test('Archive does not drag the session out: pressed and moved onto the grid, it
   await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(0);
 });
 
-test('a session open in a window cannot be archived, and says why', async ({ page }) => {
+test('a running session cannot be archived, even with its window closed, until Stop ends it', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  const pane = page.locator('.widget[data-widget="omp"]');
+  const session = await shownSession(page, pane);
+  await pane.locator('.widget-close').click();
+  await expect(pane).toHaveCount(0);
+
   const archive = row(window, 'deploy staging').getByRole('button', { name: 'Archive' });
   await expect(archive).toBeDisabled();
-  await expect(archive).toHaveAttribute('title', /close it to archive it/);
+  await expect(archive).toHaveAttribute('title', /stop it to archive it/);
   await expect(row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' })).toBeEnabled();
+
+  await runningRow(window, session).getByRole('button', { name: 'Stop' }).click();
+  await expect(runningRow(window, session)).toHaveCount(0);
+  await expect(archive).toBeEnabled();
+});
+
+test('Running lists every running session with how it is doing; a click shows it in the omp window used last', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' }).click();
+  const first = page.locator('.widget[data-widget="omp"]').first();
+  const login = await shownSession(page, first);
+  const second = await startedPane(page, ALPHA);
+  const fresh = await shownSession(page, second);
+  await expect(runningRow(window, login).locator('.sessions-title')).toHaveText('Earlier work');
+  await expect(runningRow(window, fresh).locator('.sessions-title')).toHaveText('New session');
+  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('idle');
+
+  // Working while a turn runs; needs you once it ends unseen; idle again once looked at.
+  await page.mouse.move(5, 5); // the top bar: no window is being looked at
+  await second.locator('textarea').fill('slow');
+  await second.locator('textarea').press('Enter');
+  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('working');
+  await expect(runningRow(window, fresh).locator('.sessions-title')).toHaveText('slow');
+  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('needs you', { timeout: 5000 });
+  await expect(runningRow(window, fresh)).toHaveClass(/is-attention/);
+  const { x, y } = await middleOf(second);
+  await page.mouse.move(x, y);
+  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('idle');
+
+  // The second window was used last: a click shows the session there; its own runs on.
+  await runningRow(window, login).click();
+  await expect.poll(() => shownSession(page, second)).toBe(login);
+  await expect(second.locator('.omp-user')).toContainText('earlier question');
+  expect(await shownSession(page, first)).toBe(login);
+  await expect(runningRow(window, fresh)).toBeVisible();
+  expect((await daemonSessions(page)).find((/** @type {any} */ s) => s.id === fresh).status).toBe('ready');
+});
+
+test('a session dragged onto the middle of an omp window is shown there', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  const target = await startedPane(page, ALPHA);
+  const before = await shownSession(page, target);
+  await dragTo(page, row(window, 'Zebra cleanup'), await middleOf(target));
+  await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
+  await expect(page.locator('.drop-indicator')).toContainText('Show here');
+  await page.mouse.up();
+  await expect(page.locator('.widget[data-widget="omp"]'), 'no window added').toHaveCount(1);
+  await expect(target.locator('.omp-user')).toContainText('earlier question');
+  await expect.poll(() => shownSession(page, target)).not.toBe(before);
+
+  // A running one too: the window goes back to the session it showed first.
+  await dragTo(page, runningRow(window, before), await middleOf(target));
+  await page.mouse.up();
+  await expect.poll(() => shownSession(page, target)).toBe(before);
+  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(1);
 });
 
 test('the directory menu narrows the list to one directory, with search, sort and the archive, and is kept per window', async ({ page }) => {

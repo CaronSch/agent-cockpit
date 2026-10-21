@@ -23,6 +23,8 @@
  *   the answer bolds the first quoted line; a follow-up (`recordId`) appends a turn to its
  *   topic and answers from the topic's quote. A question containing "slow" waits 1.5 s, one
  *   containing "fail" fails as a provider error would.
+ * - logins: the default model's provider, `fake`, is not logged in (a `login` to it stays
+ *   under way); `keyed` is, and its `keyed-model` can be picked from the models
  * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
  * session already has a name; the fake never writes to a resumed file.
  * Other sessions keep a journal in `$TMPDIR/fake-omp-sessions/`, written as omp does: a new
@@ -371,7 +373,7 @@ lines.on('line', (line) => {
     case 'get_messages':
       return ok(id, type, { messages });
     case 'get_available_models':
-      return ok(id, type, { models: [model, { provider: 'fake', id: 'fake-large', name: 'Fake Large' }] });
+      return ok(id, type, { models: [model, { provider: 'fake', id: 'fake-large', name: 'Fake Large' }, { provider: 'keyed', id: 'keyed-model', name: 'Keyed Model' }] });
     case 'set_model':
       model = { provider: cmd.provider, id: cmd.modelId, name: cmd.modelId };
       out({ type: 'model_changed' }); // no payload, emitted while the model is set
@@ -383,7 +385,12 @@ lines.on('line', (line) => {
       out({ type: 'thinking_level_changed', thinkingLevel });
       return ok(id, type);
     case 'get_login_providers':
-      return ok(id, type, { providers: [{ id: 'fake', name: 'Fake Provider', available: true, authenticated: false }] });
+      return ok(id, type, {
+        providers: [
+          { id: 'fake', name: 'Fake Provider', available: true, authenticated: false },
+          { id: 'keyed', name: 'Keyed Provider', available: true, authenticated: true },
+        ],
+      });
     case 'bash': {
       // Like omp, answer only when the command finishes; "sleep" makes it take a while.
       const result = { exitCode: 0, cancelled: false, workingDir: process.cwd(), output: 'hi\n', truncated: false, totalLines: 2, totalBytes: 3, outputLines: 2, outputBytes: 3 };

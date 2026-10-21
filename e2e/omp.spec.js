@@ -598,10 +598,27 @@ test('the toolbar menus open under their button, close on Esc or a click outside
   await expect(thinkingBtn).toHaveText(/high/);
 });
 
+test('Login is in the toolbar only while the session’s model needs it, and always in More', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const toolbar = pane.locator('.omp-toolbar');
+  const login = toolbar.getByRole('button', { name: 'Login', exact: true });
+  await expect(login, 'the fake model’s provider is not logged in').toBeVisible();
+
+  await pane.getByRole('button', { name: 'Fake Model', exact: true }).click();
+  await pane.locator('.omp-menu:popover-open').getByRole('button', { name: /Keyed Model/ }).click();
+  await expect(pane.getByRole('button', { name: 'keyed-model', exact: true })).toBeVisible();
+  await expect(login, 'its provider is logged in').toBeHidden();
+
+  await pane.getByRole('button', { name: 'More actions' }).click();
+  await pane.locator('.omp-more').getByRole('button', { name: 'Login', exact: true }).click();
+  await expect(pane.locator('.omp-menu:popover-open').getByRole('button', { name: /Keyed Provider/ })).toContainText('logged in');
+});
+
 test('a login under way is shown from the stream, so a reload still shows it', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
-  await pane.getByRole('button', { name: 'Login', exact: true }).click();
+  await pane.locator('.omp-toolbar').getByRole('button', { name: 'Login', exact: true }).click();
   await pane.locator('.omp-menu:popover-open').getByRole('button', { name: /Fake Provider/ }).click();
   await expect(pane.getByText('Logging in to fake…')).toBeVisible();
   await page.reload();
@@ -896,6 +913,7 @@ test('Config can show only prompts and final replies, per pane, across a reload,
   await expect(pane.locator('.omp-thinking')).toHaveCount(1);
 
   const only = pane.locator('.omp-settings:popover-open').getByRole('checkbox', { name: 'Only prompts and responses' });
+  await pane.getByRole('button', { name: 'More actions' }).click();
   await pane.getByRole('button', { name: 'Config' }).click();
   await expect(only).not.toBeChecked();
   await only.check();
@@ -928,6 +946,7 @@ test('Config can show only prompts and final replies, per pane, across a reload,
   await expect(pane.locator('.omp-thinking')).toHaveCount(0);
 
   // Switching it off brings back everything it hid.
+  await pane.getByRole('button', { name: 'More actions' }).click();
   await pane.getByRole('button', { name: 'Config' }).click();
   await expect(only).toBeChecked();
   await only.uncheck();
@@ -987,11 +1006,15 @@ test('two panes run separate sessions side by side', async ({ page }) => {
 test('Fork continues a copy of the conversation in a new pane, as a session of its own', async ({ page }) => {
   const workspace = await openWorkbench(page);
   const source = await startedPane(page);
+  const more = source.getByRole('button', { name: 'More actions' });
   const fork = source.getByRole('button', { name: 'Fork', exact: true });
+  await more.click();
   await expect(fork, 'omp has saved nothing yet').toBeDisabled();
+  await page.keyboard.press('Escape');
   await send(source, 'shared start');
   await expect(source.locator('.omp-assistant').last()).toContainText('You said: shared start');
 
+  await more.click();
   const forked = await paneAddedBy(page, () => fork.click());
   await expect(forked.locator('.omp-user')).toHaveText([/shared start$/]);
   await expect(forked.locator('.omp-assistant')).toHaveText([/You said: shared start/]);
@@ -1028,6 +1051,7 @@ test('windows only render: the daemon asks omp for the state and a fork’s hist
   await source.locator('.omp-menu:popover-open').getByRole('button', { name: 'high', exact: true }).click();
   await expect(thinking).toHaveText(/high/);
 
+  await source.getByRole('button', { name: 'More actions' }).click();
   const forked = await paneAddedBy(page, () => source.getByRole('button', { name: 'Fork', exact: true }).click());
   await expect(forked.locator('.omp-assistant')).toHaveText([/You said: shared start/]);
   await expect(forked.getByText('Fake Model')).toBeVisible();
@@ -1164,16 +1188,70 @@ test('while the agent works through its todo list, the toolbar shows how far it 
   await expect(progress, 'no turn, no progress').toBeHidden();
 });
 
-test('closing the window ends its omp session', async ({ page }) => {
+/** The daemon's view of session `id`. @param {Page} page @param {string} id */
+const daemonSession = async (page, id) => (await (await page.request.get('/api/sessions')).json()).sessions.find((/** @type {any} */ s) => s.id === id);
+
+/** Stops session `id`, as the page would (the daemon wants the page's Origin). @param {Page} page @param {string} id */
+const stopSession = (page, id) => page.evaluate((id) => fetch(`/api/sessions/${id}`, { method: 'DELETE' }).then(() => {}), id);
+
+test('closing the window leaves its omp session running', async ({ page }) => {
   const workspace = await openWorkbench(page);
   const pane = await startedPane(page);
   const sessionOf = async () => (await savedLayout(page.request, workspace))?.params?.session;
   await expect.poll(sessionOf).toBeTruthy();
   const session = await sessionOf();
+  /** @type {string[]} */
+  const ended = [];
+  page.on('request', (r) => {
+    if (r.method() === 'DELETE') ended.push(r.url());
+  });
   await pane.locator('.widget-close').click();
-  await expect
-    .poll(async () => (await (await page.request.get('/api/sessions')).json()).sessions.find((/** @type {any} */ s) => s.id === session)?.status)
-    .toBe('exited');
+  // Saved once the window is gone, so after anything closing it would have sent.
+  await expect.poll(() => savedLayout(page.request, workspace)).toBeNull();
+  expect(ended).toEqual([]);
+  expect((await daemonSession(page, session)).status).toBe('ready');
+  await stopSession(page, session);
+});
+
+test('New starts another session in the window, in the same directory, and the one before keeps running', async ({ page }) => {
+  const workspace = await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'first conversation');
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: first conversation');
+  const sessionOf = async () => (await savedParams(page, workspace, pane))?.session;
+  await expect.poll(sessionOf).toBeTruthy();
+  const before = await sessionOf();
+
+  await pane.getByRole('button', { name: 'New', exact: true }).click();
+  await expect(pane.locator('input')).toHaveValue(PROJECT);
+  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await expect(pane.getByText('Fake Model')).toBeVisible();
+  await expect.poll(sessionOf).not.toBe(before);
+  await expect(pane.getByText('first conversation')).toHaveCount(0);
+  expect((await daemonSession(page, before)).status).toBe('ready');
+  await stopSession(page, before);
+});
+
+test('End stops the session, asking first while a turn runs', async ({ page }) => {
+  const workspace = await openWorkbench(page);
+  const pane = await startedPane(page);
+  await expect.poll(async () => (await savedParams(page, workspace, pane))?.session).toBeTruthy();
+  const { session } = await savedParams(page, workspace, pane);
+  await send(pane, 'slow');
+  await expect(pane.getByText('working')).toBeVisible();
+  await pane.getByRole('button', { name: 'More actions' }).click();
+  await pane.getByRole('button', { name: 'End', exact: true }).click();
+  const ask = page.getByRole('alertdialog');
+  await expect(ask).toContainText('End the session anyway?');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(ask).toHaveCount(0);
+  expect((await daemonSession(page, session)).status).toBe('ready');
+
+  await pane.getByRole('button', { name: 'More actions' }).click();
+  await pane.getByRole('button', { name: 'End', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'End session' }).click();
+  await expect.poll(async () => (await daemonSession(page, session)).status).toBe('exited');
+  await expect(pane.locator('.omp-banner')).toContainText('omp exited');
 });
 
 test('Tab indents in the message box, Shift+Tab outdents, Cmd/Ctrl+Z undoes it; an @ list still takes Tab; Esc then Tab leaves', async ({ page }) => {
