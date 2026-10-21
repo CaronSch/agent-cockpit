@@ -282,6 +282,29 @@ test('the message box is set like scratchpad text and starts one line high, plac
   await expect.poll(lines).toBeCloseTo(2, 1);
 });
 
+test('a focused message box lifts its border instead of drawing the accent outline', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  const look = () =>
+    draft.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { outline: s.outlineStyle, border: s.borderTopColor };
+    });
+  const idle = await look();
+  await draft.focus();
+  const focused = await look();
+  const lifted = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('div'));
+    probe.style.color = 'var(--color-line-focus)';
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  expect(focused).toEqual({ outline: 'none', border: lifted });
+  expect(focused.border).not.toBe(idle.border);
+});
+
 test('status lines under a reply look like transcript notes', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
