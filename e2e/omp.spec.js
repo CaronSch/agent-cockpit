@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { E2E_STATE_DIR, newWorkspace, savedLayout, workbenchPath } from './daemon.js';
+import { E2E_STATE_DIR, newWorkspace, rpcAnswer, savedLayout, workbenchPath } from './daemon.js';
 import { composeAsk, composeFollowUp } from '../src/omp/message.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
@@ -510,8 +510,7 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
     const started = rpcSent(page, 'btw');
     await box.fill(question);
     await box.press('Enter');
-    const answered = await (await started).response();
-    return /** @type {string} */ (answered ? (await answered.json()).data?.record?.id : null);
+    return /** @type {string} */ ((await rpcAnswer(await started)).data?.record?.id);
   };
 
   // A stray click does not throw away an answer still coming; closing the popup stops it.
@@ -564,7 +563,7 @@ test('Ask takes follow-ups in the same topic, one at a time, and keeps the whole
   const first = rpcSent(page, 'btw');
   await box.fill('what does this mean?');
   await box.press('Enter');
-  const topic = (await (await (await first).response())?.json())?.data?.record?.id;
+  const topic = (await rpcAnswer(await first)).data?.record?.id;
   expect(topic).toEqual(expect.any(String));
   await expect(answers.nth(0).locator('strong')).toHaveText('hello');
   await expect(followUp).toBeFocused();

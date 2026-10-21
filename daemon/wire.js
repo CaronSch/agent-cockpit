@@ -18,9 +18,9 @@
  *                                      (`resume` continues a journal, `fork` starts a new session
  *                                      from a copy of one; either must be an existing file)
  *   DELETE /api/sessions/:id           → 204 (closes omp's stdin, kills it if it lingers)
- *   POST   /api/sessions/:id/rpc       omp command without `id` → the omp response frame, or
- *                                      202 { pending: true, id } when omp has not answered within
- *                                      the hold time; the response then arrives on the stream
+ *   POST   /api/sessions/:id/rpc       omp command without `id` → 202 { id }: the id the daemon gave
+ *                                      the command; omp's response frame, carrying it, arrives on
+ *                                      the stream
  *   POST   /api/sessions/:id/ui        omp `extension_ui_response` → 204
  *   GET    /api/sessions/:id/files?dir=path → DirListing: the folder `dir` names (relative to
  *                                      the session's directory, `~/…` or absolute), or 404

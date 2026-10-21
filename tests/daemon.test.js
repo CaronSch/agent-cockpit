@@ -12,7 +12,7 @@ import { createDaemonServer } from '../daemon/server.js';
 import { listDirectory } from '../daemon/files.js';
 import { loadToken } from '../daemon/token.js';
 import { HISTORY_COMMAND, SETUP_COMMANDS } from '../daemon/omp-session.js';
-/** @import { StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
+/** @import { RpcResponse, StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
 
 const ROOT = resolve(import.meta.dir, '..');
 const FAKE_OMP = join(ROOT, 'tests/fixtures/fake-omp.js');
@@ -95,6 +95,34 @@ async function waitForStatus(id, status) {
   throw new Error(`session ${id} never became ${status}`);
 }
 
+/**
+ * The first event in the daemon's log, already there or still to come, that `match` accepts.
+ * @param {(event: SessionEvent) => boolean} match @returns {Promise<SessionEvent>}
+ */
+function logged(match) {
+  const found = hub.since(0).find(match);
+  if (found) return Promise.resolve(found);
+  return new Promise((resolve) => {
+    const stop = hub.subscribe((event) => {
+      if (!match(event)) return;
+      stop();
+      resolve(event);
+    });
+  });
+}
+
+/**
+ * Sends `command` to session `id`: the daemon accepts it at once (202, with the id it gave
+ * the command), and omp's response arrives on the log.
+ * @param {string} id @param {Record<string, unknown>} command @returns {Promise<RpcResponse>}
+ */
+async function rpc(id, command) {
+  const res = await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: command });
+  assert.equal(res.status, 202);
+  const answer = await logged((e) => e.session === id && e.kind === 'frame' && e.frame.type === 'response' && e.frame.id === res.json.id);
+  return /** @type {RpcResponse} */ (answer.kind === 'frame' && answer.frame);
+}
+
 /** @param {StreamEvent[]} events @param {string} session @returns {SessionEvent[]} */
 const forSession = (events, session) =>
   /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.kind !== 'history' && e.session === session));
@@ -112,7 +140,6 @@ beforeAll(async () => {
     root: ROOT,
     config: { defaultCwd: cwd, home: cwd, scratchpadDir: join(cwd, 'state', 'scratchpads') },
     port: 0,
-    rpcHoldMs: 200,
   });
   port = /** @type {number} */ (server.port);
 });
@@ -261,10 +288,10 @@ describe('sessions', () => {
     const id = json.session.id;
     await waitForStatus(id, 'ready');
 
-    const state = await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'get_state', id: 'mine' } });
-    assert.equal(state.json.command, 'get_state');
-    assert.equal(state.json.data.model.id, 'fake-model');
-    assert.notEqual(state.json.id, 'mine', 'the daemon owns request ids');
+    const state = await rpc(id, { type: 'get_state', id: 'mine' });
+    assert.equal(state.command, 'get_state');
+    assert.equal(state.data.model.id, 'fake-model');
+    assert.notEqual(state.id, 'mine', 'the daemon owns request ids');
 
     await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'prompt', message: 'mystery garble' } });
     const { events } = await readStream({
@@ -299,15 +326,15 @@ describe('sessions', () => {
     assert.equal(stale.ids.length, first.ids.length);
   });
 
-  test('a command omp answers slowly frees the request and delivers the answer on the stream', async () => {
+  test('a command is accepted at once, and omp’s answer, however slow, arrives on the stream', async () => {
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
     const id = json.session.id;
     await waitForStatus(id, 'ready');
-    const started = Date.now();
     const res = await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'bash', command: 'sleep 1' } });
     assert.equal(res.status, 202);
-    assert.equal(res.json.pending, true);
-    assert.ok(Date.now() - started < 550, 'the request was released before omp answered');
+    assert.deepEqual(Object.keys(res.json), ['id']);
+    const answered = (/** @type {SessionEvent} */ e) => e.kind === 'frame' && e.frame.id === res.json.id;
+    assert.ok(!forSession(hub.since(0), id).some(answered), 'the request was released before omp answered');
     const { events } = await readStream({
       done: (all) => forSession(all, id).some((e) => e.kind === 'frame' && e.frame.id === res.json.id),
     });
@@ -381,8 +408,8 @@ describe('sessions', () => {
     const id = json.session.id;
     const ready = await waitForStatus(id, 'ready');
     assert.ok(ready.sessionFile && ready.sessionFile !== journal, 'the fork writes a journal of its own');
-    const copied = await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'get_messages' } });
-    const texts = copied.json.data.messages.map((/** @type {any} */ m) => m.content[0].text);
+    const copied = await rpc(id, { type: 'get_messages' });
+    const texts = copied.data.messages.map((/** @type {any} */ m) => m.content[0].text);
     assert.deepEqual(texts, ['fix the login bug', 'fixed it'], 'the conversation so far');
 
     await turn(id, 'now add tests');

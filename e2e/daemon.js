@@ -39,3 +39,31 @@ export async function savedLayout(request, workspace) {
   if (screens.length > 1) throw new Error(`workspace ${workspace} has ${screens.length} screens, not one`);
   return screens[0]?.tree ?? null;
 }
+
+/**
+ * omp's answer to the rpc the page sent as `request`. The daemon accepts a command with the
+ * id it gave it, and the answer arrives on the event stream, read here as a page reads it.
+ * @param {import('@playwright/test').Request} request @returns {Promise<any>}
+ */
+export async function rpcAnswer(request) {
+  const { id } = await (await /** @type {Promise<import('@playwright/test').Response>} */ (request.response())).json();
+  const session = decodeURIComponent(new URL(request.url()).pathname.split('/')[3]);
+  const stream = new AbortController();
+  const res = await fetch(`http://127.0.0.1:${E2E_PORT}/api/stream`, { headers: { cookie: `ac_token=${e2eToken()}` }, signal: stream.signal });
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for await (const bytes of /** @type {ReadableStream<Uint8Array>} */ (res.body)) {
+      buffer += decoder.decode(bytes, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = /** @type {string} */ (lines.pop());
+      for (const line of lines) {
+        const event = line.startsWith('data: ') ? JSON.parse(line.slice(6)) : null;
+        if (event?.session === session && event.kind === 'frame' && event.frame.type === 'response' && event.frame.id === id) return event.frame;
+      }
+    }
+  } finally {
+    stream.abort();
+  }
+  throw new Error(`the stream ended before omp answered ${id}`);
+}

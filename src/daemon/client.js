@@ -244,9 +244,8 @@ export function createDaemonClient(env = {}) {
   }
 
   /**
-   * omp's answer to a request the daemon stopped holding open (202 pending). It arrives on
-   * the stream like every frame, possibly already; the request fails if omp or the daemon
-   * goes away first.
+   * omp's answer to the command the daemon accepted as `id`. It arrives on the stream like
+   * every frame, possibly already; the request fails if omp or the daemon goes away first.
    * @param {string} session @param {string} id @returns {Promise<RpcResponse>}
    */
   function streamedResponse(session, id) {
@@ -362,8 +361,8 @@ export function createDaemonClient(env = {}) {
       await request(sessionPath(session), { method: 'DELETE' });
     },
     async rpc(session, command) {
-      const body = await request(`${sessionPath(session)}/rpc`, { method: 'POST', body: JSON.stringify(command) });
-      return body?.pending === true ? streamedResponse(session, body.id) : body;
+      const { id } = await request(`${sessionPath(session)}/rpc`, { method: 'POST', body: JSON.stringify(command) });
+      return streamedResponse(session, id);
     },
     async respondUi(session, response) {
       await request(`${sessionPath(session)}/ui`, { method: 'POST', body: JSON.stringify(response) });
