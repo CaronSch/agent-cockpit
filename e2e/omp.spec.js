@@ -890,6 +890,30 @@ test('dragging Send sends the message in a fork placed where it is dropped, and 
   await expect(home.locator('.omp-user')).toHaveText([/shared start$/, /stay here$/]);
 });
 
+test('a suggestion list open when Send is dragged into a fork closes as the box empties', async ({ page }) => {
+  const project = mkdtempSync(join(tmpdir(), 'ac-e2e-fork-mention-'));
+  writeFileSync(join(project, 'notes.md'), 'hi');
+  await openWorkbench(page);
+  const source = await startedPane(page, project);
+  await send(source, 'shared start');
+  await expect(source.locator('.omp-assistant').last()).toContainText('You said: shared start');
+  const draft = source.locator('textarea');
+  const list = source.locator('.omp-suggest');
+  await draft.pressSequentially('see @');
+  await expect(list.getByRole('option')).toHaveText(['notes.md']);
+  const grid = await page.locator('#grid').boundingBox();
+  const button = await source.getByRole('button', { name: 'Send', exact: true }).boundingBox();
+  if (!grid || !button) throw new Error('not laid out');
+  await paneAddedBy(page, async () => {
+    await page.mouse.move(button.x + button.width / 2, button.y + button.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
+    await page.mouse.up();
+  });
+  await expect(draft).toHaveValue('');
+  await expect(list).toBeHidden();
+});
+
 test('the window’s top bar names its conversation, and the name is saved with the window', async ({ page }) => {
   const workspace = await openWorkbench(page);
   const pane = await startedPane(page);

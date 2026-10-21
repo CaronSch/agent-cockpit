@@ -813,7 +813,9 @@ function createPane(body, ctx, daemon) {
       ctx.dragWidget('omp', { fork: m.sessionFile, cwd: m.cwd, session: null, sessionFile: null, name: params().name, prompt: outgoing.message || null }, e, {
         label: line ? `Fork: ${line.length > 40 ? `${line.slice(0, 39)}…` : line}` : 'Fork',
         onEnd: ({ dropped }) => {
-          if (dropped) outgoing.take();
+          if (!dropped) return;
+          outgoing.take();
+          hideSuggestions();
         },
       });
     });
