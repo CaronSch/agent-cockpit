@@ -8,8 +8,8 @@
  * omp defaults to the `omp` on PATH (install it from https://omp.sh). `--cwd` is the
  * directory a new omp window suggests, the home directory unless given.
  * Environment: COCKPIT_PORT, COCKPIT_OMP, COCKPIT_CWD, COCKPIT_STATE_DIR (default ~/.cockpit; holds the
- * access token, scratchpads/, attachments/, workspaces/ and archive/sessions/, the archived
- * omp sessions), COCKPIT_OMP_SESSIONS (omp's session journals; default
+ * access token, unread.json (which conversations have news not read yet), scratchpads/,
+ * attachments/, workspaces/ and archive/sessions/, the archived omp sessions), COCKPIT_OMP_SESSIONS (omp's session journals; default
  * `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
  */
 import { homedir } from 'node:os';
@@ -22,6 +22,7 @@ import { createScratchpads } from './scratchpad.js';
 import { createDaemonServer } from './server.js';
 import { createWorkspaces } from './workspace.js';
 import { loadToken } from './token.js';
+import { loadUnread } from './unread.js';
 
 const ROOT = resolve(import.meta.dir, '..');
 const VERSION_TIMEOUT_MS = 10_000;
@@ -47,7 +48,11 @@ const ompSessions =
   process.env.COCKPIT_OMP_SESSIONS ?? join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.omp', 'agent'), 'sessions');
 
 const token = await loadToken(stateDir);
-const hub = createHub({ ompPath });
+const unread = await loadUnread({ file: join(stateDir, 'unread.json') }).catch((err) => {
+  console.error(`[daemon] ${err instanceof Error ? err.message : err}`);
+  process.exit(1);
+});
+const hub = createHub({ ompPath, unread });
 const scratchpadDir = join(stateDir, 'scratchpads');
 /** @type {ReturnType<typeof createDaemonServer>} */
 let server;
@@ -58,6 +63,7 @@ try {
     scratchpads: createScratchpads({ dir: scratchpadDir }),
     attachments: createAttachments({ dir: join(stateDir, 'attachments') }),
     workspaces: createWorkspaces({ dir: join(stateDir, 'workspaces') }),
+    unread,
     token,
     root: ROOT,
     port,

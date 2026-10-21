@@ -13,6 +13,10 @@
  *   POST   /api/history/restore        { file } → { file }: an archived journal moved back where it was,
  *                                      409 if something is there now; both are 400 for a path that is
  *                                      not a journal they list, 404 for one that is gone
+ *   PUT    /api/unread/:ompId          → 204: the user marked the conversation unread (see `unread.js`)
+ *   POST   /api/unread/:ompId/read     { at } → 204: the user read it as it was at `at` (daemon
+ *                                      time: the `since` they were shown); a mark made after
+ *                                      `at` stays. Both are 404 for an id that is not one
  *   GET    /api/sessions               → { sessions: SessionMeta[] }
  *   POST   /api/sessions               { cwd, resume? | fork? } → 201 { session: SessionMeta }
  *                                      (`cwd` relative to home, `~/…` or absolute; `resume`
@@ -23,8 +27,6 @@
  *   DELETE /api/sessions/:id           → 204: the user stopped the session (closes omp's stdin,
  *                                      kills it if it lingers); nothing else ends one but the
  *                                      daemon exiting
- *   POST   /api/sessions/:id/seen      { at } → 204: the user has seen what the session did up to
- *                                      `at` (daemon time; see SessionMeta `seenAt`)
  *   POST   /api/sessions/:id/rpc       omp command without `id` → 202 { id }: the id the daemon gave
  *                                      the command; omp's response frame, carrying it, arrives on
  *                                      the stream
@@ -51,11 +53,13 @@
  *
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
  * `<bootId>:<seq>`, so a reconnect resumes after the last event it saw; the first message
- * on every connection is a `hello` carrying the current boot id, session list and UI version.
- * `scratchpad` and `history` events carry no id and are not replayed: a reconnecting page reads
- * GET /api/scratchpads/:id and GET /api/history instead.
+ * on every connection is a `hello` carrying the current boot id, session list, unread
+ * conversations and UI version. `scratchpad`, `history` and `unread` events carry no id and are
+ * not replayed: a reconnecting page reads GET /api/scratchpads/:id and GET /api/history instead,
+ * and its `hello` carries the unread conversations.
  */
 /** @import { GridNode } from '../src/layout/grid-model.js' */
+/** @import { Unread } from './unread.js' */
 
 /** @typedef {'starting' | 'ready' | 'exited' | 'failed'} SessionStatus */
 
@@ -63,9 +67,9 @@
  * One omp process the daemon launched, started from the journal `resume` (continuing it) or
  * `fork` (a new session copied from it), or from nothing. `sessionFile` is the journal it
  * writes, learned from omp's `get_state` answers (the resumed file until then); it changes
- * on /new or /fork. `seenAt` is the daemon time up to which the user has seen what it did,
- * in whichever window: a final response or question after it needs their attention
- * (src/omp/activity.js). It starts at `startedAt`.
+ * on /new or /fork. `ompId` is omp's id for the conversation it holds (`get_state`'s
+ * `sessionId`, its journal header's `id`: PastSession `id`), which names it in the unread
+ * marks (`unread.js`); null until omp has said.
  * @typedef {{
  *   id: string,
  *   cwd: string,
@@ -77,7 +81,7 @@
  *   exitCode: number | null,
  *   error: string | null,
  *   startedAt: number,
- *   seenAt: number,
+ *   ompId: string | null,
  * }} SessionMeta
  */
 
@@ -113,8 +117,9 @@
 
 /**
  * `ui` is the version of the UI files being served (see `ui-files.js`): a page that loaded
- * other files is running older code than the daemon now serves.
- * @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[], ui: string }} HelloEvent
+ * other files is running older code than the daemon now serves. `unread` holds the
+ * conversations with news their user has not read: when each became unread, by omp id.
+ * @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[], unread: Unread, ui: string }} HelloEvent
  */
 
 /** A scratchpad's text; `rev` names this exact text (a hash of it). @typedef {{ text: string, rev: string }} Scratchpad */
@@ -123,7 +128,9 @@
 
 /** Sent to every page after past sessions changed (see `history.js` `watch`). @typedef {{ kind: 'history' }} HistoryEvent */
 
-/** @typedef {HelloEvent | ScratchpadEvent | HistoryEvent | SessionEvent} StreamEvent */
+/** Sent to every page after a conversation was marked read or unread, with all the marks. @typedef {{ kind: 'unread', unread: Unread }} UnreadEvent */
+
+/** @typedef {HelloEvent | ScratchpadEvent | HistoryEvent | UnreadEvent | SessionEvent} StreamEvent */
 
 /** @typedef {{ defaultCwd: string, home: string, scratchpadDir: string }} DaemonConfig */
 

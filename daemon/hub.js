@@ -7,11 +7,18 @@
  *
  * A session runs until the user stops it or the daemon exits: no window owns one, so closing
  * or switching a window never ends it.
+ *
+ * Whenever a session waits on its user (its final response, or a question: omp/activity.js),
+ * its conversation becomes unread (`unread.js`) until the user reads it, whether or not a
+ * window was open on it.
  */
 import { randomBytes } from 'node:crypto';
 import { launchOmp } from './omp-session.js';
+import { OMP_ID } from './unread.js';
+import { awaitsUser } from '../src/omp/activity.js';
 /** @import { SessionEvent, SessionMeta } from './wire.js' */
 /** @import { OmpSession, SessionEventBody } from './omp-session.js' */
+/** @import { UnreadStore } from './unread.js' */
 
 /**
  * @typedef {{
@@ -27,10 +34,10 @@ import { launchOmp } from './omp-session.js';
  */
 
 /**
- * @param {{ ompPath: string, now?: () => number, launch?: typeof launchOmp }} options
+ * @param {{ ompPath: string, unread: Pick<UnreadStore, 'awaited'>, now?: () => number, launch?: typeof launchOmp }} options
  * @returns {Hub}
  */
-export function createHub({ ompPath, now = Date.now, launch = launchOmp }) {
+export function createHub({ ompPath, unread, now = Date.now, launch = launchOmp }) {
   const bootId = randomBytes(6).toString('hex');
   /** @type {SessionEvent[]} */
   const log = [];
@@ -44,6 +51,8 @@ export function createHub({ ompPath, now = Date.now, launch = launchOmp }) {
     const event = /** @type {SessionEvent} */ ({ ...body, seq: log.length + 1, at: now(), session });
     log.push(event);
     for (const fn of listeners) fn(event);
+    const ompId = sessions.get(session)?.meta().ompId;
+    if (ompId && OMP_ID.test(ompId) && awaitsUser(event)) void unread.awaited(ompId, event.at);
   }
 
   return {

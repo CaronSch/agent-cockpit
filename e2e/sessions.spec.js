@@ -73,6 +73,12 @@ test.beforeEach(async ({ page }) => {
   workspace = newWorkspace();
   await page.goto(workbenchPath(workspace));
   await expect(page.locator('.screen-switch')).toBeVisible(); // the app has started
+  // Unread marks outlive sessions: an earlier test's must not show in this one.
+  await page.evaluate(async (ids) => {
+    for (const id of ids) {
+      await fetch(`/api/unread/${id}/read`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ at: Number.MAX_SAFE_INTEGER }) });
+    }
+  }, JOURNALS.map((j) => j.name));
 });
 
 test.afterEach(async ({ page }) => {
@@ -352,14 +358,14 @@ test('Running lists every running session with how it is doing; a click shows it
   await expect(runningRow(window, fresh).locator('.sessions-title')).toHaveText('New session');
   await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('idle');
 
-  // Working while a turn runs; needs you once it ends unseen; idle again once looked at.
+  // Working while a turn runs; done (and unread) once it ends unread; idle again once looked at.
   await page.mouse.move(5, 5); // the top bar: no window is being looked at
   await second.locator('textarea').fill('slow');
   await second.locator('textarea').press('Enter');
   await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('working');
   await expect(runningRow(window, fresh).locator('.sessions-title')).toHaveText('slow');
-  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('needs you', { timeout: 5000 });
-  await expect(runningRow(window, fresh)).toHaveClass(/is-attention/);
+  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('done', { timeout: 5000 });
+  await expect(runningRow(window, fresh)).toHaveClass(/is-unread/);
   const { x, y } = await middleOf(second);
   await page.mouse.move(x, y);
   await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('idle');
@@ -435,4 +441,142 @@ test('the directory menu narrows the list to one directory, with search, sort an
   await expect(titles(first)).toHaveText(['Fix the login flow']);
   await expect(other.getByRole('combobox', { name: 'Directory' })).toHaveValue(BRAVO);
   await expect(titles(other)).toHaveText(['deploy staging']);
+});
+
+/** A finished turn in `pane`, sent from the keyboard while the pointer is on the top bar, outside every window. @param {Page} page @param {Locator} pane @param {string} text */
+async function turnWhileAway(page, pane, text) {
+  await page.mouse.move(5, 5);
+  await pane.locator('textarea').fill(text);
+  await pane.locator('textarea').press('Enter');
+  await expect(pane.locator('.omp-assistant').last()).toContainText(text);
+}
+
+test('a turn that ends while nobody looks stays unread, across reloads and after the session stops, until it is read', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await window.getByRole('combobox', { name: 'Directory' }).selectOption(BRAVO); // only this test's sessions
+  await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  const pane = page.locator('.widget[data-widget="omp"]');
+  const session = await shownSession(page, pane);
+  await expect(window.locator('.widget-label')).toBeHidden();
+
+  await turnWhileAway(page, pane, 'hello');
+  const running = runningRow(window, session);
+  await expect(running).toHaveClass(/is-unread/);
+  await expect(running.locator('.sessions-state')).toHaveText('done');
+  await expect(running.getByRole('img', { name: 'Unread' })).toBeVisible();
+  await expect(window.locator('.widget-label')).toHaveText('1 unread');
+  await expect(pane).toHaveClass(/is-unread/);
+
+  await page.reload();
+  await expect(running).toHaveClass(/is-unread/);
+  await expect(pane).toHaveClass(/is-unread/);
+
+  // Stopped, it is a past session, still unread: blue dot, bold title.
+  await running.getByRole('button', { name: 'Stop' }).click();
+  const past = row(window, 'deploy staging');
+  await expect(past).toHaveClass(/is-unread/);
+  await expect(past.locator('.sessions-title')).toHaveCSS('font-weight', '600');
+  await expect(window.locator('.widget-label')).toHaveText('1 unread');
+  await page.reload();
+  await expect(past).toHaveClass(/is-unread/);
+
+  // Archived, it keeps the mark; restored, it still has it.
+  await past.getByRole('button', { name: 'Archive' }).click();
+  await window.getByRole('button', { name: 'Archived' }).click();
+  await expect(past).toHaveClass(/is-unread/);
+  await past.getByRole('button', { name: 'Restore' }).click();
+  await window.getByRole('button', { name: 'Archived' }).click();
+  await expect(past).toHaveClass(/is-unread/);
+
+  // Showing it from Sessions reads it.
+  await past.getByRole('button', { name: 'Resume' }).click();
+  await expect(past).toHaveCount(0); // listed under Running again
+  await expect.poll(() => shownSession(page, pane)).not.toBe(session);
+  const again = runningRow(window, await shownSession(page, pane));
+  await expect(again).toBeVisible();
+  await expect(again).not.toHaveClass(/is-unread/);
+  await expect(pane).not.toHaveClass(/is-unread/);
+  await expect(window.locator('.widget-label')).toBeHidden();
+});
+
+test('reading a session in its omp window clears its mark in Sessions', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  const pane = page.locator('.widget[data-widget="omp"]');
+  const running = runningRow(window, await shownSession(page, pane));
+  await turnWhileAway(page, pane, 'hello');
+  await expect(running).toHaveClass(/is-unread/);
+  const { x, y } = await middleOf(pane);
+  await page.mouse.move(x, y);
+  await expect(pane).not.toHaveClass(/is-unread/);
+  await expect(running).not.toHaveClass(/is-unread/);
+  await expect(running.locator('.sessions-state')).toHaveText('idle');
+  await page.reload();
+  await expect(running).toBeVisible();
+  await expect(running).not.toHaveClass(/is-unread/);
+});
+
+test('a row’s menu, from a right-click or its ⋯ button, marks a session read or unread beside its other actions', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA); // only this test's sessions
+  const menu = page.getByRole('menu');
+  const zebra = row(window, 'Zebra cleanup');
+  await zebra.click({ button: 'right' });
+  await expect(menu.getByRole('menuitem')).toHaveText(['Resume', 'Mark as unread', 'Archive']);
+  await expect(menu.getByRole('menuitem').first()).toBeFocused();
+  await menu.getByRole('menuitem', { name: 'Mark as unread' }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(zebra).toHaveClass(/is-unread/);
+  await expect(window.locator('.widget-label')).toHaveText('1 unread');
+
+  await zebra.hover();
+  await zebra.getByRole('button', { name: 'More actions' }).click();
+  await expect(menu.getByRole('menuitem')).toHaveText(['Resume', 'Mark as read', 'Archive']);
+  await menu.getByRole('menuitem', { name: 'Mark as read' }).click();
+  await expect(zebra).not.toHaveClass(/is-unread/);
+
+  // The menu's Archive is the row's.
+  await zebra.click({ button: 'right' });
+  await menu.getByRole('menuitem', { name: 'Archive' }).click();
+  await expect(titles(window)).toHaveText(['Fix the login flow']);
+  await window.getByRole('button', { name: 'Archived' }).click();
+  await zebra.click({ button: 'right' });
+  await expect(menu.getByRole('menuitem')).toHaveText(['Mark as unread', 'Restore']);
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+});
+
+test('from the keyboard, Shift+F10 opens a running row’s menu; Mark as unread lights its window, which the pointer resting there does not clear', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await row(window, 'Zebra cleanup').getByRole('button', { name: 'Resume' }).click();
+  const pane = page.locator('.widget[data-widget="omp"]');
+  const running = runningRow(window, await shownSession(page, pane));
+  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  const { x, y } = await middleOf(pane);
+  await page.mouse.move(x, y); // looking at the window
+
+  const menu = page.getByRole('menu');
+  await running.focus();
+  await page.keyboard.press('Shift+F10');
+  await expect(menu.getByRole('menuitem')).toHaveText(['Show', 'Mark as unread', 'Stop']);
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(running, 'Esc gives focus back to the row').toBeFocused();
+
+  await page.keyboard.press('ContextMenu');
+  await expect(menu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Mark as unread' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(running).toHaveClass(/is-unread/);
+  await expect(running, 'focus is back on the row').toBeFocused();
+  await expect(pane).toHaveClass(/is-unread/);
+  // The pointer has been resting on the window all along: that is not reading the mark.
+  await settle(page);
+  await expect(pane).toHaveClass(/is-unread/);
+  await expect(running).toHaveClass(/is-unread/);
+  // Moving it there again is.
+  await page.mouse.move(x + 10, y + 10);
+  await expect(pane).not.toHaveClass(/is-unread/);
+  await expect(running).not.toHaveClass(/is-unread/);
 });

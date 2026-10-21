@@ -65,9 +65,10 @@ Planned capabilities:
   omp pane shows), saved with the layout. **Sessions belong to the daemon, not to
   windows:** a window only shows one, two windows may show the same one, and
   switching or closing a window never ends it; it runs until the user stops it
-  (End in the omp pane, Stop in Sessions) or the daemon exits. What the user has
-  seen of a session (`seenAt`) is kept with it in the daemon, so every window
-  agrees on what needs attention. **User data lives with the daemon**,
+  (End in the omp pane, Stop in Sessions) or the daemon exits. Which conversations
+  are unread is the daemon's too (`daemon/unread.js`, keyed by omp's conversation
+  id, kept in `~/.cockpit/unread.json`), so every window and page agrees on what
+  needs attention, and a mark outlives the session. **User data lives with the daemon**,
   not in the layout: anything that must outlive a window, a browser profile or
   a port change (the scratchpad's notes) is a file in the state directory
   (`~/.cockpit`). Closing a window must never delete it.
@@ -154,13 +155,17 @@ What runs today:
   reads with the prompt. A pane whose
   agent finished its turn (or asks something) while its user was not looking
   gets an electric-blue border until it is hovered, scrolled, clicked or typed
-  in. Each pane's Config menu holds its own settings (saved with the window);
+  in: its session is unread, for every window and page, across reloads and daemon
+  restarts, and after it stops, until it is read there or shown from Sessions. A
+  session marked unread from Sessions lights its windows too, and waits for a fresh
+  hover, scroll, click or keystroke there (a pointer already resting on the window
+  does not read it). Each pane's Config menu holds its own settings (saved with the window);
   the first shows only prompts and final responses, hiding thinking, tool calls
   and the messages in between, with one "Working…" line while a turn runs.
 - The Sessions window: first the daemon's **running** sessions (whatever screen
   shows them, or none), newest first, each with how it is doing (starting,
-  working, idle, or *needs you*: it finished or asks something nobody has looked
-  at) and **Stop** (asking first while a turn runs); then every past omp
+  working, idle, *done*: it finished and nobody has read it, or *needs you*: it asks
+  a question or an approval) and **Stop** (asking first while a turn runs); then every past omp
   conversation (read from omp's session files) but those a running session
   writes, which are listed under Running only, searchable across titles,
   directories and prompts, and sortable. A click on a session (or Resume, or
@@ -180,7 +185,12 @@ What runs today:
   own resume offers it; the **Archived** toggle lists archived sessions (searchable and
   sortable the same way), each with **Restore**, which moves it back and never replaces a
   file that is there now. A running session cannot be archived. Nothing is
-  ever deleted: there is no delete.
+  ever deleted: there is no delete. An unread session (running, past or archived, which
+  keeps its mark) has a blue dot and a bold title, and the window's top bar counts the
+  unread ones it lists; showing a session from here reads it. Right-click on a row, its
+  **⋯** button, or Shift+F10 / the ContextMenu key on a focused row opens its menu
+  (`src/ui/context-menu.js`, a popover the arrow keys move through): **Mark as
+  unread** or **Mark as read**, with Show / Resume and Stop / Archive / Restore.
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
   Markdown files in `~/.cockpit/scratchpads/`; pasted or dropped
@@ -345,7 +355,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/neighbors.js` — Geometric neighbour lookup for keyboard moves (Alt+Shift+Arrow).
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
-- `src/omp/activity.js` — Which omp events turn an omp window "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
+- `src/omp/activity.js` — Which omp events make a session "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
 - `src/omp/composer.js` — The omp pane's message box: a draft that starts one line high and grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, pasted text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/file-mention.js` — Paths typed in the omp pane, as `@` file mentions in its draft or plainly in its Directory field: the path being typed at the caret, the folder entries that match it, and the text that completes it, kept free of the DOM so they can be tested.
@@ -372,6 +382,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
 - `src/ui/click-focus.js` — Click-to-focus, as in a terminal: a plain click on a window's own surface puts the caret at the end of its main text box, while clicks on controls, in boxes of their own, and those that end a text selection do what they did before.
 - `src/ui/confirm.js` — Asking before an action that cannot be undone: a small popover beside the button that asked for it, saying what will happen, with the action and Cancel (Esc or a click elsewhere cancel too).
+- `src/ui/context-menu.js` — A small menu of actions on one thing, as a right-click, the ContextMenu key, Shift+F10 or a ⋯ button opens it: a native popover at the pointer or beside the control, whose items the arrow keys move between; Enter or a click runs one, and Esc or a click elsewhere closes it.
 - `src/ui/dom.js` — Element construction helpers: elements, buttons that never submit a form, and file-drag checks.
 - `src/ui/format.js` — Text formatters shared across the UI: error messages, home-relative paths and JSON dumps, with no DOM.
 - `src/ui/indent.js` — Tab and Shift+Tab indent and outdent text in a textarea, as in a code editor; Esc then Tab leaves the field instead, so keyboard users are never trapped in it.
@@ -397,6 +408,7 @@ particular, move a capability into "Current state" when it ships.
 - `daemon/server.js` — HTTP face of the daemon: the workbench's static files, the JSON API and the event stream (routes in `wire.js`), all behind the loopback guard.
 - `daemon/token.js` — The daemon's access token: random, created once, kept owner-only in the state directory so a browser stays signed in across daemon restarts.
 - `daemon/ui-files.js` — The files that make up the browser UI: which ones the daemon serves, and a version that changes whenever any of them does, so an open page can tell it is running older code.
+- `daemon/unread.js` — Which omp conversations have news their user has not read: kept in one small file in the state directory, so a mark outlives windows, browsers, daemon restarts and the session itself (a stopped session is a past one, still unread).
 - `daemon/wire.js` — Wire contract between the daemon and the browser: session metadata, stream events and HTTP payloads.
 - `daemon/workspace.js` — Workspaces: the screens of each one (a layout tree per browser window), kept by the daemon so a layout outlives a browser profile and an address change.
 
@@ -420,6 +432,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/sessions-running.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/sessions-running.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/unread.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/unread.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->

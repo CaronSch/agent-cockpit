@@ -11,6 +11,7 @@ import { createWorkspaces } from '../daemon/workspace.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { listDirectory } from '../daemon/files.js';
 import { loadToken } from '../daemon/token.js';
+import { loadUnread } from '../daemon/unread.js';
 import { HISTORY_COMMAND, SETUP_COMMANDS } from '../daemon/omp-session.js';
 /** @import { RpcResponse, StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
 
@@ -22,6 +23,8 @@ const TOKEN = 'a'.repeat(64);
 let server;
 /** @type {ReturnType<typeof createHub>} */
 let hub;
+/** @type {import('../daemon/unread.js').UnreadStore} */
+let unread;
 let port = 0;
 let cwd = '';
 
@@ -53,17 +56,18 @@ async function call({ method = 'GET', path, headers = {}, body, raw, auth = true
 /**
  * Connects to the event stream as a page does (resuming after `lastEventId`, if given). Once
  * it resolves, the daemon sends this connection everything new, so whatever happens next is
- * on it; `until` reads until `done` holds.
- * @param {{ lastEventId?: string }} [options]
+ * on it; `until` reads until `done` holds. `daemon` is the port of a daemon other than the
+ * suite's.
+ * @param {{ lastEventId?: string, daemon?: number }} [options]
  */
-async function openStream({ lastEventId } = {}) {
+async function openStream({ lastEventId, daemon = port } = {}) {
   /** @type {StreamEvent[]} */
   const events = [];
   /** @type {string[]} */
   const ids = [];
   const headers = { cookie: `ac_token=${TOKEN}`, ...(lastEventId ? { 'last-event-id': lastEventId } : {}) };
   const connection = new AbortController();
-  const res = await fetch(`http://127.0.0.1:${port}/api/stream`, { headers, signal: connection.signal });
+  const res = await fetch(`http://127.0.0.1:${daemon}/api/stream`, { headers, signal: connection.signal });
   return {
     /** @param {(events: StreamEvent[], ids: string[]) => boolean} done @returns {Promise<{ events: StreamEvent[], ids: string[] }>} */
     async until(done) {
@@ -133,13 +137,15 @@ async function rpc(id, command) {
 
 /** @param {StreamEvent[]} events @param {string} session @returns {SessionEvent[]} */
 const forSession = (events, session) =>
-  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.kind !== 'history' && e.session === session));
+  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.kind !== 'history' && e.kind !== 'unread' && e.session === session));
 
 beforeAll(async () => {
   cwd = await mkdtemp(join(tmpdir(), 'ac-daemon-test-'));
-  hub = createHub({ ompPath: FAKE_OMP });
+  unread = await loadUnread({ file: join(cwd, 'state', 'unread.json') });
+  hub = createHub({ ompPath: FAKE_OMP, unread });
   server = createDaemonServer({
     hub,
+    unread,
     history: createHistory({ root: join(cwd, 'omp-sessions'), archive: join(cwd, 'state', 'archive', 'sessions') }),
     scratchpads: createScratchpads({ dir: join(cwd, 'state', 'scratchpads') }),
     attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
@@ -412,20 +418,16 @@ describe('sessions', () => {
     await call({ method: 'DELETE', path: `/api/sessions/${after.json.session.id}` });
   });
 
-  test('what the user has seen of a session is kept with it, for every window, and only moves forward', async () => {
-    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
-    const id = json.session.id;
-    assert.equal(json.session.seenAt, json.session.startedAt, 'nothing to see before it started');
-    await waitForStatus(id, 'ready');
-    const at = json.session.startedAt + 1;
-    assert.equal((await call({ method: 'POST', path: `/api/sessions/${id}/seen`, body: { at } })).status, 204);
-    const seen = await logged((e) => e.session === id && e.kind === 'session' && e.meta.seenAt === at);
-    assert.ok(seen, 'announced on the stream');
-    await call({ method: 'POST', path: `/api/sessions/${id}/seen`, body: { at: at - 1 } });
-    assert.equal(hub.get(id)?.meta().seenAt, at);
-    assert.equal((await call({ method: 'POST', path: `/api/sessions/${id}/seen`, body: { at: 'later' } })).status, 400);
-    assert.equal((await call({ method: 'POST', path: '/api/sessions/nope/seen', body: { at } })).status, 404);
-    await call({ method: 'DELETE', path: `/api/sessions/${id}` });
+  test('a resumed session is named by its journal’s omp id, a new one by the id omp gives it', async () => {
+    const journal = join(cwd, 'named.jsonl');
+    await Bun.write(journal, `${JSON.stringify({ type: 'session', version: 3, id: 'conv-named', timestamp: '2026-10-01T10:00:00.000Z', cwd })}\n`);
+    const resumed = (await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } })).json.session;
+    assert.equal(resumed.ompId, null, 'unknown until omp says');
+    assert.equal((await waitForStatus(resumed.id, 'ready')).ompId, 'conv-named');
+    const fresh = (await call({ method: 'POST', path: '/api/sessions', body: { cwd } })).json.session;
+    assert.match(String((await waitForStatus(fresh.id, 'ready')).ompId), /^[\w-]+$/);
+    await call({ method: 'DELETE', path: `/api/sessions/${resumed.id}` });
+    await call({ method: 'DELETE', path: `/api/sessions/${fresh.id}` });
   });
 
   test('a fork runs a new session on a copy of the journal and leaves the journal alone', async () => {
@@ -519,7 +521,7 @@ describe('sessions', () => {
   });
 
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {
-    const missing = createHub({ ompPath: join(cwd, 'no-such-omp') });
+    const missing = createHub({ ompPath: join(cwd, 'no-such-omp'), unread });
     /** @type {Promise<void>} */
     const settled = new Promise((resolve) => missing.subscribe((e) => e.kind === 'session' && e.meta.status !== 'starting' && resolve()));
     const meta = missing.create({ cwd, resume: null, fork: null });
@@ -535,6 +537,93 @@ describe('sessions', () => {
     const res = await call({ method: 'POST', path: '/api/sessions', body: { cwd: join(cwd, 'missing') } });
     assert.equal(res.status, 400);
     assert.equal(hub.list().length, before);
+  });
+});
+
+describe('unread conversations', () => {
+  /** A ready session on a journal of its own, named `ompId`. @param {string} ompId */
+  async function sessionOn(ompId) {
+    const journal = join(cwd, `${ompId}.jsonl`);
+    await Bun.write(journal, `${JSON.stringify({ type: 'session', version: 3, id: ompId, timestamp: '2026-10-01T10:00:00.000Z', cwd })}\n`);
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
+    await waitForStatus(json.session.id, 'ready');
+    return /** @type {string} */ (json.session.id);
+  }
+  /** The event at which session `id` handed its turn back. @param {string} id */
+  const turnEnded = (id) => logged((e) => e.session === id && e.kind === 'frame' && e.frame.type === 'agent_end');
+
+  test('a finished turn makes its conversation unread for every page, whether a window looked or not', async () => {
+    const id = await sessionOn('conv-done');
+    const stream = await openStream();
+    await rpc(id, { type: 'prompt', message: 'hello' });
+    const ended = await turnEnded(id);
+    const { events } = await stream.until((events) => events.some((e) => e.kind === 'unread' && 'conv-done' in e.unread));
+    const news = /** @type {import('../daemon/wire.js').UnreadEvent} */ (events.findLast((e) => e.kind === 'unread'));
+    assert.equal(news.unread['conv-done'], ended.at, 'unread since the turn ended, in daemon time');
+    assert.ok(events.findIndex((e) => e.kind === 'unread') > events.findIndex((e) => e.kind === 'frame' && e.frame.type === 'agent_end'), 'after the news itself');
+    await call({ method: 'DELETE', path: `/api/sessions/${id}` });
+    await waitForStatus(id, 'exited');
+    assert.equal(unread.all()['conv-done'], ended.at, 'a stopped session is still unread');
+  });
+
+  test('a question makes it unread before the turn ends', async () => {
+    const id = await sessionOn('conv-ask');
+    await rpc(id, { type: 'prompt', message: 'ask me' });
+    const asked = await logged((e) => e.session === id && e.kind === 'frame' && e.frame.type === 'extension_ui_request' && e.frame.method === 'ask');
+    assert.equal(unread.all()['conv-ask'], asked.at);
+    await call({ method: 'DELETE', path: `/api/sessions/${id}` });
+  });
+
+  test('reading clears the mark only up to what was read; marking unread sets it again', async () => {
+    const id = await sessionOn('conv-read');
+    await rpc(id, { type: 'prompt', message: 'hello' });
+    const { at } = await turnEnded(id);
+    assert.equal((await call({ method: 'POST', path: '/api/unread/conv-read/read', body: { at: at - 1 } })).status, 204);
+    assert.equal(unread.all()['conv-read'], at, 'a window that had not heard of this news does not clear it');
+    assert.equal((await call({ method: 'POST', path: '/api/unread/conv-read/read', body: { at } })).status, 204);
+    assert.equal('conv-read' in unread.all(), false);
+    assert.equal((await call({ method: 'PUT', path: '/api/unread/conv-read' })).status, 204);
+    assert.ok(unread.all()['conv-read'] > at, 'unread since the user marked it, after any news');
+    assert.equal((await call({ method: 'POST', path: '/api/unread/conv-read/read', body: { at } })).status, 204);
+    assert.ok('conv-read' in unread.all(), 'a read from before the mark leaves it');
+    await call({ method: 'DELETE', path: `/api/sessions/${id}` });
+  });
+
+  test('marks survive a daemon restart: the next daemon’s pages hear them first thing', async () => {
+    assert.equal((await call({ method: 'PUT', path: '/api/unread/conv-kept' })).status, 204);
+    const marks = await loadUnread({ file: join(cwd, 'state', 'unread.json') });
+    const nextHub = createHub({ ompPath: FAKE_OMP, unread: marks });
+    const next = createDaemonServer({
+      hub: nextHub,
+      unread: marks,
+      history: createHistory({ root: join(cwd, 'omp-sessions'), archive: join(cwd, 'state', 'archive', 'sessions') }),
+      scratchpads: createScratchpads({ dir: join(cwd, 'state', 'scratchpads') }),
+      attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
+      workspaces: createWorkspaces({ dir: join(cwd, 'state', 'workspaces') }),
+      token: TOKEN,
+      root: ROOT,
+      config: { defaultCwd: cwd, home: cwd, scratchpadDir: join(cwd, 'state', 'scratchpads') },
+      port: 0,
+    });
+    try {
+      const { events } = await (await openStream({ daemon: next.port })).until((events) => events.some((e) => e.kind === 'hello'));
+      const hello = events.find((e) => e.kind === 'hello');
+      assert.equal(hello?.kind === 'hello' && hello.unread['conv-kept'], unread.all()['conv-kept']);
+    } finally {
+      await next.stop(true);
+    }
+  });
+
+  test('like every API route, marks need the token and the page’s Origin; an id that is not one is a 404', async () => {
+    for (const [method, path, body] of [['PUT', '/api/unread/conv-guard', undefined], ['POST', '/api/unread/conv-guard/read', { at: Date.now() }]]) {
+      const request = { method: /** @type {string} */ (method), path: /** @type {string} */ (path), body };
+      assert.equal((await call({ ...request, auth: false })).status, 401);
+      assert.equal((await call({ ...request, origin: false })).status, 403);
+      assert.equal((await call({ ...request, headers: { origin: 'http://evil.example' } })).status, 403);
+    }
+    assert.equal('conv-guard' in unread.all(), false, 'nothing was marked');
+    assert.equal((await call({ method: 'PUT', path: '/api/unread/a%20b' })).status, 404);
+    assert.equal((await call({ method: 'POST', path: '/api/unread/conv-guard/read', body: { at: 'later' } })).status, 400);
   });
 });
 

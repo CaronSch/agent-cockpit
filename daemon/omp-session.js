@@ -57,10 +57,8 @@ export class SessionNotRunning extends Error {}
 /**
  * `command` throws SessionNotRunning unless the session is ready; otherwise it returns the
  * id the daemon gave the request (omp echoes it on its response frame) and the response.
- * `markSeen(at)` records that the user has seen what the session did up to `at` (daemon time).
  * @typedef {{
  *   meta(): SessionMeta,
- *   markSeen(at: number): void,
  *   command(command: Record<string, unknown>): { id: string, response: Promise<RpcResponse> },
  *   respondUi(response: Record<string, unknown>): void,
  *   close(): Promise<void>,
@@ -79,7 +77,7 @@ export class SessionNotRunning extends Error {}
 export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now }) {
   const startedAt = now();
   /** @type {SessionMeta} */
-  let meta = { id, cwd, resume, fork, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt, seenAt: startedAt };
+  let meta = { id, cwd, resume, fork, sessionFile: resume, status: 'starting', pid: null, exitCode: null, error: null, startedAt, ompId: null };
   /** @type {Map<string, PromiseWithResolvers<RpcResponse>>} */
   const pending = new Map();
   const decoder = createFrameDecoder();
@@ -146,6 +144,8 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
     if (frame.type === 'response' && frame.command === 'get_state' && frame.success) {
       const file = frame.data?.sessionFile;
       if (typeof file === 'string' && file !== meta.sessionFile) update({ sessionFile: file });
+      const ompId = frame.data?.sessionId;
+      if (typeof ompId === 'string' && ompId !== meta.ompId) update({ ompId });
       if (frame.data?.sessionName) named = true;
     }
     if (frame.type === 'session_info_update' && frame.title) named = true;
@@ -211,9 +211,6 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
 
   return {
     meta: () => meta,
-    markSeen(at) {
-      if (at > meta.seenAt) update({ seenAt: Math.min(at, now()) });
-    },
     command(command) {
       if (meta.status !== 'ready') throw new SessionNotRunning(`session is ${meta.status}`);
       return send(command);

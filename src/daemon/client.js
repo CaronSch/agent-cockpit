@@ -6,12 +6,16 @@
  * all along. When the daemon restarts, its sessions are gone: buffers are cleared and
  * `onReset` listeners fire before any event from the new daemon is delivered.
  *
+ * It keeps which conversations are unread (daemon/unread.js), as the daemon last said: every
+ * window reads them here, so all of them, and every page, agree.
+ *
  * It also tracks the UI files' version (see daemon/ui-files.js): the first one the daemon
  * reports is the code this page loaded, and `onUiChange` hears when the files served stop
  * being, or become again, those.
  */
 /** @import { DaemonConfig, DirListing, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, Screen, SessionEvent, SessionMeta, StreamEvent, Workspace } from '../../daemon/wire.js' */
 /** @import { Tree } from '../layout/grid-model.js' */
+/** @import { Unread } from '../../daemon/unread.js' */
 /** @typedef {{ ok: true, rev: string } | { ok: false, current: Scratchpad }} ScratchpadSave */
 /** @typedef {{ ok: true, rev: number | null } | { ok: false, current: Screen | null }} ScreenSave */
 
@@ -38,6 +42,10 @@ export class DaemonError extends Error {
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
  *   onHistory(fn: () => void): () => void,
+ *   unreadSince(ompId: string | null): number | null,
+ *   onUnread(fn: () => void): () => void,
+ *   markRead(ompId: string, at: number): Promise<void>,
+ *   markUnread(ompId: string): Promise<void>,
  *   history(query?: string, options?: { archived?: boolean }): Promise<PastSession[]>,
  *   archivePastSession(file: string): Promise<string>,
  *   restorePastSession(file: string): Promise<string>,
@@ -53,7 +61,6 @@ export class DaemonError extends Error {
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string, fork?: string }): Promise<SessionMeta>,
  *   closeSession(session: string): Promise<void>,
- *   markSeen(session: string, at: number): Promise<void>,
  *   rpc(session: string, command: Record<string, unknown>): Promise<RpcResponse>,
  *   respondUi(session: string, response: Record<string, unknown>): Promise<void>,
  *   listFiles(session: string | null, dir: string): Promise<DirListing>,
@@ -96,6 +103,15 @@ export function createDaemonClient(env = {}) {
   const scratchpadListeners = new Set();
   /** @type {Set<() => void>} */
   const historyListeners = new Set();
+  /** @type {Unread} */
+  let unread = {};
+  /** @type {Set<() => void>} */
+  const unreadListeners = new Set();
+  /** @param {Unread} marks */
+  const setUnread = (marks) => {
+    unread = marks;
+    for (const fn of unreadListeners) fn();
+  };
   /** @type {Set<(outdated: boolean) => void>} */
   const uiListeners = new Set();
   /** The UI version this page loaded: the first one heard. @type {string | null} */
@@ -136,6 +152,7 @@ export function createDaemonClient(env = {}) {
     noteUi(hello.ui);
     setStatus('open');
     sessionsChanged();
+    setUnread(hello.unread);
   }
 
   /** @param {StreamEvent} event */
@@ -149,6 +166,7 @@ export function createDaemonClient(env = {}) {
       for (const fn of historyListeners) fn();
       return;
     }
+    if (event.kind === 'unread') return setUnread(event.unread);
     if (event.kind === 'session') {
       metas.set(event.session, event.meta);
       sessionsChanged();
@@ -233,6 +251,7 @@ export function createDaemonClient(env = {}) {
   const sessionPath = (/** @type {string} */ session) => `/api/sessions/${encodeURIComponent(session)}`;
   const padPath = (/** @type {string} */ id) => `/api/scratchpads/${encodeURIComponent(id)}`;
   const workspacePath = (/** @type {string} */ name) => `/api/workspaces/${encodeURIComponent(name)}`;
+  const unreadPath = (/** @type {string} */ ompId) => `/api/unread/${encodeURIComponent(ompId)}`;
 
   /** @param {string} session @param {(event: SessionEvent) => void} fn @returns {() => void} */
   function subscribe(session, fn) {
@@ -296,6 +315,18 @@ export function createDaemonClient(env = {}) {
       historyListeners.add(fn);
       return () => historyListeners.delete(fn);
     },
+    /** When conversation `ompId` became unread (daemon time), or null while it is read. */
+    unreadSince: (ompId) => (ompId !== null && Object.hasOwn(unread, ompId) ? unread[ompId] : null),
+    onUnread(fn) {
+      unreadListeners.add(fn);
+      return () => unreadListeners.delete(fn);
+    },
+    async markRead(ompId, at) {
+      await request(`${unreadPath(ompId)}/read`, { method: 'POST', body: JSON.stringify({ at }) });
+    },
+    async markUnread(ompId) {
+      await request(unreadPath(ompId), { method: 'PUT' });
+    },
     async history(query = '', { archived = false } = {}) {
       const params = new URLSearchParams({ ...(query ? { q: query } : {}), ...(archived ? { archived: '1' } : {}) });
       const body = await request(`/api/history${params.size ? `?${params}` : ''}`);
@@ -357,9 +388,6 @@ export function createDaemonClient(env = {}) {
     },
     async closeSession(session) {
       await request(sessionPath(session), { method: 'DELETE' });
-    },
-    async markSeen(session, at) {
-      await request(`${sessionPath(session)}/seen`, { method: 'POST', body: JSON.stringify({ at }) });
     },
     async rpc(session, command) {
       const { id } = await request(`${sessionPath(session)}/rpc`, { method: 'POST', body: JSON.stringify(command) });

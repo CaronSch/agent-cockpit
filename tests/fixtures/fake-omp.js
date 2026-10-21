@@ -27,7 +27,8 @@
  * - logins: the default model's provider, `fake`, is not logged in (a `login` to it stays
  *   under way); `keyed` is, and its `keyed-model` can be picked from the models
  * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
- * session already has a name; the fake never writes to a resumed file.
+ * session already has a name and keeps the journal's id (its `session` header's, as omp's
+ * `SessionManager` does); the fake never writes to a resumed file.
  * Other sessions keep a journal in `$TMPDIR/fake-omp-sessions/`, written as omp does: a new
  * session's only once the model has replied, then after every message. `--fork <file>`
  * copies that file's title and messages into a new journal at once (omp's
@@ -78,7 +79,19 @@ if (forkedFrom) {
   }
 }
 
-const sessionId = randomUUID();
+/** omp keeps a resumed journal's id (its `session` header's), as `get_state` reports it. */
+const resumedId = () => {
+  try {
+    return readFileSync(/** @type {string} */ (resumed), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .find((entry) => entry.type === 'session')?.id;
+  } catch {
+    return undefined;
+  }
+};
+const sessionId = (resumed && resumedId()) || randomUUID();
 const startedAt = new Date().toISOString();
 const sessionsDir = join(tmpdir(), 'fake-omp-sessions');
 const sessionFile = resumed ?? join(sessionsDir, `${sessionId}.jsonl`);

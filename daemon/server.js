@@ -7,6 +7,7 @@ import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
 import { MoveRefused } from './history.js';
 import { SessionNotRunning } from './omp-session.js';
+import { OMP_ID } from './unread.js';
 import { listDirectory, resolvePath } from './files.js';
 import { PAD_ID } from '../src/scratchpad/blocks.js';
 import { SCREEN_ID, WORKSPACE_NAME } from '../src/workspace/model.js';
@@ -19,6 +20,7 @@ import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-fi
 /** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
 /** @typedef {ReturnType<typeof import('./attachments.js').createAttachments>} Attachments */
 /** @typedef {ReturnType<typeof import('./workspace.js').createWorkspaces>} Workspaces */
+/** @import { Unread, UnreadStore } from './unread.js' */
 /** @typedef {(req: BunRequest, server: Server<undefined>) => Response | Promise<Response>} Handler */
 
 /** Bun refuses (413) any request body larger than this; uploads are the largest. */
@@ -118,9 +120,9 @@ function errorResponse(err) {
 
 /**
  * Starts serving on `127.0.0.1:port` (0 picks a free port); throws if the port is taken.
- * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, workspaces: Workspaces, token: string, root: string, config: DaemonConfig, port: number }} options
+ * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, workspaces: Workspaces, unread: UnreadStore, token: string, root: string, config: DaemonConfig, port: number }} options
  */
-export function createDaemonServer({ hub, history, scratchpads, attachments, workspaces, token, root, config, port }) {
+export function createDaemonServer({ hub, history, scratchpads, attachments, workspaces, unread, token, root, config, port }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, INDEX_FILE);
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
@@ -152,21 +154,23 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
       start(controller) {
         const write = (/** @type {string} */ chunk) => controller.enqueue(chunk);
         write('retry: 1000\n\n');
-        write(`data: ${JSON.stringify({ kind: 'hello', bootId: hub.bootId, sessions: hub.list(), ui })}\n\n`);
+        write(`data: ${JSON.stringify({ kind: 'hello', bootId: hub.bootId, sessions: hub.list(), unread: unread.all(), ui })}\n\n`);
         const send = (/** @type {SessionEvent} */ event) => write(`id: ${hub.bootId}:${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
         for (const event of hub.since(lastSeenSeq(req.headers.get('last-event-id'), hub.bootId))) send(event);
         const unsubscribe = hub.subscribe(send);
-        // No id: scratchpad and history events are not part of the replayable log (see wire.js).
+        // No id: scratchpad, history and unread events are not part of the replayable log (see wire.js).
         const offScratchpad = scratchpads.subscribe((/** @type {string} */ id, /** @type {Scratchpad} */ pad) =>
           write(`data: ${JSON.stringify({ kind: 'scratchpad', id, ...pad })}\n\n`),
         );
         const offHistory = history.watch(() => write(`data: ${JSON.stringify({ kind: 'history' })}\n\n`));
+        const offUnread = unread.subscribe((/** @type {Unread} */ marks) => write(`data: ${JSON.stringify({ kind: 'unread', unread: marks })}\n\n`));
         const heartbeat = setInterval(() => write(': ping\n\n'), HEARTBEAT_MS);
         stop = () => {
           clearInterval(heartbeat);
           unsubscribe();
           offScratchpad();
           offHistory();
+          offUnread();
         };
       },
       cancel: () => stop(),
@@ -179,6 +183,12 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
     const session = hub.get(req.params.id);
     if (!session) throw new HttpError(404, 'no such session');
     return session;
+  }
+
+  /** @param {BunRequest} req */
+  function ompIdOf(req) {
+    if (!OMP_ID.test(req.params.id)) throw new HttpError(404, 'no such conversation');
+    return req.params.id;
   }
 
   /** @param {BunRequest} req */
@@ -249,6 +259,21 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
         },
       }),
       '/api/history/restore': api({ POST: async (req) => json({ file: await history.restore((await readJson(req))?.file) }) }),
+      '/api/unread/:id': api({
+        PUT: async (req) => {
+          await unread.unread(ompIdOf(req));
+          return noContent();
+        },
+      }),
+      '/api/unread/:id/read': api({
+        POST: async (req) => {
+          const id = ompIdOf(req);
+          const at = (await readJson(req))?.at;
+          if (!Number.isFinite(at)) throw new HttpError(400, 'expected { at: a time in daemon milliseconds }');
+          await unread.read(id, at);
+          return noContent();
+        },
+      }),
       '/api/scratchpads': api({ GET: async () => json({ pads: await scratchpads.list() }) }),
       '/api/scratchpads/:id': api({
         GET: async (req) => json(await scratchpads.read(padOf(req))),
@@ -313,15 +338,6 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
       '/api/sessions/:id': api({
         DELETE: async (req) => {
           await sessionOf(req).close();
-          return noContent();
-        },
-      }),
-      '/api/sessions/:id/seen': api({
-        POST: async (req) => {
-          const session = sessionOf(req);
-          const at = (await readJson(req))?.at;
-          if (!Number.isFinite(at)) throw new HttpError(400, 'expected { at: a time in daemon milliseconds }');
-          session.markSeen(at);
           return noContent();
         },
       }),

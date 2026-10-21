@@ -178,7 +178,8 @@
   cursor: default;
 }
 
-/* How a running session is doing: a small dot (past rows keep its space, empty). */
+/* How a running session is doing, or that a session is unread: a small dot (rows with
+   nothing to say keep its space, empty). */
 .sessions-dot {
   flex: none;
   width: 6px;
@@ -197,8 +198,9 @@
   animation: sessions-pulse 1.2s ease-in-out infinite;
 }
 
-.sessions-item.is-attention .sessions-dot {
+.sessions-item:is(.is-unread, .is-asking) .sessions-dot {
   background: var(--color-unread);
+  animation: none;
 }
 
 @keyframes sessions-pulse {
@@ -245,8 +247,13 @@
   color: var(--color-text-dim);
 }
 
-.sessions-item.is-attention .sessions-state {
+.sessions-item:is(.is-asking, .is-done) .sessions-state {
   color: var(--color-unread);
+}
+
+/* Unread: news the user has not read yet (daemon/unread.js). */
+.sessions-item.is-unread .sessions-title {
+  font-weight: 600;
 }
 
 /* Row actions: quiet text buttons, shown while the row is hovered or holds focus. */
