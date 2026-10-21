@@ -56,7 +56,7 @@ describe('session history', () => {
   test('search needs every word, in any of title, directory or prompts, ignoring case', async () => {
     const history = createHistory({ root });
     /** @param {string} q */
-    const ids = async (q) => (await history.list(q)).map((s) => s.id).sort();
+    const ids = async (q) => (await history.list({ query: q })).map((s) => s.id).sort();
     assert.deepEqual(await ids('TESTS alpha'), ['aaa']);
     assert.deepEqual(await ids('login'), ['aaa'], 'title and prompt');
     assert.deepEqual(await ids('beta'), ['bbb'], 'directory');
@@ -64,13 +64,26 @@ describe('session history', () => {
     assert.deepEqual(await ids('handoff'), [], 'agent-authored text is not searched');
   });
 
+  test('a directory filter keeps only sessions run in exactly that directory, and combines with search', async () => {
+    await writeFile(join(root, '-p-beta', '2026-10-04_ddd.jsonl'), journal([header('ddd', '/p/beta/sub'), user('deploy prod')]));
+    await writeFile(join(root, '-p-beta', '2026-10-05_eee.jsonl'), journal([header('eee', '/p/betamax'), user('deploy again')]));
+    const history = createHistory({ root });
+    /** @param {{ query?: string, cwd?: string }} filter */
+    const ids = async (filter) => (await history.list(filter)).map((s) => s.id).sort();
+    assert.deepEqual(await ids({ cwd: '/p/beta' }), ['bbb'], 'not a subdirectory, not a longer name');
+    assert.deepEqual(await ids({ cwd: '/p/beta/sub' }), ['ddd']);
+    assert.deepEqual(await ids({ cwd: '/p/beta', query: 'prod' }), []);
+    assert.deepEqual(await ids({ cwd: '/p/nowhere' }), []);
+    assert.deepEqual(await ids({}), ['aaa', 'bbb', 'ddd', 'eee']);
+  });
+
   test('a journal that grew since the last listing is read again', async () => {
     const history = createHistory({ root });
-    assert.deepEqual(await history.list('rollback'), []);
+    assert.deepEqual(await history.list({ query: 'rollback' }), []);
     await appendFile(alpha, journal([user('plan the rollback')]));
     const later = new Date(Date.now() + 5000);
     await utimes(alpha, later, later);
-    const [hit] = await history.list('rollback');
+    const [hit] = await history.list({ query: 'rollback' });
     assert.equal(hit?.id, 'aaa');
     assert.equal(hit?.prompts, 3);
   });

@@ -97,6 +97,10 @@
   flex: 1;
 }
 
+.omp-setup .session-picker {
+  margin-top: var(--space-3);
+}
+
 /* ── Session layout ─────────────────────────────────── */
 .omp-session {
   position: relative;
@@ -763,6 +767,24 @@
 
 .omp-chip-remove:hover {
   color: var(--color-danger);
+}
+
+/* `/resume`: the directory's sessions, inline above the message box. */
+.omp-resume {
+  flex: none;
+  max-height: 55%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 var(--space-2) var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+}
+
+.omp-resume .session-picker {
+  flex: 1;
 }
 
 .omp-suggest {

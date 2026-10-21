@@ -62,9 +62,12 @@ is newer. The daemon prints its version at start.
 - **The Sessions window reads omp's private journal format.** `daemon/history.js`
   parses `~/.omp/agent/sessions/<project>/*.jsonl` directly (the `title` and
   `session` records, user messages and their `attribution`); omp has no rpc for
-  listing past sessions. A format change shows up as sessions with no title,
-  no directory, or missing from the list. *Response:* compare a fresh journal
-  with `tests/history.test.js`'s fixtures and update both.
+  listing past sessions. The omp pane's start screen and `/resume` match a session's
+  directory exactly against the header's `cwd`, which omp writes with symlinks resolved
+  (the daemon resolves the asked-for directory the same way). A format change shows
+  up as sessions with no title, no directory, or missing from the list (or from a
+  directory's). *Response:* compare a fresh journal with `tests/history.test.js`'s
+  fixtures and update both.
 
 - **Auto-titles, attachments, Ask, Fork, `!` commands and the responses-only view lean on omp internals.** Titles rely on
   `/rename` with no title generating one in RPC mode (it is not gated by

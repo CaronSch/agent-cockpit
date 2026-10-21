@@ -2,6 +2,7 @@
  * HTTP face of the daemon: the workbench's static files, the JSON API and the event stream
  * (routes in `wire.js`), all behind the loopback guard.
  */
+import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
@@ -66,10 +67,23 @@ const fileName = (req) => decodeURIComponent(req.headers.get('x-file-name') ?? '
 /** @param {string} input */
 const expandHome = (input) => (input === '~' || input.startsWith('~/') ? homedir() + input.slice(1) : input);
 
+/** A path as the user typed it, made absolute the way a session's cwd is: `~` expanded, then resolved. @param {string} input */
+const absolutePath = (input) => resolve(expandHome(input.trim()));
+
+/**
+ * The directory omp records for a session started in `input`: omp writes the one the OS
+ * reports, symlinks resolved (`/tmp` is `/private/tmp` on macOS). A missing one stays as typed.
+ * @param {string} input
+ */
+const recordedDir = async (input) => {
+  const path = absolutePath(input);
+  return realpath(path).catch(() => path);
+};
+
 /** @param {unknown} input @param {'directory' | 'file'} kind @param {string} field */
 async function existingPath(input, kind, field) {
   if (typeof input !== 'string' || !input.trim()) throw new HttpError(400, `${field} is required`);
-  const path = resolve(expandHome(input.trim()));
+  const path = absolutePath(input);
   const info = await Bun.file(path).stat().catch(() => null);
   const ok = kind === 'directory' ? info?.isDirectory() : info?.isFile();
   if (!ok) throw new HttpError(400, `${field} is not an existing ${kind}: ${path}`);
@@ -225,7 +239,13 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
       '/api/stream': api({ GET: stream }),
       '/api/config': api({ GET: () => json(config) }),
       '/api/ui': api({ GET: async () => json({ version: await uiVersion.current() }) }),
-      '/api/history': api({ GET: async (req) => json({ sessions: await history.list(new URL(req.url).searchParams.get('q') ?? '') }) }),
+      '/api/history': api({
+        GET: async (req) => {
+          const params = new URL(req.url).searchParams;
+          const cwd = params.get('cwd')?.trim();
+          return json({ sessions: await history.list({ query: params.get('q') ?? '', cwd: cwd ? await recordedDir(cwd) : null }) });
+        },
+      }),
       '/api/scratchpads': api({ GET: async () => json({ pads: await scratchpads.list() }) }),
       '/api/scratchpads/:id': api({
         GET: async (req) => json(await scratchpads.read(padOf(req))),

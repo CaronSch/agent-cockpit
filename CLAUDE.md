@@ -113,6 +113,12 @@ What runs today:
   in. Each pane's Config menu holds its own settings (saved with the window);
   the first shows only prompts and final responses, hiding thinking, tool calls
   and the messages in between, with one "Working…" line while a turn runs.
+  The start screen lists the typed directory's past sessions (newest five, the
+  rest on request) to resume one in the pane instead, and `/resume [filter]` (the
+  pane's own command: omp's picker is TUI-only) lists the running pane's directory
+  the same way and switches the pane to the one picked, stopping its omp first
+  (after asking, if a turn is running). Sessions open in a window (on any screen)
+  are marked and cannot be picked, as in the Sessions window.
 - The Sessions window: every past omp conversation (read from omp's session
   files), searchable across titles, directories and prompts, sortable, and
   draggable onto the grid to resume it in a new omp pane. Sessions already open
@@ -289,6 +295,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
 - `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then attachments), `!` shell commands, and side questions about a quote.
+- `src/omp/pane-commands.js` — Slash commands the omp pane answers itself, because omp's RPC mode has no form of them: they are offered with omp's own in the suggestions but never sent to omp.
 - `src/omp/selection-popup.js` — Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons appear at the end of the selection.
 - `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
 - `src/omp/visibility.js` — Which transcript items an omp pane shows when it is set to only prompts and responses: what the user said and ran, and what the agent finally answered, without the work in between.
@@ -296,7 +303,8 @@ particular, move a capability into "Current state" when it ships.
 - `src/render/grid-renderer.js` — Imperative, diffed DOM writer for the grid.
 - `src/scratchpad/blocks.js` — A scratchpad's text as blocks to edit: runs of text, and the images and files it references, kept free of the DOM so the round trip can be tested.
 - `src/scratchpad/store.js` — The page's copy of one scratchpad: every window in the page showing that pad edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
-- `src/sessions/order.js` — Sorting and labels for the Sessions window, kept free of the DOM so they can be tested.
+- `src/sessions/list-view.js` — DOM for lists of past omp sessions: the row both the Sessions window and the omp pane draw for a session, and the session picker the omp pane shows on its start screen and for `/resume`.
+- `src/sessions/order.js` — Sorting, labels and open-session checks for lists of past omp sessions (the Sessions window, the omp pane's session picker), kept free of the DOM so they can be tested.
 - `src/state/atom.js` — Tiny observable cell: get/set/subscribe.
 - `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
 - `src/ui/dom.js` — Element construction helpers: elements, buttons that never submit a form, and file-drag checks.
@@ -345,6 +353,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-pane-commands.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->

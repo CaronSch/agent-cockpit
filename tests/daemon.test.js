@@ -1,7 +1,7 @@
 import { test, describe, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
@@ -102,7 +102,7 @@ beforeAll(async () => {
   hub = createHub({ ompPath: FAKE_OMP });
   server = createDaemonServer({
     hub,
-    history: createHistory({ root: join(cwd, 'no-sessions-yet') }),
+    history: createHistory({ root: join(cwd, 'omp-sessions') }),
     scratchpads: createScratchpads({ dir: join(cwd, 'state', 'scratchpads') }),
     attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
     workspaces: createWorkspaces({ dir: join(cwd, 'state', 'workspaces') }),
@@ -415,6 +415,36 @@ describe('sessions', () => {
     const res = await call({ method: 'POST', path: '/api/sessions', body: { cwd: join(cwd, 'missing') } });
     assert.equal(res.status, 400);
     assert.equal(hub.list().length, before);
+  });
+});
+
+describe('history', () => {
+  test('?cwd= lists one directory\'s sessions, the directory resolved as a session\'s cwd is and as omp records it', async () => {
+    const project = join(cwd, 'history-project');
+    await mkdir(project, { recursive: true });
+    const journals = join(cwd, 'omp-sessions', '-history');
+    await mkdir(journals, { recursive: true });
+    /** @param {string} id @param {string} dir @param {string} prompt */
+    const write = (id, dir, prompt) =>
+      writeFile(
+        join(journals, `${id}.jsonl`),
+        [{ type: 'session', version: 3, id, timestamp: '2026-10-01T10:00:00.000Z', cwd: dir }, { type: 'message', message: { role: 'user', content: prompt } }]
+          .map((line) => JSON.stringify(line))
+          .join('\n'),
+      );
+    // omp writes the directory with symlinks resolved (on macOS the temp dir is under /private).
+    await write('here', await realpath(project), 'fix the build');
+    await write('nested', join(await realpath(project), 'sub'), 'nested work');
+    await write('home', await realpath(homedir()), 'home chores');
+    /** @param {string} query */
+    const ids = async (query) => (await call({ path: `/api/history?${query}` })).json.sessions.map((/** @type {any} */ s) => s.id).sort();
+
+    assert.deepEqual(await ids(`cwd=${encodeURIComponent(`${project}/`)}`), ['here'], 'a trailing slash, an unresolved path');
+    assert.deepEqual(await ids(`cwd=${encodeURIComponent(join(project, 'sub', '..'))}&q=build`), ['here']);
+    assert.deepEqual(await ids(`cwd=${encodeURIComponent(project)}&q=nested`), []);
+    assert.deepEqual(await ids('cwd=~'), ['home']);
+    assert.deepEqual(await ids(`cwd=${encodeURIComponent(join(project, 'missing'))}`), []);
+    assert.deepEqual(await ids('q=work'), ['nested'], 'no cwd: every directory');
   });
 });
 

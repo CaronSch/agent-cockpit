@@ -2,6 +2,9 @@
  * The omp pane: starts an omp coding agent in a chosen directory through the daemon and
  * lets the user chat with it and set it up, rendered from omp's structured event stream.
  *
+ * Its start screen lists the typed directory's past sessions, and `/resume` lists the running
+ * session's (sessions/list-view.js): either way the one picked is resumed in this window.
+ *
  * Params (persisted with the layout): `session` (daemon session id), `cwd`,
  * `sessionFile` (omp's transcript file, for resuming after the process is gone), `resume`
  * or `fork` while the window is starting from another journal, and the pane's settings
@@ -18,9 +21,12 @@ import { composeAsk, isCommand, shellCommand } from '../omp/message.js';
 import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { awaitsUser } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
+import { paneCommand, withPaneCommands } from '../omp/pane-commands.js';
+import { createSessionPicker, resumeParams } from '../sessions/list-view.js';
+import { displayTitle } from '../sessions/order.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { LeafParams } from '../layout/grid-model.js' */
-/** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
+/** @import { PastSession, RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { SlashCommand } from '../omp/transcript.js' */
 
@@ -46,6 +52,8 @@ const SETTINGS = [
 ];
 
 const MAX_SUGGESTIONS = 8;
+/** The start screen lists the typed directory's sessions once typing pauses this long. */
+const DIR_DEBOUNCE_MS = 250;
 const BOTTOM_SLACK_PX = 24;
 /** Seen-up-to is saved this long after it last moved, not on every streamed token. */
 const READ_SAVE_MS = 1000;
@@ -104,6 +112,8 @@ function createPane(body, ctx, daemon) {
 
   /** @type {string | null} */
   let mode = null;
+  /** Undoes what the view on show set up (timers, subscriptions); a view that needs it sets it. */
+  let leaveMode = () => {};
   let frame = 0;
   let destroyed = false;
   /** @type {SessionView | null} */
@@ -200,6 +210,8 @@ function createPane(body, ctx, daemon) {
   function show(next, build) {
     if (mode === next) return;
     mode = next;
+    leaveMode();
+    leaveMode = () => {};
     root.replaceChildren(...build());
   }
 
@@ -265,9 +277,30 @@ function createPane(body, ctx, daemon) {
           if (typed || input.value) return;
           input.value = c.defaultCwd;
           if (document.activeElement === input) input.select();
+          listSessions();
         })
         .catch(() => {});
     }
+    // The directory's past sessions, below the field: pick one to resume it here instead.
+    const picker = createSessionPicker({
+      daemon,
+      label: 'Resume a session here',
+      onPick: (s) => {
+        ctx.setParams(resumeParams(s));
+        schedule();
+      },
+    });
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let listTimer;
+    const listSessions = () => void picker.show({ cwd: input.value });
+    input.addEventListener('input', () => {
+      clearTimeout(listTimer);
+      listTimer = setTimeout(listSessions, DIR_DEBOUNCE_MS);
+    });
+    leaveMode = () => {
+      clearTimeout(listTimer);
+      picker.destroy();
+    };
     const start = el('button', 'btn btn-accent', 'Start omp');
     start.type = 'submit';
     const error = el('p', 'omp-error');
@@ -294,7 +327,8 @@ function createPane(body, ctx, daemon) {
     });
     const row = el('div', 'omp-row');
     row.append(input, start);
-    form.append(el('p', 'omp-setup-title', 'Start an omp agent'), label, row, error);
+    form.append(el('p', 'omp-setup-title', 'Start an omp agent'), label, row, error, picker.root);
+    if (cwd) listSessions();
     queueMicrotask(() => input.focus());
     return [form];
   }
@@ -477,7 +511,18 @@ function createPane(body, ctx, daemon) {
         cancel: (id) => void daemon.rpc(session, { type: 'btw_cancel', recordId: id }).catch(() => {}),
       },
     });
-    node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, queue, suggest, composer.root);
+    // ── /resume: another of this directory's sessions, in this pane (omp/pane-commands.js) ──
+    const resumeBox = el('div', 'omp-resume');
+    resumeBox.hidden = true;
+    const resumeNote = el('div', 'omp-row omp-resume-note');
+    const picker = createSessionPicker({
+      daemon,
+      label: 'Resume a session in this directory',
+      empty: 'No other sessions in this directory.',
+      onPick: pickResume,
+    });
+    resumeBox.append(picker.root, resumeNote);
+    node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, resumeBox, queue, suggest, composer.root);
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
@@ -526,6 +571,13 @@ function createPane(body, ctx, daemon) {
 
     async function send() {
       if (!ready()) return;
+      // The pane's own commands never reach omp.
+      const own = paneCommand(draft.value);
+      if (own) {
+        composer.setText('');
+        hideSuggestions();
+        return openResume(own.arg);
+      }
       // `/command` and `!shell` go as typed; comments and attachments wait for the next prompt.
       const command = isCommand(draft.value);
       // A bare `!` names no command: leave it in the box rather than run nothing.
@@ -550,6 +602,60 @@ function createPane(body, ctx, daemon) {
         if (!res || !res.success) taken.restore();
       });
     }
+
+    /** A click anywhere but the picker closes it. @param {PointerEvent} event */
+    const outsideResume = (event) => {
+      if (!resumeBox.contains(/** @type {Node} */ (event.target))) closeResume({ refocus: false });
+    };
+
+    /** @param {string} query narrows the list, as the Sessions window's search does */
+    function openResume(query) {
+      resumeNote.replaceChildren();
+      resumeNote.hidden = true;
+      resumeBox.hidden = false;
+      document.addEventListener('pointerdown', outsideResume, true);
+      void picker.show({ cwd: cwd(), query }).then(() => {
+        if (!resumeBox.hidden) picker.focus();
+      });
+    }
+
+    /** @param {{ refocus?: boolean }} [options] back to the message box, unless the user clicked elsewhere */
+    function closeResume({ refocus = true } = {}) {
+      if (resumeBox.hidden) return;
+      resumeBox.hidden = true;
+      document.removeEventListener('pointerdown', outsideResume, true);
+      if (refocus) draft.focus();
+    }
+
+    /** Resumes `s` here, after a confirmation when that would cut a running turn short. @param {PastSession} s */
+    function pickResume(s) {
+      if (!state.streaming) return void switchTo(s);
+      const go = button('btn btn-accent', 'Stop and resume', () => void switchTo(s));
+      resumeNote.replaceChildren(el('span', '', `A turn is running. Stop it and resume “${displayTitle(s)}”?`), go, button('btn', 'Cancel', () => closeResume()));
+      resumeNote.hidden = false;
+      go.focus();
+    }
+
+    /** Ends this pane's omp (omp keeps its journal) and resumes `s` in its place. @param {PastSession} s */
+    async function switchTo(s) {
+      resumeNote.replaceChildren(el('span', 'omp-muted', 'Stopping this session…'));
+      resumeNote.hidden = false;
+      try {
+        await daemon.closeSession(session);
+      } catch (err) {
+        resumeNote.replaceChildren(el('span', 'omp-error', `Could not stop this session: ${errorMessage(err)}`));
+        return;
+      }
+      document.removeEventListener('pointerdown', outsideResume, true);
+      ctx.setParams(resumeParams(s));
+      schedule();
+    }
+
+    resumeBox.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      closeResume();
+    });
 
     async function stop() {
       if (!ready()) return;
@@ -729,7 +835,8 @@ function createPane(body, ctx, daemon) {
       const q = match[1].toLowerCase();
       const starts = (/** @type {SlashCommand} */ c) => [c.name, ...c.aliases].some((n) => n.toLowerCase().startsWith(q));
       const contains = (/** @type {SlashCommand} */ c) => [c.name, ...c.aliases].some((n) => n.toLowerCase().includes(q));
-      suggestions = [...state.commands.filter(starts), ...state.commands.filter((c) => !starts(c) && contains(c))].slice(0, MAX_SUGGESTIONS);
+      const commands = withPaneCommands(state.commands);
+      suggestions = [...commands.filter(starts), ...commands.filter((c) => !starts(c) && contains(c))].slice(0, MAX_SUGGESTIONS);
       selected = Math.min(selected, Math.max(0, suggestions.length - 1));
       if (!suggestions.length) return hideSuggestions();
       suggest.hidden = false;
@@ -777,7 +884,8 @@ function createPane(body, ctx, daemon) {
         e.preventDefault();
         void send();
       } else if (e.key === 'Escape') {
-        if (suggestions.length) hideSuggestions();
+        if (!resumeBox.hidden) closeResume();
+        else if (suggestions.length) hideSuggestions();
         else if (state.streaming) void stop();
       }
     });
@@ -1014,6 +1122,8 @@ function createPane(body, ctx, daemon) {
       update,
       destroy() {
         subscription();
+        document.removeEventListener('pointerdown', outsideResume, true);
+        picker.destroy();
         resizes.disconnect();
         composer.destroy();
         selectionPopup.destroy();
@@ -1035,6 +1145,7 @@ function createPane(body, ctx, daemon) {
       clearTimeout(readSave);
       offStatus();
       offReset();
+      leaveMode();
       // A page reload never gets here, so its agents keep running.
       if (view) endSession(daemon, view.session);
       view?.destroy();

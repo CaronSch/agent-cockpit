@@ -10,7 +10,8 @@
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
-import { SORT_KEYS, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
+import { SORT_KEYS, displayTitle, isSortKey, naturalDir, openJournals, relativeTime, sortSessions } from '../sessions/order.js';
+import { resumeParams, sessionRow } from '../sessions/list-view.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { PastSession } from '../../daemon/wire.js' */
@@ -90,21 +91,14 @@ function createSessionsWindow(body, ctx, daemon) {
     })
     .catch(() => {});
 
-  /** Journals the daemon's running sessions write. */
-  const openFiles = () =>
-    new Set(
-      daemon
-        .sessions()
-        .filter((m) => m.status === 'starting' || m.status === 'ready')
-        .flatMap((m) => (m.sessionFile ? [m.sessionFile] : [])),
-    );
+  const openFiles = () => openJournals(daemon.sessions());
 
   async function load() {
     const seq = ++requestSeq;
     loading = true;
     drawStatus();
     try {
-      const next = await daemon.history(query());
+      const next = await daemon.history({ query: query() });
       if (seq !== requestSeq) return;
       sessions = next;
       byFile = new Map(next.map((s) => [s.file, s]));
@@ -128,39 +122,15 @@ function createSessionsWindow(body, ctx, daemon) {
   }
 
   /** @param {PastSession} s */
-  const paneParams = (s) => ({ resume: s.file, cwd: s.cwd, session: null, sessionFile: null });
-
-  /** @param {PastSession} s */
   function resume(s) {
     if (openFiles().has(s.file)) return;
-    ctx.addWidget('omp', paneParams(s));
+    ctx.addWidget('omp', resumeParams(s));
   }
 
   /** @param {PastSession} s @param {boolean} open @param {number} now */
   function renderRow(s, open, now) {
-    const row = el('li', `sessions-item${open ? ' is-open' : ''}`);
-    row.tabIndex = 0;
-    row.dataset.file = s.file;
-    row.title = `${s.file}\nLast active ${new Date(s.modifiedAt).toLocaleString()}${open ? '\nOpen in a window' : '\nDrag onto the grid to resume'}`;
-    const main = el('div', 'sessions-main');
-    main.append(el('div', 'sessions-title', displayTitle(s)));
-    if (s.title && s.firstPrompt) main.append(el('div', 'sessions-preview', s.firstPrompt));
-    const meta = el('div', 'sessions-meta');
-    // The spaces keep the parts separate words for copy and screen readers; flex layout ignores them.
-    meta.append(
-      el('span', 'sessions-dir', shortDir(s.cwd)),
-      ' ',
-      el('span', '', relativeTime(s.modifiedAt, now)),
-      ' ',
-      el('span', '', `${s.prompts} prompt${s.prompts === 1 ? '' : 's'}`),
-    );
-    if (open) meta.append(' ', el('span', 'sessions-badge', 'open'));
-    main.append(meta);
-    row.append(main);
-    if (!open) {
-      const resume = button('btn sessions-resume', 'Resume');
-      row.append(resume);
-    }
+    const row = sessionRow(s, { open, now, dir: shortDir(s.cwd), hint: 'Drag onto the grid to resume' });
+    if (!open) row.append(button('btn sessions-resume', 'Resume'));
     return row;
   }
 
@@ -222,7 +192,7 @@ function createSessionsWindow(body, ctx, daemon) {
     if (event.button !== 0 || /** @type {Element} */ (event.target).closest('button')) return;
     const s = sessionAt(event.target);
     if (!s || openFiles().has(s.file)) return;
-    ctx.dragWidget('omp', paneParams(s), event, { label: displayTitle(s) });
+    ctx.dragWidget('omp', resumeParams(s), event, { label: displayTitle(s) });
   });
   list.addEventListener('click', (event) => {
     if (!(/** @type {Element} */ (event.target).closest('.sessions-resume'))) return;

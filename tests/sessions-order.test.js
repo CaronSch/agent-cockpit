@@ -1,7 +1,7 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { naturalDir, relativeTime, sortSessions } from '../src/sessions/order.js';
-/** @import { PastSession } from '../daemon/wire.js' */
+import { naturalDir, openJournals, relativeTime, sortSessions } from '../src/sessions/order.js';
+/** @import { PastSession, SessionMeta } from '../daemon/wire.js' */
 
 /** @param {Partial<PastSession> & { id: string }} s @returns {PastSession} */
 const session = (s) => ({
@@ -57,5 +57,12 @@ describe('session ordering', () => {
     assert.equal(relativeTime(now - 2 * 86_400_000, now), '2d ago');
     assert.match(relativeTime(now - 30 * 86_400_000, now), /2026/);
     assert.equal(relativeTime(now + 5000, now), 'just now', 'clock skew is not "in the future"');
+  });
+
+  test('the journals of starting and running sessions are open; ended ones and unsaved ones are not', () => {
+    /** @param {string} id @param {SessionMeta['status']} status @param {string | null} sessionFile @returns {SessionMeta} */
+    const meta = (id, status, sessionFile) => ({ id, cwd: '/p', resume: null, fork: null, sessionFile, status, pid: null, exitCode: null, error: null, startedAt: 0 });
+    const open = openJournals([meta('a', 'ready', '/s/a.jsonl'), meta('b', 'starting', '/s/b.jsonl'), meta('c', 'exited', '/s/c.jsonl'), meta('d', 'failed', '/s/d.jsonl'), meta('e', 'ready', null)]);
+    assert.deepEqual([...open].sort(), ['/s/a.jsonl', '/s/b.jsonl']);
   });
 });

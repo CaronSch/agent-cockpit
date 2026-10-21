@@ -1,5 +1,8 @@
-/** Sorting and labels for the Sessions window, kept free of the DOM so they can be tested. */
-/** @import { PastSession } from '../../daemon/wire.js' */
+/**
+ * Sorting, labels and open-session checks for lists of past omp sessions (the Sessions
+ * window, the omp pane's session picker), kept free of the DOM so they can be tested.
+ */
+/** @import { PastSession, SessionMeta } from '../../daemon/wire.js' */
 
 /** @typedef {'active' | 'created' | 'title' | 'directory' | 'prompts'} SortKey */
 /** @typedef {'asc' | 'desc'} SortDir */
@@ -53,3 +56,11 @@ export function relativeTime(then, now) {
   if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`;
   return new Date(then).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
+
+/**
+ * Journals the daemon's running sessions write. A past session among them is already open in
+ * a window and must not be resumed again: omp would fork it rather than share it.
+ * @param {readonly SessionMeta[]} sessions @returns {Set<string>}
+ */
+export const openJournals = (sessions) =>
+  new Set(sessions.filter((m) => m.status === 'starting' || m.status === 'ready').flatMap((m) => (m.sessionFile ? [m.sessionFile] : [])));

@@ -113,11 +113,12 @@ export function createHistory({ root }) {
   return {
     /**
      * Every past conversation with at least one prompt, matching all words of `query`
-     * (case-insensitive) when one is given. Unordered: the widget sorts.
-     * @param {string} [query]
+     * (case-insensitive) when one is given, and run in exactly the directory `cwd` when one is
+     * given (as omp records it: absolute, symlinks resolved). Unordered: the caller sorts.
+     * @param {{ query?: string, cwd?: string | null }} [filter]
      * @returns {Promise<PastSession[]>}
      */
-    async list(query = '') {
+    async list({ query = '', cwd = null } = {}) {
       const files = await journals();
       const seen = new Set(files);
       for (const file of cache.keys()) if (!seen.has(file)) cache.delete(file);
@@ -136,7 +137,7 @@ export function createHistory({ root }) {
 
       const words = query.toLowerCase().split(/\s+/).filter(Boolean);
       return summaries
-        .filter((s) => s !== null && s.prompts > 0 && words.every((w) => s.search.includes(w)))
+        .filter((s) => s !== null && s.prompts > 0 && (cwd === null || s.cwd === cwd) && words.every((w) => s.search.includes(w)))
         .map((s) => {
           const { search: _search, ...past } = /** @type {Summary} */ (s);
           return past;

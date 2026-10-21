@@ -159,3 +159,50 @@
 .sessions-resume {
   flex: none;
 }
+
+/* Session picker: one directory's past sessions, in an omp pane (start screen, `/resume`). */
+.session-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+}
+
+.session-picker-label {
+  margin: 0;
+  color: var(--color-text-dim);
+  font: 600 var(--text-2xs) / 1.4 var(--font-mono);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.session-picker .sessions-item {
+  cursor: pointer;
+}
+
+.session-picker .sessions-item.is-open {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.session-picker-list.is-expanded {
+  max-height: 18rem;
+}
+
+.session-picker-more {
+  align-self: flex-start;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  font: var(--text-xs) / 1.4 var(--font-mono);
+  cursor: pointer;
+}
+
+.session-picker-more:hover {
+  text-decoration: underline;
+}
+
+.session-picker-more:focus-visible {
+  outline: 1px solid var(--color-accent);
+}

@@ -1,7 +1,8 @@
-// Behaviour tests for the Sessions window: listing, search, sort, and resuming a past session
-// into a new omp window, against the real daemon reading journals from E2E_OMP_SESSIONS.
+// Behaviour tests for past sessions: the Sessions window (listing, search, sort, resuming into a
+// new omp window) and the omp pane's own session picker (its start screen, `/resume`), against
+// the real daemon reading journals from E2E_OMP_SESSIONS.
 import { test, expect } from '@playwright/test';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { E2E_OMP_SESSIONS, newWorkspace, workbenchPath } from './daemon.js';
@@ -11,8 +12,9 @@ import { E2E_OMP_SESSIONS, newWorkspace, workbenchPath } from './daemon.js';
 
 test.use({ viewport: { width: 1280, height: 800 }, contextOptions: { reducedMotion: 'reduce' } });
 
-const ALPHA = mkdtempSync(join(tmpdir(), 'ac-e2e-alpha-'));
-const BRAVO = mkdtempSync(join(tmpdir(), 'ac-e2e-bravo-'));
+// As omp records a session's directory: symlinks resolved (macOS's temp dir is under /private).
+const ALPHA = realpathSync(mkdtempSync(join(tmpdir(), 'ac-e2e-alpha-')));
+const BRAVO = realpathSync(mkdtempSync(join(tmpdir(), 'ac-e2e-bravo-')));
 const MINUTE = 60_000;
 
 /**
@@ -57,13 +59,17 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.afterEach(async ({ page }) => {
-  // Sessions this spec resumed would otherwise stay running and show as open in the next test.
-  await page.evaluate(async (dir) => {
-    const { sessions } = await (await fetch('/api/sessions')).json();
-    for (const s of sessions) {
-      if (s.sessionFile?.startsWith(dir) && s.status !== 'exited') await fetch(`/api/sessions/${s.id}`, { method: 'DELETE' });
-    }
-  }, E2E_OMP_SESSIONS);
+  // Sessions this spec started or resumed would otherwise stay running and show as open in the next test.
+  await page.evaluate(
+    async ({ journals, dirs }) => {
+      const { sessions } = await (await fetch('/api/sessions')).json();
+      for (const s of sessions) {
+        const ours = s.sessionFile?.startsWith(journals) || dirs.includes(s.cwd);
+        if (ours && s.status !== 'exited') await fetch(`/api/sessions/${s.id}`, { method: 'DELETE' });
+      }
+    },
+    { journals: E2E_OMP_SESSIONS, dirs: [ALPHA, BRAVO] },
+  );
   expect(problems, 'page errors / console errors during the test').toEqual([]);
 });
 
@@ -182,4 +188,145 @@ test('a session whose directory is gone says so instead of starting omp somewher
   await expect(pane.getByRole('button', { name: 'New session' })).toBeVisible();
   // A failed request logs a console error in the browser; that is the expected outcome here.
   problems = problems.filter((p) => !p.includes('400'));
+});
+
+/** Adds an omp window through the palette; it opens on its start screen. @param {Page} page */
+async function addOmpPane(page) {
+  const before = await page.locator('.widget[data-widget="omp"]').count();
+  await page.locator('#palette-toggle').click();
+  await page.locator('#palette [data-type="omp"]').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(before + 1);
+  return page.locator('.widget[data-widget="omp"]').last();
+}
+
+/** Running sessions whose journal is `name`'s. @param {Page} page @param {string} name */
+async function liveOn(page, name) {
+  const { sessions } = await (await page.request.get('/api/sessions')).json();
+  return sessions.filter((/** @type {any} */ s) => s.sessionFile === fileOf(name) && s.status !== 'exited');
+}
+
+test('the start screen lists the typed directory’s sessions, newest first, and a click resumes one there', async ({ page }) => {
+  const pane = await addOmpPane(page);
+  const field = pane.getByRole('textbox', { name: 'Directory' });
+  const picker = pane.getByRole('list', { name: 'Resume a session here' });
+
+  await field.fill(ALPHA);
+  await expect(titles(picker)).toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  await expect(row(picker, 'Fix the login flow').locator('.sessions-preview')).toHaveText('fix the login bug');
+  await expect(row(picker, 'Fix the login flow').locator('.sessions-meta')).toHaveText('2h ago 2 prompts');
+
+  await field.fill(`${BRAVO}/`); // resolved as the daemon resolves a session's directory
+  await expect(titles(picker)).toHaveText(['deploy staging']);
+  await field.fill(mkdtempSync(join(tmpdir(), 'ac-e2e-empty-')));
+  await expect(pane.locator('.session-picker'), 'no sessions, no list').toBeHidden();
+
+  await field.fill(ALPHA);
+  await row(picker, 'Fix the login flow').click();
+  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  const live = await liveOn(page, 'login');
+  expect(live).toHaveLength(1);
+  expect(live[0].cwd).toBe(ALPHA);
+});
+
+test('the start screen shows a directory’s five newest sessions, and the rest on request', async ({ page }) => {
+  const busy = realpathSync(mkdtempSync(join(tmpdir(), 'ac-e2e-busy-')));
+  for (let i = 1; i <= 7; i++) {
+    const lines = [
+      { type: 'session', version: 3, id: `busy${i}`, timestamp: '2026-10-01T10:00:00.000Z', cwd: busy },
+      { type: 'message', message: { role: 'user', content: `task ${i}` } },
+    ];
+    writeFileSync(fileOf(`busy${i}`), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+    const at = new Date(Date.now() - (10 - i) * MINUTE);
+    utimesSync(fileOf(`busy${i}`), at, at);
+  }
+  const pane = await addOmpPane(page);
+  await pane.getByRole('textbox', { name: 'Directory' }).fill(busy);
+  const picker = pane.getByRole('list', { name: 'Resume a session here' });
+  await expect(titles(picker)).toHaveText(['task 7', 'task 6', 'task 5', 'task 4', 'task 3']);
+  await pane.getByRole('button', { name: 'Show 2 more' }).click();
+  await expect(titles(picker)).toHaveText(['task 7', 'task 6', 'task 5', 'task 4', 'task 3', 'task 2', 'task 1']);
+  await expect(pane.getByRole('button', { name: /^Show \d+ more$/ })).toBeHidden();
+});
+
+test('the start screen marks sessions open in another window and will not open them twice; Enter resumes', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await row(window, 'Zebra cleanup').getByRole('button', { name: 'Resume' }).click();
+  await expect(page.locator('.widget[data-widget="omp"] .omp-user')).toContainText('earlier question');
+
+  const pane = await addOmpPane(page);
+  await pane.getByRole('textbox', { name: 'Directory' }).fill(ALPHA);
+  const picker = pane.getByRole('list', { name: 'Resume a session here' });
+  const zebra = row(picker, 'Zebra cleanup');
+  await expect(zebra.locator('.sessions-badge')).toHaveText('open');
+  await zebra.click();
+  await zebra.press('Enter');
+  await settle(page);
+  await expect(pane.getByRole('button', { name: 'Start omp' }), 'still on the start screen').toBeVisible();
+  expect(await liveOn(page, 'zebra')).toHaveLength(1);
+
+  await row(picker, 'Fix the login flow').focus();
+  await page.keyboard.press('Enter');
+  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  expect(await liveOn(page, 'login')).toHaveLength(1);
+});
+
+test('/resume in a running pane lists its directory’s sessions and switches the pane to the one picked', async ({ page }) => {
+  const pane = await addOmpPane(page);
+  await pane.getByRole('textbox', { name: 'Directory' }).fill(ALPHA);
+  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await expect(pane.getByText('Fake Model')).toBeVisible();
+  const first = (await (await page.request.get('/api/sessions')).json()).sessions.find((/** @type {any} */ s) => s.cwd === ALPHA && s.status === 'ready');
+  const draft = pane.locator('textarea');
+  const picker = pane.getByRole('list', { name: 'Resume a session in this directory' });
+
+  await draft.fill('/res');
+  await expect(pane.locator('.omp-suggestion-name')).toHaveText(['/resume']);
+
+  /** @type {string[]} */
+  const sent = [];
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc')) sent.push(String(r.postDataJSON()?.message ?? r.postDataJSON()?.type));
+  });
+  await draft.fill('/resume zebra');
+  await draft.press('Enter');
+  await expect(titles(picker)).toHaveText(['Zebra cleanup']);
+  await expect(draft).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(picker).toBeHidden();
+
+  await draft.fill('/resume');
+  await draft.press('Enter');
+  await expect(titles(picker)).toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  await pane.locator('.omp-transcript').click();
+  await expect(picker, 'a click elsewhere closes it').toBeHidden();
+  expect(sent.filter((m) => m.startsWith('/resume')), '/resume never reaches omp').toEqual([]);
+
+  await draft.fill('/resume');
+  await draft.press('Enter');
+  await row(picker, 'Fix the login flow').click();
+  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  expect(await liveOn(page, 'login')).toHaveLength(1);
+  const { sessions } = await (await page.request.get('/api/sessions')).json();
+  expect(sessions.find((/** @type {any} */ s) => s.id === first.id)?.status, 'the old session was stopped').toBe('exited');
+});
+
+test('/resume during a running turn asks before stopping it', async ({ page }) => {
+  const pane = await addOmpPane(page);
+  await pane.getByRole('textbox', { name: 'Directory' }).fill(ALPHA);
+  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await expect(pane.getByText('Fake Model')).toBeVisible();
+  const draft = pane.locator('textarea');
+  await draft.fill('something slow');
+  await draft.press('Enter');
+  await expect(pane.locator('.omp-activity')).toHaveText('working');
+
+  await draft.fill('/resume');
+  await draft.press('Enter');
+  const picker = pane.getByRole('list', { name: 'Resume a session in this directory' });
+  await row(picker, 'Zebra cleanup').click();
+  await expect(pane.getByText('A turn is running. Stop it and resume “Zebra cleanup”?')).toBeVisible();
+  await pane.getByRole('button', { name: 'Stop and resume' }).click();
+  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  expect(await liveOn(page, 'zebra')).toHaveLength(1);
 });

@@ -6,7 +6,9 @@
  *
  *   GET    /api/config                 → DaemonConfig
  *   GET    /api/ui                     → { version }: the UI files' version now (see `ui-files.js`)
- *   GET    /api/history?q=words        → { sessions: PastSession[] } (unordered; every word must match)
+ *   GET    /api/history?q=words&cwd=dir → { sessions: PastSession[] } (unordered; every word must
+ *                                      match; `cwd`, resolved as a session's is, must be the
+ *                                      session's directory exactly)
  *   GET    /api/sessions               → { sessions: SessionMeta[] }
  *   POST   /api/sessions               { cwd, resume? | fork? } → 201 { session: SessionMeta }
  *                                      (`resume` continues a journal, `fork` starts a new session

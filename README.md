@@ -9,7 +9,7 @@ as many as you like, side by side.
 
 | Window | What it does |
 | --- | --- |
-| **omp** | Chat with an agent in a directory: streamed replies, tool calls, model and thinking level, slash commands, approvals and questions, steer or stop. Start a line with `!` to run it as a shell command in the session's directory, even while the agent works (the message box turns into a shell line). Comment on or **Ask** about selected reply text (with follow-up questions, kept out of the chat); paste screenshots or drop files to attach them. **Fork** continues a copy of the conversation in a new window, as a session of its own. **Config** → *Only prompts and responses* hides the work in between, per pane. |
+| **omp** | Chat with an agent in a directory, or resume one of that directory's past sessions from the start screen (or with `/resume` in a running pane): streamed replies, tool calls, model and thinking level, slash commands, approvals and questions, steer or stop. Start a line with `!` to run it as a shell command in the session's directory, even while the agent works (the message box turns into a shell line). Comment on or **Ask** about selected reply text (with follow-up questions, kept out of the chat); paste screenshots or drop files to attach them. **Fork** continues a copy of the conversation in a new window, as a session of its own. **Config** → *Only prompts and responses* hides the work in between, per pane. |
 | **Sessions** | Every past omp conversation, searchable and sortable. Drag one onto the grid (or press **Resume**) to continue it. |
 | **Scratchpad** | Markdown notes with inline screenshots and files, stored in `~/.cockpit/scratchpads/`. |
 

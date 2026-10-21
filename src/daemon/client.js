@@ -37,7 +37,7 @@ export class DaemonError extends Error {
  *   meta(session: string): SessionMeta | null,
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
- *   history(query?: string): Promise<PastSession[]>,
+ *   history(filter?: { query?: string, cwd?: string }): Promise<PastSession[]>,
  *   scratchpads(): Promise<ScratchpadSummary[]>,
  *   scratchpad(id: string): Promise<Scratchpad>,
  *   saveScratchpad(id: string, text: string, base: string, options?: { keepalive?: boolean }): Promise<ScratchpadSave>,
@@ -282,8 +282,11 @@ export function createDaemonClient(env = {}) {
       sessionListeners.add(fn);
       return () => sessionListeners.delete(fn);
     },
-    async history(query = '') {
-      const body = await request(`/api/history${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+    async history({ query = '', cwd = '' } = {}) {
+      const search = new URLSearchParams();
+      if (query) search.set('q', query);
+      if (cwd) search.set('cwd', cwd);
+      const body = await request(`/api/history${search.size ? `?${search}` : ''}`);
       return body.sessions;
     },
     async scratchpads() {
