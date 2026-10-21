@@ -3,7 +3,7 @@
  * so a browser stays signed in across daemon restarts.
  */
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
@@ -18,6 +18,11 @@ export async function loadToken(stateDir) {
     return existing;
   }
   const token = randomBytes(32).toString('hex');
-  await writeFile(file, `${token}\n`, { mode: 0o600 }); // not Bun.write: it ignores `mode`
+  // A file's mode is set only when it is created, so the token goes into a new file that
+  // replaces any unusable one (whatever that one's mode). writeFile, since Bun.write
+  // ignores `mode`.
+  const tmp = `${file}.${process.pid}.tmp`;
+  await writeFile(tmp, `${token}\n`, { mode: 0o600 });
+  await rename(tmp, file);
   return token;
 }

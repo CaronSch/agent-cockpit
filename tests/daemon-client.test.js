@@ -33,6 +33,9 @@ const frame = (session, seq) => ({ kind: 'frame', frame: { type: 'agent_start' }
 /** @param {string} bootId @param {SessionMeta[]} [sessions] @param {string} [ui] @returns {StreamEvent} */
 const hello = (bootId, sessions = [], ui = 'v1') => ({ kind: 'hello', bootId, sessions, ui });
 
+/** The daemon's answer to POST /rpc: the id omp's response will carry on the stream. */
+const accepted = () => new Response(JSON.stringify({ id: 'ac_7' }), { status: 202 });
+
 /** @param {number} [status] @param {(url: string) => Response | null} [route] */
 async function connectedClient(status = 200, route = () => null) {
   FakeSource.opened = [];
@@ -133,9 +136,8 @@ describe('daemon client', () => {
     assert.equal(source, undefined);
   });
 
-  test('a request the daemon released resolves with omp’s answer from the stream', async () => {
-    const pending = () => new Response(JSON.stringify({ pending: true, id: 'ac_7' }), { status: 202 });
-    const { client, source } = await connectedClient(200, (url) => (url.endsWith('/rpc') ? pending() : null));
+  test('a command resolves with omp’s answer from the stream', async () => {
+    const { client, source } = await connectedClient(200, (url) => (url.endsWith('/rpc') ? accepted() : null));
     source.deliver(hello('b1', [meta('s1')]));
     const answer = client.rpc('s1', { type: 'bash', command: 'sleep 9' });
     await new Promise((r) => setImmediate(r));
@@ -144,9 +146,21 @@ describe('daemon client', () => {
     assert.equal((await answer).id, 'ac_7');
   });
 
-  test('a released request fails instead of hanging when omp exits first', async () => {
-    const pending = () => new Response(JSON.stringify({ pending: true, id: 'ac_7' }), { status: 202 });
-    const { client, source } = await connectedClient(200, (url) => (url.endsWith('/rpc') ? pending() : null));
+  test('a command whose answer the stream delivered before the request returned resolves with it', async () => {
+    /** @type {FakeSource | undefined} */
+    let stream;
+    const { client, source } = await connectedClient(200, (url) => {
+      if (!url.endsWith('/rpc')) return null;
+      stream?.deliver({ kind: 'frame', frame: { type: 'response', id: 'ac_7', command: 'get_state', success: true }, seq: 1, at: 0, session: 's1' });
+      return accepted();
+    });
+    stream = source;
+    source.deliver(hello('b1', [meta('s1')]));
+    assert.equal((await client.rpc('s1', { type: 'get_state' })).command, 'get_state');
+  });
+
+  test('a command fails instead of hanging when omp exits before answering', async () => {
+    const { client, source } = await connectedClient(200, (url) => (url.endsWith('/rpc') ? accepted() : null));
     source.deliver(hello('b1', [meta('s1')]));
     const answer = client.rpc('s1', { type: 'login', providerId: 'x' });
     await new Promise((r) => setImmediate(r));

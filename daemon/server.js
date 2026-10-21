@@ -104,17 +104,10 @@ function errorResponse(err) {
 }
 
 /**
- * How long `/rpc` holds a request open waiting for omp's answer. Some commands answer only
- * when they finish (`bash`, `login`, `compact`); holding those would tie up the browser's
- * six connections per host and freeze the page, so after this the answer moves to the stream.
- */
-export const RPC_HOLD_MS = 2000;
-
-/**
  * Starts serving on `127.0.0.1:port` (0 picks a free port); throws if the port is taken.
- * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, workspaces: Workspaces, token: string, root: string, config: DaemonConfig, port: number, rpcHoldMs?: number }} options
+ * @param {{ hub: Hub, history: History, scratchpads: Scratchpads, attachments: Attachments, workspaces: Workspaces, token: string, root: string, config: DaemonConfig, port: number }} options
  */
-export function createDaemonServer({ hub, history, scratchpads, attachments, workspaces, token, root, config, port, rpcHoldMs = RPC_HOLD_MS }) {
+export function createDaemonServer({ hub, history, scratchpads, attachments, workspaces, token, root, config, port }) {
   const rootDir = resolve(root);
   const indexFile = resolve(rootDir, INDEX_FILE);
   const staticDirs = STATIC_DIRS.map((dir) => resolve(rootDir, dir));
@@ -315,10 +308,12 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
           const session = sessionOf(req);
           const command = asCommand(await readJson(req));
           if (command.type === 'extension_ui_response') throw new HttpError(400, 'send dialog answers to /ui');
+          // omp's answer travels on the stream, never in this request: some commands answer only
+          // when they finish (`bash`, `login`, `compact`), and holding those open would tie up
+          // the browser's six connections per host.
           const { id, response } = session.command(command);
-          response.catch(() => {}); // after the hold, the outcome travels on the stream
-          const answer = await Promise.race([response, Bun.sleep(rpcHoldMs).then(() => null)]);
-          return answer ? json(answer) : json({ pending: true, id }, 202);
+          response.catch(() => {});
+          return json({ id }, 202);
         },
       }),
       '/api/sessions/:id/files': api({

@@ -2,7 +2,6 @@
  * One omp process in RPC mode: launch, protocol setup, command/response correlation and
  * lifecycle, with everything it does reported as session events.
  */
-import { dirname } from 'node:path';
 import { createFrameDecoder } from './frame-decoder.js';
 /** @import { RpcResponse, SessionEvent, SessionMeta } from './wire.js' */
 
@@ -39,9 +38,6 @@ const STATE_CHANGING_FRAMES = new Set(['agent_end', 'model_changed', 'thinking_l
 /** @param {Record<string, any>} frame */
 const changesState = (frame) =>
   frame.type === 'response' ? frame.success === true && STATE_CHANGING_COMMANDS.has(frame.command) : STATE_CHANGING_FRAMES.has(frame.type);
-
-/** The test fake (and omp installed through bun) start with `#!/usr/bin/env bun`: let them find the bun running the daemon. */
-export const OMP_ENV = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ''}` };
 
 const CLOSE_GRACE_MS = 5000;
 const MAX_GARBLED_CHARS = 64 * 1024;
@@ -95,7 +91,6 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
-      env: OMP_ENV,
     });
     update({ pid: child.pid });
   } catch (err) {

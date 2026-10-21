@@ -67,11 +67,11 @@ The daemon listens on loopback only and refuses requests from other sites.
 | --- | --- |
 | `--port <n>` / `COCKPIT_PORT` | `4777` |
 | `--omp <path>` / `COCKPIT_OMP` | `omp` on `PATH` |
+| `--cwd <dir>` / `COCKPIT_CWD` (the directory a new omp window suggests) | your home directory |
 | `COCKPIT_STATE_DIR` (token, scratchpads, attachments, workspaces) | `~/.cockpit` |
 | `COCKPIT_OMP_SESSIONS` (omp's session files) | `~/.omp/agent/sessions` |
 
-Pass flags through with `bun start --port 4800`, or run `bun daemon/main.js`
-from another directory to make that the suggested working directory.
+Pass flags through with `bun start --port 4800 --cwd ~/code/app`.
 
 ## Develop
 
