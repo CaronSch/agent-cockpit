@@ -1,13 +1,35 @@
-/** Where the e2e daemon listens and keeps its token, shared by the Playwright config and the specs. */
+/**
+ * Where the e2e daemon listens and keeps its state, shared by the Playwright config and the specs.
+ *
+ * Each run has a free port and a temporary directory of its own, so runs in two checkouts at
+ * once never meet. The runner process decides when it loads the config; its workers inherit
+ * the choice through the environment.
+ */
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export const E2E_PORT = 4173;
-export const E2E_STATE_DIR = join(tmpdir(), 'cockpit-e2e');
+/** A port nothing listens on now. @returns {Promise<number>} */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = /** @type {import('node:net').AddressInfo} */ (server.address());
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+process.env.COCKPIT_E2E_PORT ??= String(await freePort());
+process.env.COCKPIT_E2E_DIR ??= mkdtempSync(join(tmpdir(), 'cockpit-e2e-'));
+
+export const E2E_PORT = Number(process.env.COCKPIT_E2E_PORT);
+export const E2E_STATE_DIR = join(process.env.COCKPIT_E2E_DIR, 'state');
 /** Stands in for ~/.omp/agent/sessions; the Sessions spec writes its journals here. */
-export const E2E_OMP_SESSIONS = join(tmpdir(), 'cockpit-e2e-omp-sessions');
+export const E2E_OMP_SESSIONS = join(process.env.COCKPIT_E2E_DIR, 'omp-sessions');
 
 /** The token the e2e daemon wrote on startup. */
 export const e2eToken = () => readFileSync(join(E2E_STATE_DIR, 'token'), 'utf8').trim();

@@ -19,6 +19,5 @@ export default defineConfig({
     command: `bun daemon/main.js --port ${E2E_PORT} --omp tests/fixtures/fake-omp.js`,
     env: { COCKPIT_STATE_DIR: E2E_STATE_DIR, COCKPIT_OMP_SESSIONS: E2E_OMP_SESSIONS },
     url: BASE_URL,
-    reuseExistingServer: !CI,
   },
 });
