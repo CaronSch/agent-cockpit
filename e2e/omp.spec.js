@@ -1118,3 +1118,53 @@ test('closing the window ends its omp session', async ({ page }) => {
     .poll(async () => (await (await page.request.get('/api/sessions')).json()).sessions.find((/** @type {any} */ s) => s.id === session)?.status)
     .toBe('exited');
 });
+
+test('Tab indents in the message box, Shift+Tab outdents, Cmd/Ctrl+Z undoes it; an @ list still takes Tab; Esc then Tab leaves', async ({ page }) => {
+  const project = mkdtempSync(join(tmpdir(), 'ac-e2e-indent-'));
+  writeFileSync(join(project, 'notes.md'), 'notes');
+  await openWorkbench(page);
+  const pane = await startedPane(page, project);
+  const draft = pane.locator('textarea');
+  /** The selected text. */
+  const selection = () =>
+    draft.evaluate((node) => {
+      const a = /** @type {HTMLTextAreaElement} */ (node);
+      return a.value.slice(a.selectionStart, a.selectionEnd);
+    });
+
+  // No selection: the indent goes in at the caret.
+  await draft.pressSequentially('list');
+  await draft.press('ArrowLeft');
+  await draft.press('ArrowLeft');
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('li  st');
+  await expect(draft).toBeFocused();
+
+  // A selection over lines: every line moves, and the same text stays selected.
+  await draft.fill('- one\n- two');
+  await draft.press('ControlOrMeta+a');
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('  - one\n  - two');
+  expect(await selection()).toBe('  - one\n  - two');
+  await draft.press('Tab');
+  await draft.press('Shift+Tab');
+  await expect(draft).toHaveValue('  - one\n  - two');
+  await draft.press('ControlOrMeta+z');
+  await expect(draft).toHaveValue('    - one\n    - two');
+  await draft.press('ControlOrMeta+z');
+  await expect(draft).toHaveValue('  - one\n  - two');
+  await draft.press('ControlOrMeta+Shift+z');
+  await expect(draft).toHaveValue('    - one\n    - two');
+
+  // An open @ list completes with Tab, as before.
+  await draft.fill('read @no');
+  await expect(pane.locator('.omp-suggest').getByRole('option')).toHaveText(['notes.md']);
+  await draft.press('Tab');
+  await expect(draft).toHaveValue('read @notes.md ');
+
+  // Esc arms the next Tab to leave the box, which keeps its text.
+  await draft.press('Escape');
+  await draft.press('Tab');
+  await expect(pane.getByRole('button', { name: 'Send' })).toBeFocused();
+  await expect(draft).toHaveValue('read @notes.md ');
+});

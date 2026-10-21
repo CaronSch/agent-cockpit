@@ -267,3 +267,50 @@ test('another tab showing the same pad follows it as it is saved', async ({ page
   await expect(there.locator('.pad-text').first()).toHaveValue('typed in the first tab, and more');
   expect(await editorText(there)).toBe('typed in the first tab, and more');
 });
+
+test('Tab indents scratchpad text and saves it, Shift+Tab outdents, Cmd/Ctrl+Z undoes it; Esc then Tab leaves', async ({ page }) => {
+  await openWorkbench(page);
+  const window = await addScratchpad(page);
+  const area = window.locator('.pad-text').first();
+  /** The selected text. */
+  const selection = () =>
+    area.evaluate((node) => {
+      const a = /** @type {HTMLTextAreaElement} */ (node);
+      return a.value.slice(a.selectionStart, a.selectionEnd);
+    });
+
+  // No selection: the indent goes in at the caret, and the pad saves it.
+  await area.fill('todo\nfirst\nsecond');
+  await area.evaluate((node) => /** @type {HTMLTextAreaElement} */ (node).setSelectionRange(5, 5)); // the start of `first`
+  await area.press('Tab');
+  await expect(area).toHaveValue('todo\n  first\nsecond');
+  await expect(window.locator('.scratchpad-status')).toHaveText('Saved');
+  const file = await padFile(window);
+  expect(readFileSync(file, 'utf8')).toBe('todo\n  first\nsecond');
+
+  // A selection over lines: each one moves by one indent, at most, and stays selected.
+  await area.evaluate((node) => /** @type {HTMLTextAreaElement} */ (node).setSelectionRange(7, 'todo\n  first\nsecond'.length));
+  await area.press('Tab');
+  await expect(area).toHaveValue('todo\n    first\n  second');
+  expect(await selection()).toBe('first\n  second');
+  await area.press('Shift+Tab');
+  await area.press('Shift+Tab');
+  await expect(area).toHaveValue('todo\nfirst\nsecond');
+  expect(await selection()).toBe('first\nsecond');
+  await expect(window.locator('.scratchpad-status')).toHaveText('Saved');
+  expect(readFileSync(file, 'utf8')).toBe('todo\nfirst\nsecond');
+
+  // Each indent is one step of the field's own undo.
+  await area.press('ControlOrMeta+z');
+  await expect(area).toHaveValue('todo\n  first\nsecond');
+  await area.press('ControlOrMeta+z');
+  await expect(area).toHaveValue('todo\n    first\n  second');
+  await expect(window.locator('.scratchpad-status')).toHaveText('Saved');
+  expect(readFileSync(file, 'utf8')).toBe('todo\n    first\n  second');
+
+  // Esc arms the next Tab to leave the text, which keeps it.
+  await area.press('Escape');
+  await area.press('Tab');
+  await expect(area).not.toBeFocused();
+  await expect(area).toHaveValue('todo\n    first\n  second');
+});

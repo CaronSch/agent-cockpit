@@ -113,7 +113,9 @@ What runs today:
   replied. Dragging **Send** onto the grid does the same, placed where it is
   dropped, and sends the message there instead (the box empties once the fork is
   placed; a click still sends here). The message box starts one line high, set like
-  scratchpad text, and grows with the prompt; Up
+  scratchpad text, and grows with the prompt; Tab indents by two spaces as in a code
+  editor (every selected line; Shift+Tab outdents; Cmd/Ctrl+Z undoes it) unless a
+  suggestion list is open, and Esc then Tab leaves the box (`src/ui/indent.js`); Up
   in an empty box steps back through the conversation's prompts and `!` commands
   (Down forward), as omp's own editor does; a line starting with `!` runs
   as a shell command in the session's directory, at once even mid-turn, and while
@@ -157,7 +159,8 @@ What runs today:
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
   Markdown files in `~/.cockpit/scratchpads/`; pasted or dropped
-  screenshots and files are stored beside them and shown inline. An edit made
+  screenshots and files are stored beside them and shown inline. Tab indents pad text
+  as in the message box. An edit made
   elsewhere (the file itself, another tab) is never overwritten without asking.
 
 Not built yet: saved-context pins, terminal panes, process view,
@@ -343,6 +346,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
 - `src/ui/dom.js` — Element construction helpers: elements, buttons that never submit a form, and file-drag checks.
 - `src/ui/format.js` — Text formatters shared across the UI: error messages, home-relative paths and JSON dumps, with no DOM.
+- `src/ui/indent.js` — Tab and Shift+Tab indent and outdent text in a textarea, as in a code editor; Esc then Tab leaves the field instead, so keyboard users are never trapped in it.
 - `src/ui/palette.js` — "Add widget" palette.
 - `src/ui/screen-switcher.js` — The screen switcher in the top bar: which screen of its workspace this window shows, and a menu of every screen, with what it holds and where it is open, to open one here or delete it.
 - `src/ui/update-notice.js` — The "updated, reload" notice in the top bar: shown while the daemon serves other UI files than this page loaded (see daemon/ui-files.js), so a tab left open never runs stale code unknowingly.
@@ -388,6 +392,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->
