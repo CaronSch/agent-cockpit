@@ -13,11 +13,17 @@ export const TOKEN_COOKIE = 'ac_token';
 
 /** @typedef {{ ok: true } | { ok: false, status: number, error: string }} Verdict */
 
+/**
+ * Names the daemon answers to. Each is loopback whatever DNS says: browsers hard-code
+ * `*.localhost` to loopback (RFC 6761). Kept explicit rather than every `*.localhost`.
+ */
+const HOSTNAMES = ['127.0.0.1', 'localhost', 'cockpit.localhost'];
+
 /** @param {number} port */
-export const ownOrigins = (port) => [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
+export const ownOrigins = (port) => HOSTNAMES.map((name) => `http://${name}:${port}`);
 
 /** @param {string | null} host @param {number} port */
-export const isAllowedHost = (host, port) => host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+export const isAllowedHost = (host, port) => HOSTNAMES.some((name) => host === `${name}:${port}`);
 
 /** @param {string | null} header @returns {Map<string, string>} */
 export function parseCookies(header) {

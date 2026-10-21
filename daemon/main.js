@@ -73,7 +73,7 @@ try {
 }
 
 console.log(`Cockpit daemon on http://127.0.0.1:${port}`);
-console.log(`Open: http://127.0.0.1:${port}/?token=${token}`);
+console.log(`Open: http://cockpit.localhost:${port}/?token=${token}`);
 // Asked after the server is up: starting omp just to read its version takes most of a second.
 ompVersion(ompPath).then((version) =>
   console.log(version ? `omp: ${version}` : `omp: not found at "${ompPath}" (sessions will fail to start)`),

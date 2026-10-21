@@ -145,6 +145,29 @@ describe('loopback guard', () => {
     }
   });
 
+  test('the workbench answers at cockpit.localhost, pages and API alike', async () => {
+    const name = `cockpit.localhost:${port}`;
+    const headers = { host: name, origin: `http://${name}` };
+    assert.equal((await call({ path: '/', headers })).status, 200);
+    assert.equal((await call({ path: '/api/config', headers })).status, 200);
+    const created = await call({ method: 'POST', path: '/api/sessions', body: { cwd }, headers });
+    assert.equal(created.status, 201);
+    await call({ method: 'DELETE', path: `/api/sessions/${created.json.session.id}`, headers });
+  });
+
+  test('look-alikes of cockpit.localhost are refused as Host and as Origin', async () => {
+    const sessionsBefore = hub.list().length;
+    const lookAlikes = [`evil.localhost:${port}`, `cockpit.localhost.evil.com:${port}`, `cockpit.localhost:${port + 1}`];
+    for (const name of lookAlikes) {
+      for (const path of ['/api/config', '/']) {
+        assert.equal((await call({ path, headers: { host: name } })).status, 403, `Host ${name} ${path}`);
+      }
+      const res = await call({ method: 'POST', path: '/api/sessions', body: { cwd }, headers: { origin: `http://${name}` } });
+      assert.equal(res.status, 403, `Origin ${name}`);
+    }
+    assert.equal(hub.list().length, sessionsBefore);
+  });
+
   test('the token link sets an HttpOnly, SameSite=Strict cookie and drops only the token from the URL', async () => {
     const res = await call({ path: `/?token=${TOKEN}&workspace=side`, auth: false });
     assert.equal(res.status, 302);
