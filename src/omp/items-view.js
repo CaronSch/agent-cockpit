@@ -24,17 +24,17 @@ export function renderItem(item, ctx) {
       node.append(el('div', 'omp-role', item.byAgent ? 'agent → omp' : 'you'));
       const body = el('div', 'omp-md');
       body.append(renderMarkdown(item.text));
-      if (item.images) body.append(el('p', 'omp-muted', `[${item.images} image${item.images === 1 ? '' : 's'}]`));
+      if (item.images) body.append(statusLine('muted', `[${item.images} image${item.images === 1 ? '' : 's'}]`));
       node.append(body);
       return node;
     }
     case 'assistant': {
       const node = el('div', 'omp-msg omp-assistant');
       item.blocks.forEach((block, i) => node.append(renderBlock(block, `${item.key}:${i}`, ctx)));
-      if (!item.ended && item.blocks.length === 0) node.append(el('p', 'omp-muted', '…'));
-      if (item.errorMessage) node.append(el('p', 'omp-error', item.errorMessage));
-      else if (item.stopReason === 'aborted') node.append(el('p', 'omp-muted', 'aborted'));
-      else if (item.stopReason === 'length') node.append(el('p', 'omp-muted', 'stopped: output length limit'));
+      if (!item.ended && item.blocks.length === 0) node.append(statusLine('muted', '…'));
+      if (item.errorMessage) node.append(statusLine('error', item.errorMessage));
+      else if (item.stopReason === 'aborted') node.append(statusLine('muted', 'aborted'));
+      else if (item.stopReason === 'length') node.append(statusLine('muted', 'stopped: output length limit'));
       return node;
     }
     case 'tool': {
@@ -48,12 +48,12 @@ export function renderItem(item, ctx) {
         el('span', 'omp-status', STATUS_GLYPH[item.status]),
         el('code', 'omp-bash-cmd', `${item.language === 'bash' ? '$' : '>>>'} ${item.command}`),
       );
-      if (item.exitCode !== null && item.exitCode !== 0) head.append(el('span', 'omp-muted', `exit ${item.exitCode}`));
-      if (item.status === 'cancelled') head.append(el('span', 'omp-muted', 'cancelled'));
+      if (item.exitCode !== null && item.exitCode !== 0) head.append(statusLine('muted', `exit ${item.exitCode}`, 'span'));
+      if (item.status === 'cancelled') head.append(statusLine('muted', 'cancelled', 'span'));
       node.append(head);
       if (item.output) node.append(el('pre', 'omp-pre', item.output));
-      if (item.truncated) node.append(el('p', 'omp-muted', 'output truncated'));
-      if (item.error) node.append(el('p', 'omp-error', item.error));
+      if (item.truncated) node.append(statusLine('muted', 'output truncated'));
+      if (item.error) node.append(statusLine('error', item.error));
       return node;
     }
     case 'note': {
@@ -114,11 +114,18 @@ function toolCard(id, block, run, ctx) {
     } else if (run?.output) {
       parts.push(el('div', 'omp-label', 'output'), el('pre', 'omp-pre', run.output));
     } else if (status === 'pending') {
-      parts.push(el('p', 'omp-muted', 'no result'));
+      parts.push(statusLine('muted', 'no result'));
     }
     return parts;
   });
 }
+
+/**
+ * A status line inside an item (how a reply ended, an exit code, an error), styled as a
+ * transcript note so the transcript keeps one font for everything but message prose.
+ * @param {'muted' | 'error'} level @param {string} text @param {'div' | 'span'} [tag]
+ */
+const statusLine = (level, text, tag = 'div') => el(tag, `omp-note is-${level}`, text);
 
 /**
  * A `<details>` whose body is built only while open.

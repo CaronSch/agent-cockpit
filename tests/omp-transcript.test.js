@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { addNote, applyEvent, askAnswers, createTranscript, removeDialog } from '../src/omp/transcript.js';
+import { addNote, applyEvent, askAnswers, conversationName, createTranscript, removeDialog } from '../src/omp/transcript.js';
 /** @import { SessionEvent } from '../daemon/wire.js' */
 /** @import { Transcript } from '../src/omp/transcript.js' */
 
@@ -395,5 +395,21 @@ describe('bash and resume', () => {
   test('get_messages in a session that streamed its own history seeds nothing', () => {
     const state = run([session(null), frame({ type: 'message_end', message: history[0], messageId: 'm1' }), messagesReply('ac_3')]);
     assert.deepEqual(kinds(state), ['user']);
+  });
+});
+
+describe('conversation name', () => {
+  /** @param {string} text @param {string} [attribution] */
+  const user = (text, attribution = 'user') => frame({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text }], attribution }, messageId: `u-${text}` });
+
+  test('an untitled conversation is named by the user’s first prompt, on one line', () => {
+    const state = run([user('steer here', 'agent'), user('fix the\nlogin bug'), user('and tests')]);
+    assert.equal(conversationName(state), 'fix the login bug');
+    assert.equal(conversationName(run([])), null);
+  });
+
+  test('omp’s title, once the user names the session, wins over the first prompt', () => {
+    const state = run([user('fix the login bug'), frame({ type: 'session_info_update', title: 'Login fix', sessionId: 'x' })]);
+    assert.equal(conversationName(state), 'Login fix');
   });
 });

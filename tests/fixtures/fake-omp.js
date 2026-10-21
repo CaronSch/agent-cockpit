@@ -13,8 +13,11 @@
  * - contains "todo": a `todo` tool call setting a three-task list, one done and one in progress
  *   (its result carries the whole list in `details.phases`, as omp's does; so does `get_state`)
  * - contains "think": the final reply opens with a thinking block
+ * - contains "interrupt": the reply ends as an aborted one does (`stopReason: 'aborted'` with
+ *   "Interrupted by user"), and the prompt's result says it was aborted
  * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
- *   prompt that says something: "hi" alone is too little to name a session by)
+ *   prompt that says something: "hi" alone is too little to name a session by; that
+ *   outcome follows the answer, as omp's background title generation does)
  * - `btw`: a side question, answered from the conversation and kept out of it as omp's is;
  *   the answer bolds the first quoted line; a follow-up (`recordId`) appends a turn to its
  *   topic and answers from the topic's quote. A question containing "slow" waits 1.5 s, one
@@ -105,10 +108,13 @@ function record(message) {
   return messageId;
 }
 
-/** @param {string} text @param {string | null} [thinking] streamed as a thinking block ahead of the text */
-function streamAssistant(text, thinking = null) {
+/**
+ * @param {string} text @param {string | null} [thinking] streamed as a thinking block ahead of the text
+ * @param {{ stopReason: string, errorMessage?: string }} [ending] how the message ends
+ */
+function streamAssistant(text, thinking = null, ending = { stopReason: 'stop' }) {
   const content = [...(thinking === null ? [] : [{ type: 'thinking', thinking }]), { type: 'text', text }];
-  const final = { role: 'assistant', content, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: Date.now() };
+  const final = { role: 'assistant', content, provider: model.provider, model: model.id, usage, ...ending, timestamp: Date.now() };
   const messageId = record(final);
   out({ type: 'message_start', message: final, messageId }); // pre-filled, like real omp
   /** @param {Record<string, any>} event */
@@ -201,6 +207,8 @@ async function runPrompt(id, text) {
     const answer = await askDialog();
     const picked = answer.cancelled ? 'nothing (cancelled)' : (answer.answers?.[0]?.selectedOptions?.[0] ?? answer.answers?.[0]?.customInput);
     streamAssistant(`You picked **${picked}**.`);
+  } else if (/interrupt/.test(text)) {
+    streamAssistant('I was about to', null, { stopReason: 'aborted', errorMessage: 'Interrupted by user' });
   } else if (/table/.test(text)) {
     streamAssistant('Here it is:\n| When | What happens | Code |\n|---|---|---|\n| Now | Stuff happened | `tracked.rs:67` |');
   } else {
@@ -209,23 +217,30 @@ async function runPrompt(id, text) {
   out({ type: 'turn_end', message: messages.at(-1), toolResults: [] });
   out({ type: 'extension_ui_request', id: `ui-${Date.now()}-w`, method: 'setWidget', widgetKey: 'autoresearch' }); // omp clears it every turn
   out({ type: 'agent_end', messages: messages.slice(firstMessage), isTerminal: true, yielded: true });
-  out({ type: 'prompt_result', id, agentInvoked: true, status: 'completed', sessionSettled: true });
+  out({ type: 'prompt_result', id, agentInvoked: true, status: /interrupt/.test(text) ? 'aborted' : 'completed', sessionSettled: true });
   out({ type: 'session_settled' });
 }
 
-/** Like omp's builtin: output first, then the answer with `agentInvoked: false` and no `prompt_result`. @param {string | undefined} id @param {string} title */
+/**
+ * Like omp's builtin, answered with `agentInvoked: false` and no `prompt_result`. A given
+ * title is applied before the answer; with none, omp generates one in the background
+ * (builtin-lifecycle.ts `rename`), so the answer comes first and the outcome after it.
+ * @param {string | undefined} id @param {string} title
+ */
 function rename(id, title) {
-  const said = messages.filter((m) => m.role === 'user').map((m) => String(m.content?.[0]?.text ?? ''));
-  const topic = said.find((text) => !/^\s*hi\s*$/i.test(text));
-  const name = title || (topic ? `About ${topic.split(/\s+/).slice(0, 4).join(' ')}` : null);
-  if (!name) out({ type: 'command_output', text: 'Could not generate a session title. Use /rename <title> to set one.' });
-  else {
+  const apply = () => {
+    const said = messages.filter((m) => m.role === 'user').map((m) => String(m.content?.[0]?.text ?? ''));
+    const topic = said.find((text) => !/^\s*hi\s*$/i.test(text));
+    const name = title || (topic ? `About ${topic.split(/\s+/).slice(0, 4).join(' ')}` : null);
+    if (!name) return out({ type: 'command_output', text: 'Could not generate a session title. Use /rename <title> to set one.' });
     sessionName = name;
     persist();
     out({ type: 'session_info_update', title: name, sessionId });
     out({ type: 'command_output', text: `Session renamed to ${name}.` });
-  }
+  };
+  if (title) apply();
   ok(id, 'prompt', { agentInvoked: false });
+  if (!title) setTimeout(apply, 50);
 }
 
 /** Side topics by id, each one omp's record: its first turn, follow-ups in `followUps`. @type {Map<string, Record<string, any>>} */

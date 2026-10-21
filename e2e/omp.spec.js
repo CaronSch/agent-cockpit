@@ -209,6 +209,24 @@ test('the message box is set like scratchpad text and starts one line high, plac
   await expect.poll(lines).toBeCloseTo(2, 1);
 });
 
+test('status lines under a reply look like transcript notes, and a /rename the user runs shows its output', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'interrupt this');
+  const status = pane.locator('.omp-assistant').last().locator('.omp-note.is-error');
+  await expect(status).toHaveText('Interrupted by user');
+  const aborted = pane.locator('.omp-transcript > .omp-note', { hasText: 'prompt: Aborted' });
+  await expect(aborted).toBeVisible();
+  /** @param {import('@playwright/test').Locator} node */
+  const font = (node) => node.evaluate((e) => [getComputedStyle(e).fontFamily, getComputedStyle(e).fontSize]);
+  expect(await font(status)).toEqual(await font(aborted));
+  await expect(pane.locator('.omp-command-output'), 'the daemon runs no command by itself').toHaveCount(0);
+
+  // With no title omp generates one in the background: its outcome follows the answer.
+  await send(pane, '/rename');
+  await expect(pane.locator('.omp-command-output')).toHaveText('Session renamed to About interrupt this.');
+});
+
 test('the message box grows with the prompt, up to half the pane, and shrinks again after sending', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
@@ -451,7 +469,7 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
   await send(pane, 'hello');
   const reply = pane.locator('.omp-assistant').last();
   await expect(reply.locator('strong')).toHaveText('hello');
-  await expect(pane.getByText(/Session renamed/)).toBeVisible(); // the chat has settled
+  await expect(pane.getByText('idle')).toBeVisible(); // the chat has settled
   const transcript = pane.locator('.omp-transcript');
   const chat = await transcript.innerText();
 
@@ -524,7 +542,7 @@ test('Ask takes follow-ups in the same topic, one at a time, and keeps the whole
   await send(pane, 'hello');
   const reply = pane.locator('.omp-assistant').last();
   await expect(reply.locator('strong')).toHaveText('hello');
-  await expect(pane.getByText(/Session renamed/)).toBeVisible(); // the chat has settled
+  await expect(pane.getByText('idle')).toBeVisible(); // the chat has settled
   const transcript = pane.locator('.omp-transcript');
   const chat = await transcript.innerText();
   const pop = pane.locator('.omp-quote-pop');
@@ -920,9 +938,12 @@ test('the window’s top bar names its conversation, and the name is saved with 
   const label = pane.locator('.widget-label');
   await expect(label, 'a new session has no name yet').toBeHidden();
   await send(pane, 'fix the login bug');
-  await expect(label).toHaveText('About fix the login bug');
-  await expect(pane.getByRole('heading', { name: 'omp About fix the login bug' })).toBeVisible();
-  await expect.poll(async () => (await savedParams(page, workspace, pane))?.name).toBe('About fix the login bug');
+  await expect(label, 'untitled: named by the first prompt').toHaveText('fix the login bug');
+  await expect(pane.getByRole('heading', { name: 'omp fix the login bug' })).toBeVisible();
+  await expect.poll(async () => (await savedParams(page, workspace, pane))?.name).toBe('fix the login bug');
+  await send(pane, '/rename Login fix');
+  await expect(label, 'a title the user gives wins').toHaveText('Login fix');
+  await expect.poll(async () => (await savedParams(page, workspace, pane))?.name).toBe('Login fix');
 });
 
 test('Up and Down in the message box step through what was sent, as in a shell', async ({ page }) => {

@@ -96,8 +96,10 @@ What runs today:
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
   a running turn, and resume the conversation after a daemon restart. Several
   panes can run side by side, each bound to its own session; the window's top
-  bar names its conversation (omp's session title, saved with the window, so it
-  still shows once the session has ended). **Fork** continues
+  bar names its conversation (omp's session title, or the first prompt while it
+  has none, saved with the window, so it still shows once the session has ended).
+  The daemon never names a session by itself: a title comes from a `/rename` the
+  user runs. **Fork** continues
   a copy of a pane's conversation in a new pane, as a session of its own (omp's
   `--fork`: a new journal, the original runs on untouched); it stays off until
   omp has saved the conversation, which a new session does once the model has
@@ -134,9 +136,8 @@ What runs today:
   files), searchable across titles, directories and prompts, sortable, and
   draggable onto the grid (by its row or its Resume button) to resume it in a new
   omp pane there; Resume clicked opens it beside the list. Sessions already open
-  in a pane are marked and cannot be opened twice. Sessions the daemon runs get a
-  summarising title: after a turn settles in an unnamed session it sends omp
-  `/rename`, which RPC mode otherwise never does by itself. A fork is listed as a
+  in a pane are marked and cannot be opened twice; an untitled one is listed by
+  its first prompt. A fork is listed as a
   session of its own, under the title it copied from its source.
 - Scratchpad windows: each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are

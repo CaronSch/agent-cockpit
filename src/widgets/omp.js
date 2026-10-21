@@ -12,7 +12,7 @@
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
-import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/transcript.js';
+import { addNote, applyEvent, conversationName, createTranscript, removeDialog } from '../omp/transcript.js';
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
@@ -1055,8 +1055,8 @@ function createPane(body, ctx, daemon) {
           void refreshState();
         }
       }
-      // The conversation's title names the window, and is saved with it for when omp is gone.
-      const name = state.session.name;
+      // The conversation's name names the window, and is saved with it for when omp is gone.
+      const name = conversationName(state);
       if (name && name !== params().name) {
         queueMicrotask(() => {
           if (closed || params().session !== session) return;
