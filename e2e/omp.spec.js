@@ -472,6 +472,62 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
   await expect(pane.locator('textarea')).toHaveValue('');
 });
 
+test('a click in the pane puts the caret in the message box, unless it is on a control or ends a selection', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await page.context().route('https://example.com/**', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '' }));
+  for (let i = 0; i < 6; i++) await send(pane, `hello ${i}`);
+  await send(pane, 'think [docs](https://example.com/)');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('a')).toHaveText('docs');
+  const draft = pane.locator('textarea');
+  const transcript = pane.locator('.omp-transcript');
+  const blur = () => draft.evaluate((d) => d.blur());
+
+  // Clicking reply text, even scrolled up, focuses the box with the caret at the end, and
+  // leaves the transcript where it was.
+  await transcript.evaluate((t) => (t.scrollTop = t.scrollHeight / 3));
+  const top = await transcript.evaluate((t) => t.scrollTop);
+  await draft.fill('draft text');
+  await blur();
+  await pane.locator('.omp-assistant').nth(2).locator('li').first().click();
+  await expect(draft).toBeFocused();
+  expect(await draft.evaluate((d) => /** @type {HTMLTextAreaElement} */ (d).selectionStart)).toBe(10);
+  expect(await transcript.evaluate((t) => t.scrollTop)).toBe(top);
+
+  // Dragging across reply text selects it: focus stays put and Comment and Ask appear.
+  await blur();
+  const items = reply.locator('li');
+  await reply.scrollIntoViewIfNeeded();
+  const from = await items.first().boundingBox();
+  const to = await items.last().boundingBox();
+  if (!from || !to) throw new Error('the reply has no list');
+  await page.mouse.move(from.x + 1, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect(pane.getByRole('button', { name: 'Comment' })).toBeVisible();
+  await expect(draft).not.toBeFocused();
+  await page.evaluate(() => getSelection()?.removeAllRanges());
+
+  // Controls keep their clicks: the thinking toggle, a link, a toolbar button.
+  await reply.locator('.omp-thinking summary').click();
+  await expect(reply.locator('.omp-thinking')).toHaveAttribute('open', '');
+  await expect(draft).not.toBeFocused();
+  const popup = page.waitForEvent('popup');
+  await reply.locator('a').click();
+  await (await popup).close();
+  await expect(draft).not.toBeFocused();
+  await pane.getByRole('button', { name: 'More actions' }).click();
+  await expect(pane.locator('.omp-more')).toBeVisible();
+  await expect(draft).not.toBeFocused();
+  await page.keyboard.press('Escape');
+
+  // Toolbar text that is not a control counts as the pane.
+  await pane.locator('.omp-activity').click();
+  await expect(draft).toBeFocused();
+});
+
 test('a ! draft turns the message box into a shell line that Enter runs in the session directory', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
