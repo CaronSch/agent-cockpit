@@ -225,8 +225,9 @@ telemetry views, cmux-parity features beyond the above.
   `http://cockpit.localhost:4777/?token=…` (it carries the token; the browser
   keeps a cookie afterwards). Cookies and browser storage are per address, so a
   new address (`127.0.0.1` still works) needs the printed URL once. `--port`,
-  `--omp <path>` (or `COCKPIT_OMP`) and `COCKPIT_STATE_DIR` override
-  the defaults.
+  `--omp <path>` (or `COCKPIT_OMP`), `--cwd <dir>` (or `COCKPIT_CWD`: the
+  directory a new omp window suggests, home by default) and `COCKPIT_STATE_DIR`
+  override the defaults.
 - Before committing, all of these must pass (CI in `.github/workflows/ci.yml`
   runs the same on every push to `main` and every PR):
   - `bun run typecheck`

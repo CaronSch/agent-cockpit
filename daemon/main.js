@@ -3,10 +3,11 @@
  * Daemon entry point (`bun start`): serves the workbench on loopback and runs the omp
  * processes it shows.
  *
- *   bun daemon/main.js [--port 4777] [--omp <path to omp>]
+ *   bun daemon/main.js [--port 4777] [--omp <path to omp>] [--cwd <dir>]
  *
- * omp defaults to the `omp` on PATH (install it from https://omp.sh).
- * Environment: COCKPIT_PORT, COCKPIT_OMP, COCKPIT_STATE_DIR (default ~/.cockpit; holds the
+ * omp defaults to the `omp` on PATH (install it from https://omp.sh). `--cwd` is the
+ * directory a new omp window suggests, the home directory unless given.
+ * Environment: COCKPIT_PORT, COCKPIT_OMP, COCKPIT_CWD, COCKPIT_STATE_DIR (default ~/.cockpit; holds the
  * access token, scratchpads/, attachments/, workspaces/ and archive/sessions/, the archived
  * omp sessions), COCKPIT_OMP_SESSIONS (omp's session journals; default
  * `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
@@ -35,11 +36,12 @@ async function ompVersion(ompPath) {
   }
 }
 
-const { values } = parseArgs({ options: { port: { type: 'string' }, omp: { type: 'string' } } });
+const { values } = parseArgs({ options: { port: { type: 'string' }, omp: { type: 'string' }, cwd: { type: 'string' } } });
 const port = Number(values.port ?? process.env.COCKPIT_PORT ?? 4777);
 const ompOption = values.omp ?? process.env.COCKPIT_OMP ?? 'omp';
 // A path (not a bare command name) must not depend on each session's cwd.
 const ompPath = ompOption.includes('/') ? resolve(ompOption) : ompOption;
+const defaultCwd = resolve(values.cwd ?? process.env.COCKPIT_CWD ?? homedir());
 const stateDir = process.env.COCKPIT_STATE_DIR ?? join(homedir(), '.cockpit');
 const ompSessions =
   process.env.COCKPIT_OMP_SESSIONS ?? join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.omp', 'agent'), 'sessions');
@@ -59,9 +61,8 @@ try {
     token,
     root: ROOT,
     port,
-    // npm sets INIT_CWD to where `npm start` was typed; `bun start` runs from the repo root.
     config: {
-      defaultCwd: process.env.INIT_CWD ?? process.cwd(),
+      defaultCwd,
       home: homedir(),
       scratchpadDir,
     },
