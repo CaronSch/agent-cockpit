@@ -465,8 +465,9 @@ test.describe('persistence', () => {
       await switcher.click();
       await expect(page.locator('.screen-menu')).toContainText(`${workspace}.json is not a workspace file`);
 
-      // The pane is never saved over the file.
-      await page.waitForTimeout(600);
+      // The pane is never saved over the file, not even by the page going away.
+      await page.reload();
+      await expect(switcher).toHaveText(/^Not saved/);
       expect(readFileSync(workspaceFile(workspace), 'utf8')).toBe(value);
     });
   }

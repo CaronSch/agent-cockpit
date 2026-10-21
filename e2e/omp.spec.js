@@ -90,6 +90,22 @@ async function savedParams(page, workspace, pane) {
 }
 
 /**
+ * Waits until the page has heard everything the daemon logged so far, and the pane has drawn
+ * it. The stream delivers events in order and the page takes omp's answers from it, so once
+ * the answer to a `get_state` sent now is in, everything logged before it was delivered.
+ * @param {Page} page @param {string} workspace @param {import('@playwright/test').Locator} pane
+ */
+async function caughtUp(page, workspace, pane) {
+  const { session } = await savedParams(page, workspace, pane);
+  await page.evaluate(async (session) => {
+    const url = '/src/daemon/client.js'; // the module the app runs, so the page's own connection
+    const { getDaemon } = /** @type {typeof import('../src/daemon/client.js')} */ (await import(url));
+    await getDaemon().rpc(session, { type: 'get_state' });
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // and drawn
+  }, session);
+}
+
+/**
  * Selects the bold word in `reply` and opens Ask on it; resolves to the question box.
  * @param {import('@playwright/test').Locator} pane @param {import('@playwright/test').Locator} reply
  */
@@ -320,7 +336,8 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
 
   // Text outside the transcript (here the toolbar) is not something to comment on.
   await pane.locator('.omp-cwd').dblclick();
-  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => String(getSelection())), 'the toolbar text is selected').not.toBe('');
+  await page.evaluate(() => new Promise((r) => setTimeout(r))); // after the popup's own check, queued on mouseup
   await expect(pane.locator('.omp-quote-btn')).toHaveCount(0);
 
   await reply.locator('strong').dblclick(); // selects the word, as a reader would
@@ -400,15 +417,19 @@ test('a ! draft turns the message box into a shell line that Enter runs in the s
   await expect(heldNote).toBeHidden();
 
   // A bare `!` names nothing to run: it stays in the box.
-  let ranBare = false;
+  /** @type {string[]} */
+  const ran = [];
   page.on('request', (r) => {
-    if (r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'bash') ranBare = true;
+    if (r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'bash') ran.push(r.postDataJSON().command);
   });
   await send(pane, '!');
-  await page.waitForTimeout(300);
-  expect(ranBare, 'a bare ! sends no command').toBe(false);
   await expect(draft).toHaveValue('!');
   await expect(pane.locator('.omp-bash')).toHaveCount(1);
+  // A command that does run is sent after anything the bare `!` would have sent.
+  const next = bashSent();
+  await send(pane, '!pwd');
+  await next;
+  expect(ran, 'a bare ! sends no command').toEqual(['pwd']);
 });
 
 test('a ! command while the agent works runs at once, and is not sent as a steer', async ({ page }) => {
@@ -474,7 +495,7 @@ test('a login under way is shown from the stream, so a reload still shows it', a
 });
 
 test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
-  await openWorkbench(page);
+  const workspace = await openWorkbench(page);
   const pane = await startedPane(page);
   await send(pane, 'hello');
   const reply = pane.locator('.omp-assistant').last();
@@ -501,7 +522,7 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
   // A reload replays the side answer's frames; they still stay out of the chat.
   await page.reload();
   await expect(reply.locator('strong')).toHaveText('hello');
-  await page.waitForTimeout(200);
+  await caughtUp(page, workspace, pane);
   expect(await transcript.innerText()).toBe(chat);
 
   /** Asks `question` about the selection; resolves to omp's id for it. @param {string} question */
@@ -669,7 +690,7 @@ test('long pasted text and pasted or dropped files go with the next prompt as at
 });
 
 test('a final response that lands while you are elsewhere lights the pane until you look at it', async ({ page }) => {
-  await openWorkbench(page);
+  const workspace = await openWorkbench(page);
   const pane = await startedPane(page);
   const draft = pane.locator('textarea');
   const lookAway = () => page.mouse.move(5, 5); // the top bar, outside the pane
@@ -696,7 +717,7 @@ test('a final response that lands while you are elsewhere lights the pane until 
   await lookAway();
   await page.reload();
   await expect(pane.locator('.omp-assistant').last()).toContainText('first');
-  await page.waitForTimeout(200);
+  await caughtUp(page, workspace, pane);
   await expect(pane).not.toHaveClass(/is-unread/);
 
   // Scrolling the transcript reads it.
@@ -715,7 +736,7 @@ test('a final response that lands while you are elsewhere lights the pane until 
   // Output that arrives while the pointer is over the pane is read as it comes.
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await sendFromKeyboard('fourth');
-  await page.waitForTimeout(200);
+  await caughtUp(page, workspace, pane);
   await expect(pane).not.toHaveClass(/is-unread/);
 
   // The middle of a turn (an intermediate reply, a tool run) is not news; its end is.

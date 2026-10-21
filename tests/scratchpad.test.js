@@ -1,6 +1,6 @@
 import { test, describe, beforeEach } from 'bun:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createScratchpads, revOf } from '../daemon/scratchpad.js';
@@ -35,8 +35,9 @@ describe('scratchpad files', () => {
   test('the list names each pad by its first line, most recently changed first', async () => {
     const pads = createScratchpads({ dir });
     await save(pads, 'older', '\n![shot](older.assets/x.png)\n## Release checklist\nmore');
-    await Bun.sleep(20);
     await save(pads, 'newer', '- buy milk');
+    const anHourAgo = new Date(Date.now() - 3_600_000);
+    await utimes(join(dir, 'older.md'), anHourAgo, anHourAgo);
     assert.deepEqual(
       (await pads.list()).map(({ id, title }) => ({ id, title })),
       [

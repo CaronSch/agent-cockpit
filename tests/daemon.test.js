@@ -51,48 +51,56 @@ async function call({ method = 'GET', path, headers = {}, body, raw, auth = true
 }
 
 /**
- * Reads the event stream until `done` is satisfied or the timeout passes.
- * @param {{ lastEventId?: string, done?: (events: StreamEvent[]) => boolean, ms?: number }} options
- * @returns {Promise<{ events: StreamEvent[], ids: string[] }>}
+ * Connects to the event stream as a page does (resuming after `lastEventId`, if given). Once
+ * it resolves, the daemon sends this connection everything new, so whatever happens next is
+ * on it; `until` reads until `done` holds.
+ * @param {{ lastEventId?: string }} [options]
  */
-async function readStream({ lastEventId, done = () => false, ms = 3000 }) {
+async function openStream({ lastEventId } = {}) {
   /** @type {StreamEvent[]} */
   const events = [];
   /** @type {string[]} */
   const ids = [];
   const headers = { cookie: `ac_token=${TOKEN}`, ...(lastEventId ? { 'last-event-id': lastEventId } : {}) };
-  const res = await fetch(`http://127.0.0.1:${port}/api/stream`, { headers, signal: AbortSignal.timeout(ms) });
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    for await (const bytes of /** @type {ReadableStream<Uint8Array>} */ (res.body)) {
-      buffer += decoder.decode(bytes, { stream: true });
-      let end;
-      while ((end = buffer.indexOf('\n\n')) !== -1) {
-        const block = buffer.slice(0, end);
-        buffer = buffer.slice(end + 2);
-        for (const l of block.split('\n')) {
-          if (l.startsWith('id: ')) ids.push(l.slice(4));
-          if (l.startsWith('data: ')) events.push(JSON.parse(l.slice(6)));
+  const connection = new AbortController();
+  const res = await fetch(`http://127.0.0.1:${port}/api/stream`, { headers, signal: connection.signal });
+  return {
+    /** @param {(events: StreamEvent[], ids: string[]) => boolean} done @returns {Promise<{ events: StreamEvent[], ids: string[] }>} */
+    async until(done) {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        for await (const bytes of /** @type {ReadableStream<Uint8Array>} */ (res.body)) {
+          buffer += decoder.decode(bytes, { stream: true });
+          let end;
+          while ((end = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, end);
+            buffer = buffer.slice(end + 2);
+            for (const l of block.split('\n')) {
+              if (l.startsWith('id: ')) ids.push(l.slice(4));
+              if (l.startsWith('data: ')) events.push(JSON.parse(l.slice(6)));
+            }
+          }
+          if (done(events, ids)) return { events, ids };
         }
+      } finally {
+        connection.abort();
       }
-      if (done(events)) break;
-    }
-  } catch (err) {
-    if (/** @type {Error} */ (err).name !== 'TimeoutError') throw err;
-  }
-  return { events, ids };
+      throw new Error('the event stream ended');
+    },
+  };
 }
 
-/** @param {string} id @param {SessionMeta['status']} status */
+/**
+ * Reads the event stream until `done` holds.
+ * @param {{ lastEventId?: string, done: (events: StreamEvent[], ids: string[]) => boolean }} options
+ */
+const readStream = async ({ lastEventId, done }) => (await openStream({ lastEventId })).until(done);
+
+/** The session's meta once it has reached `status`. @param {string} id @param {SessionMeta['status']} status @returns {Promise<SessionMeta>} */
 async function waitForStatus(id, status) {
-  for (let i = 0; i < 100; i++) {
-    const { json } = await call({ path: '/api/sessions' });
-    const meta = json.sessions.find((/** @type {SessionMeta} */ s) => s.id === id);
-    if (meta?.status === status) return meta;
-    await Bun.sleep(50);
-  }
-  throw new Error(`session ${id} never became ${status}`);
+  const event = await logged((e) => e.session === id && e.kind === 'session' && e.meta.status === status);
+  return /** @type {SessionMeta} */ (event.kind === 'session' && event.meta);
 }
 
 /**
@@ -239,8 +247,7 @@ describe('sessions', () => {
     const id = created.json.session.id;
     await waitForStatus(id, 'ready');
 
-    const { events } = await readStream({ ms: 300 });
-    const mine = forSession(events, id);
+    const mine = forSession(hub.since(0), id);
     const readyAt = mine.findIndex((e) => e.kind === 'session' && e.meta.status === 'ready');
     const sent = mine.slice(0, readyAt).flatMap((e) => (e.kind === 'sent' ? [e.command.type] : []));
     assert.deepEqual(sent, SETUP_COMMANDS.map((c) => c.type));
@@ -253,8 +260,7 @@ describe('sessions', () => {
     const id = json.session.id;
     await waitForStatus(id, 'ready');
 
-    const { events } = await readStream({ ms: 300 });
-    const mine = forSession(events, id);
+    const mine = forSession(hub.since(0), id);
     const readyAt = mine.findIndex((e) => e.kind === 'session' && e.meta.status === 'ready');
     const before = mine.slice(0, readyAt);
     assert.deepEqual(
@@ -269,18 +275,13 @@ describe('sessions', () => {
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
     const id = json.session.id;
     await waitForStatus(id, 'ready');
-    const { events: setup } = await readStream({ ms: 100 });
-    const after = forSession(setup, id).at(-1)?.seq ?? 0;
-    /** @param {StreamEvent[]} all */
-    const sentTypes = (all) => forSession(all, id).flatMap((e) => (e.kind === 'sent' && e.seq > after ? [e.command.type] : []));
+    const after = forSession(hub.since(0), id).at(-1)?.seq ?? 0;
 
-    await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'set_thinking_level', level: 'high' } });
-    const { events } = await readStream({
-      done: (all) => forSession(all, id).some((e) => e.kind === 'frame' && e.frame.command === 'get_state' && e.seq > after),
-    });
-    const stated = forSession(events, id).findLast((e) => e.kind === 'frame' && e.frame.command === 'get_state');
-    assert.ok(stated?.kind === 'frame' && stated.frame.data.thinkingLevel === 'high');
-    assert.deepEqual(sentTypes(events).slice(0, 2), ['set_thinking_level', 'get_state']);
+    await rpc(id, { type: 'set_thinking_level', level: 'high' });
+    const stated = await logged((e) => e.session === id && e.seq > after && e.kind === 'frame' && e.frame.command === 'get_state');
+    assert.ok(stated.kind === 'frame' && stated.frame.data.thinkingLevel === 'high');
+    const sent = forSession(hub.since(0), id).flatMap((e) => (e.kind === 'sent' && e.seq > after ? [e.command.type] : []));
+    assert.deepEqual(sent.slice(0, 2), ['set_thinking_level', 'get_state']);
   });
 
   test('commands return omp’s response, and everything omp prints lands in the log in order', async () => {
@@ -314,16 +315,20 @@ describe('sessions', () => {
   });
 
   test('a reconnect with the current boot id gets only what it missed; a stale boot id gets everything', async () => {
-    const first = await readStream({ ms: 200 });
+    const seen = hub.since(0).length;
+    const first = await readStream({ done: (_, ids) => ids.length >= seen });
     const last = /** @type {string} */ (first.ids.at(-1));
-    assert.ok(last.startsWith(`${hub.bootId}:`));
+    assert.equal(last, `${hub.bootId}:${seen}`);
 
-    const resumed = await readStream({ lastEventId: last, ms: 200 });
-    assert.equal(resumed.events.filter((e) => e.kind !== 'hello').length, 0);
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } }); // something to miss
+    await waitForStatus(json.session.id, 'ready');
+    const missed = hub.since(seen).length;
+    const resumed = await readStream({ lastEventId: last, done: (_, ids) => ids.length >= missed });
     assert.equal(resumed.events[0].kind, 'hello');
+    assert.equal(resumed.ids[0], `${hub.bootId}:${seen + 1}`, 'nothing it had seen');
 
-    const stale = await readStream({ lastEventId: `other-boot:${last.split(':')[1]}`, ms: 200 });
-    assert.equal(stale.ids.length, first.ids.length);
+    const stale = await readStream({ lastEventId: `other-boot:${seen}`, done: (_, ids) => ids.length > 0 });
+    assert.equal(stale.ids[0], `${hub.bootId}:1`, 'everything');
   });
 
   test('a command is accepted at once, and omp’s answer, however slow, arrives on the stream', async () => {
@@ -438,17 +443,18 @@ describe('sessions', () => {
   });
 
   /**
-   * Sends `message` in session `id` and waits until its turn has settled and anything the
-   * daemon might send in reply would have gone; returns the session's whole log so far.
+   * Sends `message` in session `id` and waits until its turn has settled, then until omp has
+   * answered a `get_state` sent after it: the daemon handles omp's frames in order, so
+   * anything it sends in reply to the settled turn is in the log before that. Returns the
+   * session's whole log so far.
    * @param {string} id @param {string} message
    */
   async function turn(id, message) {
-    const before = forSession((await readStream({ ms: 100 })).events, id);
-    const settled = (/** @type {SessionEvent[]} */ log) => log.filter((e) => e.kind === 'frame' && e.frame.type === 'session_settled').length;
-    await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'prompt', message } });
-    await readStream({ done: (all) => settled(forSession(all, id)) > settled(before) });
-    await Bun.sleep(150);
-    return forSession((await readStream({ ms: 100 })).events, id);
+    const from = hub.since(0).length;
+    await rpc(id, { type: 'prompt', message });
+    await logged((e) => e.seq > from && e.session === id && e.kind === 'frame' && e.frame.type === 'session_settled');
+    await rpc(id, { type: 'get_state' });
+    return forSession(hub.since(0), id);
   }
 
   test('the daemon never names a session by itself: after a turn it only asks for the state', async () => {
@@ -457,13 +463,19 @@ describe('sessions', () => {
     await waitForStatus(id, 'ready');
     const log = await turn(id, 'fix the login bug');
     const after = log.slice(log.findIndex((e) => e.kind === 'sent' && e.command.type === 'prompt'));
-    assert.deepEqual(after.flatMap((e) => (e.kind === 'sent' ? [e.command.type] : [])), ['prompt', 'get_state']);
+    assert.deepEqual(
+      after.flatMap((e) => (e.kind === 'sent' ? [e.command.type] : [])),
+      ['prompt', 'get_state', 'get_state'],
+      'the daemon’s state refresh after the turn, then the test’s own',
+    );
   });
 
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {
     const missing = createHub({ ompPath: join(cwd, 'no-such-omp') });
+    /** @type {Promise<void>} */
+    const settled = new Promise((resolve) => missing.subscribe((e) => e.kind === 'session' && e.meta.status !== 'starting' && resolve()));
     const meta = missing.create({ cwd, resume: null, fork: null });
-    for (let i = 0; i < 100 && missing.list()[0].status === 'starting'; i++) await Bun.sleep(20);
+    await settled;
     const [after] = missing.list();
     assert.equal(after.id, meta.id);
     assert.equal(after.status, 'failed');
@@ -482,12 +494,11 @@ describe('scratchpads', () => {
   test('a save from the current version lands, and every open page hears which pad changed', async () => {
     const before = await call({ path: '/api/scratchpads/notes' });
     assert.equal(before.status, 200);
-    const reading = readStream({ done: (events) => events.some((e) => e.kind === 'scratchpad') });
-    await Bun.sleep(150); // let the stream connect before the write
+    const stream = await openStream();
     const saved = await call({ method: 'PUT', path: '/api/scratchpads/notes', body: { text: 'remember the milk', base: before.json.rev } });
     assert.equal(saved.status, 200);
 
-    const { events, ids } = await reading;
+    const { events, ids } = await stream.until((all) => all.some((e) => e.kind === 'scratchpad'));
     const heard = events.find((e) => e.kind === 'scratchpad');
     assert.deepEqual(heard, { kind: 'scratchpad', id: 'notes', text: 'remember the milk', rev: saved.json.rev });
     assert.equal(ids.length, events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad').length, 'not part of the replayable log');
