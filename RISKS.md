@@ -97,7 +97,7 @@ is newer. The daemon prints its version at start.
   topic's earlier turns as context. Fork relies on
   `omp --fork <file>` copying the journal into a new one (new id, copied title)
   without touching the source, on the forked process streaming none of the copied
-  history (the pane fetches it with `get_messages`, as for `--resume`), and on omp
+  history (the daemon fetches it with `get_messages` before the session is ready, as for `--resume`), and on omp
   writing a new session's journal only once it holds a model reply (until then
   the Fork button is off). `!` commands rely on
   RPC `bash` running at once even mid-turn (it is dispatched outside the command

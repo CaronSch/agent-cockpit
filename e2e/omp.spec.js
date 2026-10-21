@@ -879,6 +879,27 @@ test('Fork continues a copy of the conversation in a new pane, as a session of i
   expect(mine.fork).toBeNull();
 });
 
+test('windows only render: the daemon asks omp for the state and a fork’s history, never the page', async ({ page }) => {
+  /** @type {string[]} */
+  const asked = [];
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc')) asked.push(r.postDataJSON()?.type);
+  });
+  await openWorkbench(page);
+  const source = await startedPane(page);
+  await send(source, 'shared start');
+  await expect(source.locator('.omp-assistant').last()).toContainText('You said: shared start');
+  const thinking = source.getByTitle('Choose thinking level');
+  await thinking.click();
+  await source.locator('.omp-menu:popover-open').getByRole('button', { name: 'high', exact: true }).click();
+  await expect(thinking).toHaveText(/high/);
+
+  const forked = await paneAddedBy(page, () => source.getByRole('button', { name: 'Fork', exact: true }).click());
+  await expect(forked.locator('.omp-assistant')).toHaveText([/You said: shared start/]);
+  await expect(forked.getByText('Fake Model')).toBeVisible();
+  expect(asked).toEqual(['prompt', 'get_available_thinking_levels', 'set_thinking_level']);
+});
+
 test('dragging Send sends the message in a fork placed where it is dropped, and empties this box', async ({ page }) => {
   const workspace = await openWorkbench(page);
   const source = await startedPane(page);

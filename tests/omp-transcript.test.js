@@ -397,16 +397,10 @@ describe('bash and resume', () => {
   });
   const messagesReply = (/** @type {string} */ id) => frame({ type: 'response', id, command: 'get_messages', success: true, data: { messages: history } });
 
-  test('a resumed session is seeded from get_messages ahead of live notes, once', () => {
-    const state = run([session('/s/old.jsonl'), frame({ type: 'notice', level: 'info', message: 'hello' }), messagesReply('ac_3'), messagesReply('ac_9')]);
+  test('a resumed session is seeded from get_messages ahead of live notes', () => {
+    const state = run([session('/s/old.jsonl'), frame({ type: 'notice', level: 'info', message: 'hello' }), messagesReply('ac_3')]);
     assert.deepEqual(kinds(state), ['user', 'assistant', 'note']);
     assert.equal(state.tools.get('c1')?.status, 'ok');
-    assert.equal(state.seeded, true);
-  });
-
-  test('get_messages in a session that streamed its own history seeds nothing', () => {
-    const state = run([session(null), frame({ type: 'message_end', message: history[0], messageId: 'm1' }), messagesReply('ac_3')]);
-    assert.deepEqual(kinds(state), ['user']);
   });
 });
 

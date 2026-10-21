@@ -106,8 +106,6 @@ import { todoPhases } from './todos.js';
  *   cost: number,
  *   editorText: { seq: number, text: string } | null,
  *   openUrl: { url: string, launchUrl: string | null, instructions: string | null } | null,
- *   refreshSeq: number,
- *   seeded: boolean,
  *   index: Map<string, Item>,
  *   toolOwner: Map<string, string>,
  *   failedRequests: Set<string>,
@@ -135,12 +133,6 @@ const KNOWN_UNRENDERED = new Set([
 /** Assistant stream events with nothing to apply: `message_end` carries the result. */
 const KNOWN_STREAM_NOOPS = new Set(['start', 'done', 'error']);
 
-/** Frame types after which the pane should re-read `get_state` (`todo_auto_clear`: omp emptied the todo list). */
-const REFRESH_TRIGGERS = new Set(['agent_end', 'model_changed', 'thinking_level_changed', 'config_update', 'todo_auto_clear']);
-
-/** Successful responses that change what `get_state` reports. */
-const REFRESH_COMMANDS = new Set(['set_model', 'cycle_model', 'set_thinking_level', 'cycle_thinking_level', 'login', 'new_session', 'switch_session', 'fork', 'branch', 'compact']);
-
 /** @returns {Omit<AssistantItem, 'key' | 'rev'>} */
 const emptyAssistant = () => ({ kind: 'assistant', blocks: [], stopReason: null, errorMessage: null, model: null, ended: false });
 
@@ -164,8 +156,6 @@ export function createTranscript() {
     cost: 0,
     editorText: null,
     openUrl: null,
-    refreshSeq: 0,
-    seeded: false,
     index: new Map(),
     toolOwner: new Map(),
     failedRequests: new Set(),
@@ -271,7 +261,6 @@ export function conversationName(state) {
 function applyFrame(state, frame) {
   const type = typeof frame?.type === 'string' ? frame.type : '';
   if (KNOWN_UNRENDERED.has(type)) return;
-  if (REFRESH_TRIGGERS.has(type)) state.refreshSeq++;
   switch (type) {
     case 'response':
       return applyResponse(state, frame);
@@ -343,7 +332,7 @@ function applyFrame(state, frame) {
       return note(state, 'muted', 'retry', `Fallback model ${frame.model} answered`);
     case 'model_changed':
     case 'todo_auto_clear':
-      return; // no payload; the refresh trigger above re-reads get_state
+      return; // no payload; the daemon follows it with a get_state
     case 'thinking_level_changed':
       if (typeof frame.thinkingLevel === 'string') state.session.thinkingLevel = frame.thinkingLevel;
       return;
@@ -420,13 +409,12 @@ function applyResponse(state, frame) {
     if (command === 'login') state.openUrl = null;
     return note(state, 'error', command, `${command} failed: ${frame.error ?? 'unknown error'}`);
   }
-  if (REFRESH_COMMANDS.has(command)) state.refreshSeq++;
   switch (command) {
     case 'get_state':
       if (frame.data && typeof frame.data === 'object') applyState(state, frame.data);
       return;
     case 'get_messages':
-      if (canSeed(state) && Array.isArray(frame.data?.messages)) seed(state, frame.data.messages);
+      if (Array.isArray(frame.data?.messages)) seed(state, frame.data.messages);
       return;
     case 'bash':
       finishBash(state, id, frame.data ?? {}, null);
@@ -721,23 +709,13 @@ function applyUpdate(state, frame) {
 }
 
 /**
- * Only a process started from a journal (resumed or forked: it streams none of its earlier
- * history) is seeded, once, and only before any conversation has streamed: otherwise the
- * history would show twice.
- * @param {Transcript} state
- */
-function canSeed(state) {
-  const fromJournal = Boolean(state.meta?.resume || state.meta?.fork);
-  return !state.seeded && fromJournal && !state.items.some((i) => i.kind === 'user' || i.kind === 'assistant');
-}
-
-/**
- * Seeds a session started from a journal with its earlier history (from `get_messages`),
- * ahead of the notes the new process has already produced.
+ * Seeds a session started from a journal with its earlier history, which omp does not
+ * stream: the daemon asks for it (`get_messages`) once, before the session is ready, so it
+ * goes ahead of the notes the new process has produced and nothing of the conversation
+ * can come first.
  * @param {Transcript} state @param {any[]} messages
  */
 function seed(state, messages) {
-  state.seeded = true;
   const live = state.items;
   state.items = [];
   messages.forEach((message, i) => applyMessage(state, message, `seed:${i}`, true));
