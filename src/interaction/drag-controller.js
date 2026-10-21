@@ -206,7 +206,10 @@ export function createDragController(app) {
   /** @param {KeyboardEvent} event */
   function onKeyDown(event) {
     if (event.key !== 'Escape' || !session?.active) return;
+    // The Esc is the drag's: nothing else acts on it, and a cancelled keydown is no close
+    // request for an open popover (the palette the drag started from stays open).
     event.stopPropagation();
+    event.preventDefault();
     end({ commit: false });
     // The pointer is still down: its release ends the gesture Esc cancelled.
     window.addEventListener('pointerup', swallowReleaseClick, { once: true });
@@ -239,6 +242,5 @@ export function createDragController(app) {
   return {
     start,
     cancel: () => end({ commit: false }),
-    isDragging: () => Boolean(session?.active),
   };
 }

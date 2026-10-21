@@ -38,15 +38,6 @@ export function createPalette({ panel, widgets, drag, onAdd }) {
     if (/** @type {ToggleEvent} */ (event).newState !== 'open') return;
     /** @type {HTMLElement | null} */ (list.querySelector('.palette-item'))?.focus();
   });
-  // Esc during a drag cancels the drag only: a cancelled keydown is no close request.
-  window.addEventListener(
-    'keydown',
-    (event) => {
-      if (event.key === 'Escape' && drag.isDragging()) event.preventDefault();
-    },
-    true,
-  );
-
   list.addEventListener('pointerdown', (event) => {
     const button = /** @type {HTMLElement | null} */ (/** @type {Element} */ (event.target).closest('.palette-item'));
     suppressClick = false;
