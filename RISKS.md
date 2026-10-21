@@ -66,7 +66,7 @@ is newer. The daemon prints its version at start.
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
-- **Auto-titles, attachments, Ask, Fork and `!` commands lean on omp internals.** Titles rely on
+- **Auto-titles, attachments, Ask, Fork, `!` commands and the responses-only view lean on omp internals.** Titles rely on
   `/rename` with no title generating one in RPC mode (it is not gated by
   `PI_NO_TITLE`), and on `session_settled` following only agent activity (if it
   followed a builtin command too, the daemon's own `/rename` would trigger the next
@@ -85,22 +85,29 @@ is newer. The daemon prints its version at start.
   the Fork button is off). `!` commands rely on
   RPC `bash` running at once even mid-turn (it is dispatched outside the command
   queue), answering with its output, and on the `bashExecution` message omp records
-  for it (after the turn, if one was running) carrying the same command text. A
+  for it (after the turn, if one was running) carrying the same command text. The
+  Config panel's "only prompts and responses" relies on an assistant message that
+  wants tools ending with `stopReason: 'toolUse'`, on `agent_end` with `yielded`
+  marking the hand-back, on messages omp injects being user messages with
+  `attribution: 'agent'` (or `synthetic`), and on `bashExecution` /
+  `pythonExecution` messages coming only from the user's own `!` commands. A
   change shows up as sessions that stay untitled, files
   that reach the model only as a bare path, side answers that never arrive or turn
   up in the chat, follow-ups answered under the wrong question or without knowing
   what was asked before, a forked pane that opens empty or shows its history twice, a
   Fork button that stays off with the journal on disk (or is on without it, and the
-  daemon refuses the fork: `fork is not an existing file`), or `!` runs that wait for
-  the turn to end or show twice. *Response:* re-read
+  daemon refuses the fork: `fork is not an existing file`), `!` runs that wait for
+  the turn to end or show twice, or a responses-only pane that shows tool work,
+  drops a final reply or never stops "Working…". *Response:* re-read
   omp's `slash-commands/builtin-lifecycle.ts` (`rename`),
   `modes/rpc/rpc-session-settle.ts`, `utils/file-mentions.ts`,
   `modes/rpc/rpc-btw.ts`, `session/btw-turn.ts`, `session/btw-history.ts`,
   `modes/rpc/rpc-mode.ts` (`BACKGROUND_COMMANDS`, `bash`), `session/bash-runner.ts`,
   and `main.ts` (`createSessionManager`) with `session/session-manager.ts` (`forkFrom`,
   `#shouldHaveSessionFile`) (in `packages/coding-agent/src/` of
-  github.com/can1357/oh-my-pi at the installed version's tag), then update
-  `daemon/omp-session.js`, `src/omp/message.js`, `src/omp/transcript.js`,
+  github.com/can1357/oh-my-pi at the installed version's tag) and `StopReason` in
+  `packages/ai/src/types.ts`, then update `daemon/omp-session.js`,
+  `src/omp/message.js`, `src/omp/transcript.js`, `src/omp/visibility.js`,
   `src/widgets/omp.js` and the fake.
 
 ## When the session history reaches thousands of journals

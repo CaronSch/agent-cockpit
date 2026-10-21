@@ -155,7 +155,8 @@
   color: var(--color-text-faint);
 }
 
-.omp-activity::before {
+.omp-activity::before,
+.omp-working::before {
   content: '';
   display: inline-block;
   width: 7px;
@@ -170,7 +171,8 @@
   color: var(--color-accent);
 }
 
-.omp-activity.is-streaming::before {
+.omp-activity.is-streaming::before,
+.omp-working::before {
   background: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-glow);
   animation: omp-pulse 1.2s ease-in-out infinite;
@@ -183,7 +185,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .omp-activity.is-streaming::before {
+  .omp-activity.is-streaming::before,
+  .omp-working::before {
     animation: none;
   }
 }
@@ -249,6 +252,35 @@
 
 .omp-menu-item.is-current {
   color: var(--color-accent);
+}
+
+.omp-setting {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  padding: 4px 6px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.omp-setting:hover {
+  background: var(--color-surface);
+}
+
+.omp-setting input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.omp-setting .omp-muted {
+  grid-column: 2;
+  font-size: var(--text-xs);
+}
+
+.omp-working {
+  color: var(--color-accent);
+  font: var(--text-xs) / 1.4 var(--font-mono);
 }
 
 .omp-strip,
