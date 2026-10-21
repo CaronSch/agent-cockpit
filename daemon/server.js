@@ -150,15 +150,17 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
         const send = (/** @type {SessionEvent} */ event) => write(`id: ${hub.bootId}:${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
         for (const event of hub.since(lastSeenSeq(req.headers.get('last-event-id'), hub.bootId))) send(event);
         const unsubscribe = hub.subscribe(send);
-        // No id: scratchpad events are not part of the replayable log (see wire.js).
+        // No id: scratchpad and history events are not part of the replayable log (see wire.js).
         const offScratchpad = scratchpads.subscribe((/** @type {string} */ id, /** @type {Scratchpad} */ pad) =>
           write(`data: ${JSON.stringify({ kind: 'scratchpad', id, ...pad })}\n\n`),
         );
+        const offHistory = history.watch(() => write(`data: ${JSON.stringify({ kind: 'history' })}\n\n`));
         const heartbeat = setInterval(() => write(': ping\n\n'), HEARTBEAT_MS);
         stop = () => {
           clearInterval(heartbeat);
           unsubscribe();
           offScratchpad();
+          offHistory();
         };
       },
       cancel: () => stop(),

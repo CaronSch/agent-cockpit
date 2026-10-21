@@ -2,7 +2,7 @@
 // into a new omp window, and archiving, against the real daemon reading journals from
 // E2E_OMP_SESSIONS.
 import { test, expect } from '@playwright/test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { E2E_OMP_SESSIONS, E2E_STATE_DIR, newWorkspace, workbenchPath } from './daemon.js';
@@ -32,20 +32,33 @@ const ARCHIVE = join(E2E_STATE_DIR, 'archive', 'sessions');
 /** @type {string[]} */
 let problems = [];
 
+/**
+ * Empties `dir`, keeping the directory itself: the daemon watches it for changes, and a
+ * watch does not follow a directory that is deleted and made again.
+ * @param {string} dir
+ */
+function empty(dir) {
+  mkdirSync(dir, { recursive: true });
+  for (const entry of readdirSync(dir)) rmSync(join(dir, entry), { recursive: true, force: true });
+}
+
+/** Writes a past conversation's journal, last active `ageMs` ago. @param {typeof JOURNALS[number]} j */
+function writeJournal(j) {
+  const lines = [
+    ...(j.title ? [{ type: 'title', v: 1, title: j.title, source: 'auto' }] : []),
+    { type: 'session', version: 3, id: j.name, timestamp: '2026-10-01T10:00:00.000Z', cwd: j.cwd },
+    ...j.prompts.map((text) => ({ type: 'message', message: { role: 'user', content: [{ type: 'text', text }] } })),
+  ];
+  writeFileSync(fileOf(j.name), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+  const at = new Date(Date.now() - j.ageMs);
+  utimesSync(fileOf(j.name), at, at);
+}
+
 test.beforeEach(async ({ page }) => {
-  rmSync(E2E_OMP_SESSIONS, { recursive: true, force: true });
-  rmSync(ARCHIVE, { recursive: true, force: true });
+  empty(E2E_OMP_SESSIONS);
+  empty(ARCHIVE);
   mkdirSync(join(E2E_OMP_SESSIONS, '-e2e-project'), { recursive: true });
-  for (const j of JOURNALS) {
-    const lines = [
-      ...(j.title ? [{ type: 'title', v: 1, title: j.title, source: 'auto' }] : []),
-      { type: 'session', version: 3, id: j.name, timestamp: '2026-10-01T10:00:00.000Z', cwd: j.cwd },
-      ...j.prompts.map((text) => ({ type: 'message', message: { role: 'user', content: [{ type: 'text', text }] } })),
-    ];
-    writeFileSync(fileOf(j.name), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
-    const at = new Date(Date.now() - j.ageMs);
-    utimesSync(fileOf(j.name), at, at);
-  }
+  for (const j of JOURNALS) writeJournal(j);
 
   problems = [];
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
@@ -130,6 +143,13 @@ test('past sessions are listed newest first, searchable across prompts and direc
   await expect(again.getByRole('searchbox', { name: 'Search sessions' })).toHaveValue('zebra');
   await expect(again.getByRole('combobox', { name: 'Sort by' })).toHaveValue('title');
   await expect(titles(again)).toHaveText(['Zebra cleanup']);
+});
+
+test('a session omp writes while the window is open shows up by itself', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await expect(titles(window)).toHaveText(['Zebra cleanup', 'deploy staging', 'Fix the login flow']);
+  writeJournal({ name: 'fresh', cwd: BRAVO, title: 'Fresh work', prompts: ['start fresh'], ageMs: 0 });
+  await expect(titles(window)).toHaveText(['Fresh work', 'Zebra cleanup', 'deploy staging', 'Fix the login flow']);
 });
 
 test('dragging a session onto the grid resumes it in a new omp window, and it cannot be opened twice', async ({ page }) => {

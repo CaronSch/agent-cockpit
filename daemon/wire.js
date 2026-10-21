@@ -43,8 +43,8 @@
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
  * `<bootId>:<seq>`, so a reconnect resumes after the last event it saw; the first message
  * on every connection is a `hello` carrying the current boot id, session list and UI version.
- * `scratchpad` events carry no id and are not replayed: a reconnecting page reads
- * GET /api/scratchpads/:id instead.
+ * `scratchpad` and `history` events carry no id and are not replayed: a reconnecting page reads
+ * GET /api/scratchpads/:id and GET /api/history instead.
  */
 /** @import { GridNode } from '../src/layout/grid-model.js' */
 
@@ -109,7 +109,9 @@
 /** @typedef {{ id: string, title: string, modifiedAt: number, size: number }} ScratchpadSummary */
 /** Sent to every page after a pad changes (a deleted pad arrives empty). @typedef {{ kind: 'scratchpad', id: string } & Scratchpad} ScratchpadEvent */
 
-/** @typedef {HelloEvent | ScratchpadEvent | SessionEvent} StreamEvent */
+/** Sent to every page after past sessions changed (see `history.js` `watch`). @typedef {{ kind: 'history' }} HistoryEvent */
+
+/** @typedef {HelloEvent | ScratchpadEvent | HistoryEvent | SessionEvent} StreamEvent */
 
 /** @typedef {{ defaultCwd: string, home: string, scratchpadDir: string }} DaemonConfig */
 

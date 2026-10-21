@@ -96,7 +96,7 @@ async function waitForStatus(id, status) {
 
 /** @param {StreamEvent[]} events @param {string} session @returns {SessionEvent[]} */
 const forSession = (events, session) =>
-  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.session === session));
+  /** @type {SessionEvent[]} */ (events.filter((e) => e.kind !== 'hello' && e.kind !== 'scratchpad' && e.kind !== 'history' && e.session === session));
 
 beforeAll(async () => {
   cwd = await mkdtemp(join(tmpdir(), 'ac-daemon-test-'));

@@ -123,6 +123,44 @@ describe('archive', () => {
     assert.deepEqual(await tree(join(root, '-p-alpha')), ['2026-10-01_aaa', '2026-10-01_aaa.jsonl', join('2026-10-01_aaa', 'Explorer.jsonl')]);
   });
 
+  test('watch tells, coalesced, when a journal changes or moves, and not for files deeper down', async () => {
+    const history = createHistory({ root, archive });
+    let calls = 0;
+    /** @type {() => void} */
+    let heard = () => {};
+    const stop = history.watch(() => {
+      calls++;
+      heard();
+    });
+    const next = () => new Promise((resolve) => (heard = () => resolve(undefined)));
+    const quiet = () => Bun.sleep(600); // twice the coalescing window: long enough to hear a call that is coming
+    try {
+      // macOS may still report the writes this test's setup made just before the watch began.
+      await quiet();
+      calls = 0;
+      await writeFile(join(root, subagent()), journal([header('sub', '/p/alpha'), user('more subagent work')]));
+      await quiet();
+      assert.equal(calls, 0, 'a subagent journal is no conversation of its own');
+
+      let told = next();
+      await appendFile(alpha, journal([user('one')]));
+      await appendFile(alpha, journal([user('two')]));
+      await told;
+      await quiet();
+      assert.equal(calls, 1, 'writes close together are one change');
+
+      told = next();
+      await history.archive(alpha);
+      await told;
+    } finally {
+      stop();
+    }
+    const before = calls;
+    await writeFile(join(root, '-p-beta', '2026-10-04_ddd.jsonl'), journal([header('ddd', '/p/beta'), user('after')]));
+    await quiet();
+    assert.equal(calls, before, 'nothing after the watch is stopped');
+  });
+
   test('a journal without a folder moves alone', async () => {
     const beta = join(root, '-p-beta', '2026-10-02_bbb.jsonl');
     const moved = await createHistory({ root, archive }).archive(beta);
