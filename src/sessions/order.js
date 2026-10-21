@@ -44,6 +44,20 @@ export function sortSessions(sessions, key, dir) {
   return [...sessions].sort((a, b) => sign * ASCENDING[key](a, b) || b.modifiedAt - a.modifiedAt);
 }
 
+/**
+ * The directories the Sessions window can narrow to: each one sessions ran in, A→Z, with how
+ * many it holds. `selected` stays listed (with 0) when nothing in `sessions` is there, so
+ * the window can still show and undo that choice.
+ * @param {readonly PastSession[]} sessions @param {string | null} selected
+ * @returns {Array<{ cwd: string, count: number }>}
+ */
+export function directoryCounts(sessions, selected) {
+  /** @type {Map<string, number>} */
+  const counts = new Map(selected ? [[selected, 0]] : []);
+  for (const s of sessions) if (s.cwd) counts.set(s.cwd, (counts.get(s.cwd) ?? 0) + 1);
+  return [...counts].map(([cwd, count]) => ({ cwd, count })).sort((a, b) => collator.compare(a.cwd, b.cwd));
+}
+
 /** @param {number} then @param {number} now */
 export function relativeTime(then, now) {
   const s = Math.max(0, Math.round((now - then) / 1000));

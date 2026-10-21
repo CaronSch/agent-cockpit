@@ -242,3 +242,48 @@ test('a session open in a window cannot be archived, and says why', async ({ pag
   await expect(archive).toHaveAttribute('title', /close it to archive it/);
   await expect(row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' })).toBeEnabled();
 });
+
+test('the directory menu narrows the list to one directory, with search, sort and the archive, and is kept per window', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  const menu = window.getByRole('combobox', { name: 'Directory' });
+  await expect(menu.locator('option')).toHaveText(['All directories', `${ALPHA} (2)`, `${BRAVO} (1)`]);
+  await expect(menu).toHaveValue('');
+
+  await menu.selectOption(ALPHA);
+  await expect(titles(window)).toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  await expect(window.locator('.sessions-status')).toHaveText('2 sessions');
+  await window.getByRole('combobox', { name: 'Sort by' }).selectOption('title');
+  await expect(titles(window)).toHaveText(['Fix the login flow', 'Zebra cleanup']);
+  await window.getByRole('searchbox', { name: 'Search sessions' }).fill('tests');
+  await expect(titles(window)).toHaveText(['Fix the login flow'], { timeout: 3000 });
+  await window.getByRole('searchbox', { name: 'Search sessions' }).fill('deploy');
+  await expect(window.locator('.sessions-status')).toHaveText('No session matches.');
+  await expect(menu, 'the choice stays while nothing there matches').toHaveValue(ALPHA);
+  await window.getByRole('searchbox', { name: 'Search sessions' }).fill('');
+
+  await row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' }).click();
+  await expect(titles(window)).toHaveText(['Fix the login flow']);
+  await window.getByRole('button', { name: 'Archived' }).click();
+  await expect(titles(window)).toHaveText(['Zebra cleanup']);
+  await expect(menu.locator('option')).toHaveText(['All directories', `${ALPHA} (1)`]);
+  await window.getByRole('button', { name: 'Archived' }).click();
+
+  // A second Sessions window starts on all directories and keeps a choice of its own.
+  const id = await window.getAttribute('data-id');
+  const first = page.locator(`.widget[data-id="${id}"]`);
+  await page.locator('#palette-toggle').click();
+  await page.locator('#palette [data-type="sessions"]').click();
+  await page.keyboard.press('Escape');
+  const other = page.locator(`.widget[data-widget="sessions"]:not([data-id="${id}"])`);
+  await expect(other).toHaveCount(1);
+  await expect(other.getByRole('combobox', { name: 'Directory' })).toHaveValue('');
+  await other.getByRole('combobox', { name: 'Directory' }).selectOption(BRAVO);
+  await expect(titles(other)).toHaveText(['deploy staging']);
+  await expect(titles(first)).toHaveText(['Fix the login flow']);
+
+  await page.reload();
+  await expect(first.getByRole('combobox', { name: 'Directory' })).toHaveValue(ALPHA);
+  await expect(titles(first)).toHaveText(['Fix the login flow']);
+  await expect(other.getByRole('combobox', { name: 'Directory' })).toHaveValue(BRAVO);
+  await expect(titles(other)).toHaveText(['deploy staging']);
+});

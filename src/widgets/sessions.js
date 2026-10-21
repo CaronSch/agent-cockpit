@@ -3,8 +3,8 @@
  * continue it in a new omp window there, or press Resume to open it beside the list.
  *
  * Search runs in the daemon (every word must match the title, directory or a prompt); sorting
- * runs here. The query and sort order are this window's own settings, so two Sessions windows
- * can show different slices. A session already open in a window is marked and cannot be
+ * runs here, and so does narrowing to one directory. The query, directory and sort order are
+ * this window's own settings, so two Sessions windows can show different slices. A session already open in a window is marked and cannot be
  * resumed a second time: omp would fork it rather than share it.
  *
  * Archive moves a session out of omp's sessions into the daemon's archive (omp's own resume
@@ -14,7 +14,7 @@
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
-import { SORT_KEYS, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
+import { SORT_KEYS, directoryCounts, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { PastSession } from '../../daemon/wire.js' */
@@ -46,6 +46,8 @@ function createSessionsWindow(body, ctx, daemon) {
   const sortDir = () => (ctx.params.dir === 'asc' || ctx.params.dir === 'desc' ? ctx.params.dir : naturalDir(sortKey()));
   const query = () => (typeof ctx.params.query === 'string' ? ctx.params.query : '');
   const showArchived = () => ctx.params.archived === true;
+  /** The one directory this window shows, or null for all. */
+  const directory = () => (typeof ctx.params.directory === 'string' && ctx.params.directory ? ctx.params.directory : null);
 
   // ── toolbar ──
   const bar = el('div', 'sessions-bar');
@@ -54,6 +56,10 @@ function createSessionsWindow(body, ctx, daemon) {
   search.placeholder = 'Search title, directory, prompts…';
   search.setAttribute('aria-label', 'Search sessions');
   search.value = query();
+  const directories = el('select', 'sessions-sort sessions-directory');
+  directories.setAttribute('aria-label', 'Directory');
+  /** What the directory options were last built from, so an open menu is not rebuilt for nothing. */
+  let directoriesSignature = '';
   const sort = el('select', 'sessions-sort');
   sort.setAttribute('aria-label', 'Sort by');
   for (const { key, label } of SORT_KEYS) {
@@ -68,7 +74,7 @@ function createSessionsWindow(body, ctx, daemon) {
   refresh.setAttribute('aria-label', 'Refresh');
   const archivedToggle = button('sessions-toggle', 'Archived');
   archivedToggle.title = 'Show archived sessions instead';
-  bar.append(search, sort, direction, archivedToggle, refresh);
+  bar.append(search, directories, sort, direction, archivedToggle, refresh);
   const status = el('p', 'sessions-status');
   status.setAttribute('aria-live', 'polite');
   const list = el('ul', 'sessions-list');
@@ -198,14 +204,39 @@ function createSessionsWindow(body, ctx, daemon) {
     return row;
   }
 
+  /** The sessions this window shows: the daemon's answer, narrowed to the chosen directory. */
+  const shownSessions = () => {
+    const dir = directory();
+    return dir ? sessions.filter((s) => s.cwd === dir) : sessions;
+  };
+
+  function drawDirectories() {
+    const options = directoryCounts(sessions, directory()).map((d) => ({ value: d.cwd, text: `${shortDir(d.cwd)} (${d.count})` }));
+    const signature = JSON.stringify(options);
+    if (signature !== directoriesSignature) {
+      directoriesSignature = signature;
+      const all = el('option', '', 'All directories');
+      all.value = '';
+      directories.replaceChildren(
+        all,
+        ...options.map((o) => {
+          const option = el('option', '', o.text);
+          option.value = o.value;
+          return option;
+        }),
+      );
+    }
+    directories.value = directory() ?? '';
+  }
+
   function drawStatus() {
-    const shown = sessions.length;
+    const shown = shownSessions().length;
     const kind = showArchived() ? 'archived session' : 'session';
     status.classList.toggle('is-error', error !== null || moveError !== null);
     if (error) status.textContent = `Could not list sessions: ${error}`;
     else if (moveError) status.textContent = moveError;
     else if (!loaded) status.textContent = 'Loading sessions…';
-    else if (shown === 0) status.textContent = query() ? 'No session matches.' : showArchived() ? 'No archived sessions.' : 'No past sessions yet.';
+    else if (shown === 0) status.textContent = query() || directory() ? 'No session matches.' : showArchived() ? 'No archived sessions.' : 'No past sessions yet.';
     else status.textContent = `${shown} ${kind}${shown === 1 ? '' : 's'}${loading ? ' · refreshing…' : ''}`;
   }
 
@@ -216,11 +247,12 @@ function createSessionsWindow(body, ctx, daemon) {
     direction.title = `${dir === 'asc' ? 'Ascending' : 'Descending'}: click to reverse`;
     archivedToggle.setAttribute('aria-pressed', String(showArchived()));
     list.setAttribute('aria-label', showArchived() ? 'Archived sessions' : 'Past sessions');
+    drawDirectories();
     drawStatus();
 
     const open = openFiles();
     const now = Date.now();
-    const ordered = sortSessions(sessions, sortKey(), dir);
+    const ordered = sortSessions(shownSessions(), sortKey(), dir);
     const live = new Set();
     ordered.forEach((s, i) => {
       live.add(s.file);
@@ -296,6 +328,10 @@ function createSessionsWindow(body, ctx, daemon) {
       ctx.setParams({ query: search.value.trim() });
       void load();
     }, SEARCH_DEBOUNCE_MS);
+  });
+  directories.addEventListener('change', () => {
+    ctx.setParams({ directory: directories.value || null });
+    draw();
   });
   sort.addEventListener('change', () => {
     const key = isSortKey(sort.value) ? sort.value : 'active';

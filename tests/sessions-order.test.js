@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { naturalDir, relativeTime, sortSessions } from '../src/sessions/order.js';
+import { directoryCounts, naturalDir, relativeTime, sortSessions } from '../src/sessions/order.js';
 /** @import { PastSession } from '../daemon/wire.js' */
 
 /** @param {Partial<PastSession> & { id: string }} s @returns {PastSession} */
@@ -57,5 +57,26 @@ describe('session ordering', () => {
     assert.equal(relativeTime(now - 2 * 86_400_000, now), '2d ago');
     assert.match(relativeTime(now - 30 * 86_400_000, now), /2026/);
     assert.equal(relativeTime(now + 5000, now), 'just now', 'clock skew is not "in the future"');
+  });
+});
+
+describe('directories to narrow to', () => {
+  const list = [
+    session({ id: 'a', cwd: '/w/beta' }),
+    session({ id: 'b', cwd: '/w/Alpha' }),
+    session({ id: 'c', cwd: '/w/beta' }),
+    session({ id: 'd', cwd: null }),
+  ];
+
+  test('each directory once, A→Z ignoring case, with its session count; unknown ones are left out', () => {
+    assert.deepEqual(directoryCounts(list, null), [
+      { cwd: '/w/Alpha', count: 1 },
+      { cwd: '/w/beta', count: 2 },
+    ]);
+  });
+
+  test('the chosen directory stays listed when no session there is shown', () => {
+    assert.deepEqual(directoryCounts([], '/w/gone'), [{ cwd: '/w/gone', count: 0 }]);
+    assert.deepEqual(directoryCounts(list, '/w/beta').map((d) => d.count), [1, 2]);
   });
 });

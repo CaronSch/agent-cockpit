@@ -32,6 +32,12 @@
   flex: 1;
 }
 
+/* Paths can be long: the directory menu gives way to the search box first. */
+.sessions-directory {
+  flex: 0 1 auto;
+  max-width: 16em;
+}
+
 /* Drawn like the search box beside it: no native control chrome, a thin chevron. */
 .sessions-sort {
   appearance: none;
