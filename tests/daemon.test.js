@@ -1,6 +1,6 @@
 import { test, describe, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHistory } from '../daemon/history.js';
@@ -10,6 +10,7 @@ import { createScratchpads } from '../daemon/scratchpad.js';
 import { createWorkspaces } from '../daemon/workspace.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { listDirectory } from '../daemon/files.js';
+import { loadToken } from '../daemon/token.js';
 import { HISTORY_COMMAND, SETUP_COMMANDS } from '../daemon/omp-session.js';
 /** @import { StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
 
@@ -178,6 +179,21 @@ describe('loopback guard', () => {
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
     assert.equal((await call({ path: '/?token=wrong', auth: false })).status, 403);
+  });
+
+  test('the token file ends up owner-only, even when an unusable one was readable by others', async () => {
+    const stateDir = join(cwd, 'token-state');
+    await mkdir(stateDir);
+    const file = join(stateDir, 'token');
+    await writeFile(file, 'not a token\n');
+    await chmod(file, 0o644);
+    const token = await loadToken(stateDir);
+    assert.match(token, /^[0-9a-f]{64}$/);
+    assert.equal((await Bun.file(file).text()).trim(), token);
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    await chmod(file, 0o644);
+    assert.equal(await loadToken(stateDir), token, 'a valid token is kept');
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
   });
 
   test('static serving stays inside the UI directories', async () => {
