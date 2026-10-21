@@ -8,7 +8,8 @@
  * - contains "ask": an `ask` dialog; the reply names the chosen option
  * - contains "mystery": emits a frame type no client knows
  * - contains "garble": writes a stdout line that is not JSON
- * - contains "table": replies with a markdown table
+ * - contains "table": replies with a markdown table; with "wide" too, a heading, a table wider
+ *   than a narrow pane (inline code in its first column) and a nested list of long lines
  * - contains "slow": an intermediate reply and a tool run, then 1.5 s before the final reply
  * - contains "todo": a `todo` tool call setting a three-task list, one done and one in progress
  *   (its result carries the whole list in `details.phases`, as omp's does; so does `get_state`)
@@ -34,6 +35,21 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+
+/** Shaped like a real omp reply: a heading, a table too wide for a narrow pane, then long list lines. */
+const WIDE_TABLE_REPLY = [
+  '### Tips around ours',
+  'Each block below put our bundle between two others; the neighbours tipped far less than we did.',
+  '| Before us | After us | Next landed |',
+  '|---|---|---|',
+  '| `0xe67e5d0f9a3c41b2e8d7f6a5c4b3a2918f7e6d5c4b3a29180f7e6d5c4b3a2918` (idx 29) | idx 30 tipped **0.038 gwei**, against our **33.6** | idx 900 |',
+  '| `0x3b1f00c2d9e8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2` (idx 12) | idx 13 tipped **0.041 gwei**, against our **28.0** | idx 412 |',
+  '',
+  '- The builder ordered by tip per gas, so a bundle tipping a thousand times more than its neighbours always lands first in the block, whatever the gas price of the transactions around it.',
+  '  - Nested: `bundle_attempts.was_sent_to_the_auction_and_landed_in_the_same_block_as_its_backrun` stays false for every one of these rows, which rules out the auction path.',
+  '  - Nested again: the lines here are long enough to wrap several times in a narrow pane.',
+  '- Last point, also long enough that it has to wrap at the pane width rather than at the width of the table above it.',
+].join('\n');
 
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
@@ -209,6 +225,8 @@ async function runPrompt(id, text) {
     streamAssistant(`You picked **${picked}**.`);
   } else if (/interrupt/.test(text)) {
     streamAssistant('I was about to', null, { stopReason: 'aborted', errorMessage: 'Interrupted by user' });
+  } else if (/wide/.test(text) && /table/.test(text)) {
+    streamAssistant(WIDE_TABLE_REPLY);
   } else if (/table/.test(text)) {
     streamAssistant('Here it is:\n| When | What happens | Code |\n|---|---|---|\n| Now | Stuff happened | `tracked.rs:67` |');
   } else {

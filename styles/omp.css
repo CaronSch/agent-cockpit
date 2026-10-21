@@ -436,21 +436,19 @@
   overflow-wrap: anywhere;
 }
 
-.omp-md > :first-child {
-  margin-top: 0;
+/* Blocks sit a blank line apart, as in a terminal; a heading stays close to what it heads.
+   Inside a list item nothing is spaced, so nested lists hang straight under their parent. */
+.omp-md :where(p, ul, ol, blockquote, pre, hr, .md-heading, .md-table-block) {
+  margin: 0;
 }
 
-.omp-md > :last-child {
-  margin-bottom: 0;
+.omp-md > * + *,
+.omp-md blockquote > * + * {
+  margin-top: 1lh;
 }
 
-.omp-md p,
-.omp-md ul,
-.omp-md ol,
-.omp-md blockquote,
-.omp-md pre,
-.omp-md .md-table-block {
-  margin: 0 0 var(--space-2);
+.omp-md > .md-heading + * {
+  margin-top: var(--space-1);
 }
 
 .omp-md strong {
@@ -478,20 +476,13 @@
   color: var(--color-text-dim);
 }
 
-.omp-md li > p:last-child,
-.omp-md li > ul:last-child,
-.omp-md li > ol:last-child {
-  margin-bottom: 0;
-}
-
 .omp-md hr {
   border: 0;
   border-top: 1px solid var(--color-line);
 }
 
-/* Headings stay at reading size: weight and a little space set them apart. */
+/* Headings stay at reading size: weight and the space above set them apart. */
 .md-heading {
-  margin: var(--space-3) 0 var(--space-1);
   font-size: 1em;
   font-weight: 600;
 }
@@ -563,6 +554,7 @@
 
 /* Light rules only: a line under the header and faint ones between rows. */
 .md-table {
+  width: max-content;
   border-collapse: collapse;
 }
 
@@ -571,6 +563,12 @@
   padding: 2px 2ch 2px 0;
   text-align: left;
   vertical-align: top;
+}
+
+/* Columns take their natural width, so a table too wide for the pane scrolls in its wrapper
+   instead of squeezing a column to one word a line; a long cell wraps at a reading measure. */
+.md-table td {
+  max-width: 60ch;
 }
 
 .md-table th:last-child,

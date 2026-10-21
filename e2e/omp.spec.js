@@ -177,6 +177,39 @@ test('a markdown table in a reply renders as a table, not as pipes', async ({ pa
   await expect(pane.locator('.omp-assistant').last()).not.toContainText('|');
 });
 
+test('a table wider than the pane scrolls by itself; the reply around it wraps at the pane width, a line apart', async ({ page }) => {
+  await openWorkbench(page);
+  await page.setViewportSize({ width: 480, height: 800 });
+  const pane = await startedPane(page);
+  await send(pane, 'show me a wide table');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('.md-table')).toBeVisible();
+
+  const sizes = await pane.locator('.omp-transcript').evaluate((transcript) => {
+    const md = /** @type {HTMLElement} */ ([...transcript.querySelectorAll('.omp-assistant .omp-md')].at(-1));
+    const wrap = /** @type {HTMLElement} */ (md.querySelector('.md-table-wrap'));
+    /** The right edge of the furthest-reaching line of text in `node`. @param {Node} node */
+    const textRight = (node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return Math.max(...[...range.getClientRects()].map((r) => r.right));
+    };
+    const block = (/** @type {string} */ selector) => /** @type {HTMLElement} */ (md.querySelector(selector)).getBoundingClientRect();
+    return {
+      overflow: transcript.scrollWidth - transcript.clientWidth,
+      textRight: Math.max(...[...md.querySelectorAll('p, li')].map(textRight)),
+      paneRight: transcript.getBoundingClientRect().right - parseFloat(getComputedStyle(transcript).paddingRight),
+      tableOverflow: wrap.scrollWidth - wrap.clientWidth,
+      tableToList: block('ul').top - block('.md-table-block').bottom,
+      line: parseFloat(getComputedStyle(md).lineHeight),
+    };
+  });
+  expect(sizes.overflow, 'the transcript never scrolls sideways').toBeLessThanOrEqual(0);
+  expect(sizes.textRight, 'reply text wraps inside the pane').toBeLessThanOrEqual(sizes.paneRight + 0.5);
+  expect(sizes.tableOverflow, 'the table scrolls inside its wrapper').toBeGreaterThan(0);
+  expect(sizes.tableToList, 'a blank line between the table and the list after it').toBeCloseTo(sizes.line, 0);
+});
+
 test('a markdown table copies as Markdown, as CSV, and as a PNG image of the table', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await openWorkbench(page);
