@@ -16,7 +16,6 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createHistory } from './history.js';
 import { createHub } from './hub.js';
-import { OMP_ENV } from './omp-session.js';
 import { createAttachments } from './attachments.js';
 import { createScratchpads } from './scratchpad.js';
 import { createDaemonServer } from './server.js';
@@ -29,7 +28,7 @@ const VERSION_TIMEOUT_MS = 10_000;
 /** @param {string} ompPath @returns {Promise<string | null>} */
 async function ompVersion(ompPath) {
   try {
-    const proc = Bun.spawn([ompPath, '--version'], { env: OMP_ENV, stderr: 'ignore', timeout: VERSION_TIMEOUT_MS });
+    const proc = Bun.spawn([ompPath, '--version'], { stderr: 'ignore', timeout: VERSION_TIMEOUT_MS });
     return (await new Response(proc.stdout).text()).trim() || null;
   } catch {
     return null;
