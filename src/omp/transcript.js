@@ -106,6 +106,7 @@ import { todoPhases } from './todos.js';
  *   cost: number,
  *   editorText: { seq: number, text: string } | null,
  *   openUrl: { url: string, launchUrl: string | null, instructions: string | null } | null,
+ *   loggedIn: Map<string, boolean> | null,
  *   index: Map<string, Item>,
  *   toolOwner: Map<string, string>,
  *   failedRequests: Set<string>,
@@ -156,6 +157,7 @@ export function createTranscript() {
     cost: 0,
     editorText: null,
     openUrl: null,
+    loggedIn: null,
     index: new Map(),
     toolOwner: new Map(),
     failedRequests: new Set(),
@@ -419,6 +421,13 @@ function applyResponse(state, frame) {
     case 'bash':
       finishBash(state, id, frame.data ?? {}, null);
       return;
+    case 'get_login_providers':
+      if (Array.isArray(frame.data?.providers)) {
+        /** @type {any[]} */
+        const providers = frame.data.providers;
+        state.loggedIn = new Map(providers.filter((p) => typeof p?.id === 'string').map((p) => [p.id, p.authenticated === true]));
+      }
+      return;
     case 'login':
       state.openUrl = null;
       return note(state, 'info', 'login', `Logged in${frame.data?.providerId ? ` to ${frame.data.providerId}` : ''}`);
@@ -426,6 +435,19 @@ function applyResponse(state, frame) {
       // Other successful replies are consumed by whoever sent the command.
       return;
   }
+}
+
+/**
+ * Whether the session has to log in before it can talk to its model: it has no model, or the
+ * model's provider is one omp logs in to (`get_login_providers`) and it is not logged in. omp
+ * only starts with, or switches to, a model whose provider has credentials (a key, or a
+ * login), so a model from any other provider can be used as it is.
+ * @param {Transcript} state
+ */
+export function needsLogin(state) {
+  const model = state.session.model;
+  if (!model) return true;
+  return state.loggedIn?.get(model.provider) === false;
 }
 
 /** @param {Transcript} state @param {Record<string, any>} data */

@@ -21,7 +21,12 @@
  * @typedef {{ kind: 'branch', axis: Axis, children: (Draft | null)[], sizes: number[] }} DraftBranch
  * @typedef {Leaf | DraftBranch} Draft
  */
-/** @typedef {{ kind: 'move', id: string } | { kind: 'new', leaf: Leaf }} DropSource */
+/**
+ * What is dropped: a window already in the tree, or a new one. A new one marked `into` may
+ * also land on the middle of a window of its own widget type, which then takes its params
+ * (shows what was dragged) instead of a window being added.
+ * @typedef {{ kind: 'move', id: string } | { kind: 'new', leaf: Leaf, into?: boolean }} DropSource
+ */
 /** @typedef {{ kind: 'leaf', id: string } | { kind: 'edge' } | { kind: 'empty' }} DropTarget */
 /** @typedef {{ source: DropSource, target: DropTarget, dir: Direction }} DropOp */
 
@@ -210,6 +215,14 @@ export function moveLeaf(tree, id, targetId, dir) {
 }
 
 /**
+ * Whether `source` may land on the middle of window `id`: a new window marked `into`, onto a
+ * window of the same widget type.
+ * @param {Tree} tree @param {DropSource} source @param {string} id
+ */
+export const canDropInto = (tree, source, id) =>
+  source.kind === 'new' && source.into === true && findLeaf(tree, id)?.widget === source.leaf.widget;
+
+/**
  * Single entry point used by drag & drop and by previews.
  * @param {Tree} tree @param {DropOp} op
  * @returns {Tree}
@@ -223,9 +236,9 @@ export function applyDrop(tree, { source, target, dir }) {
     return insertAtEdge(source.kind === 'move' ? removeLeaf(tree, source.id) : tree, dir, moving);
   }
   if (target.kind === 'leaf') {
-    return source.kind === 'move'
-      ? moveLeaf(tree, source.id, target.id, dir)
-      : insertBeside(tree, target.id, dir, moving);
+    if (source.kind === 'move') return moveLeaf(tree, source.id, target.id, dir);
+    if (dir !== 'center') return insertBeside(tree, target.id, dir, moving);
+    return canDropInto(tree, source, target.id) ? setLeafParams(tree, target.id, moving.params ?? {}) : tree;
   }
   return tree;
 }

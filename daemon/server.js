@@ -13,7 +13,7 @@ import { SCREEN_ID, WORKSPACE_NAME } from '../src/workspace/model.js';
 import { isValidTree } from '../src/layout/grid-model.js';
 import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-files.js';
 /** @import { BunRequest, Server } from 'bun' */
-/** @import { DaemonConfig, Scratchpad, SessionEvent, SessionMeta } from './wire.js' */
+/** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
 /** @import { Hub } from './hub.js' */
 /** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
 /** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
@@ -244,9 +244,7 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
       '/api/history/archive': api({
         POST: async (req) => {
           const { file } = (await readJson(req)) ?? {};
-          const writing = (/** @type {SessionMeta} */ m) => m.status === 'starting' || m.status === 'ready';
-          const open = typeof file === 'string' && hub.list().some((m) => writing(m) && m.sessionFile === resolve(file));
-          if (open) throw new HttpError(409, 'the session is open in a window; close it to archive it');
+          if (typeof file === 'string' && hub.writing(resolve(file))) throw new HttpError(409, 'the session is running; stop it to archive it');
           return json({ file: await history.archive(file) });
         },
       }),
@@ -307,12 +305,23 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
           if (body?.resume != null && body?.fork != null) throw new HttpError(400, 'resume and fork cannot be combined');
           const resume = body?.resume == null ? null : await existingPath(body.resume, 'file', 'resume');
           const fork = body?.fork == null ? null : await existingPath(body.fork, 'file', 'fork');
+          const running = resume && hub.writing(resume);
+          if (running) return json({ session: running });
           return json({ session: hub.create({ cwd, resume, fork }) }, 201);
         },
       }),
       '/api/sessions/:id': api({
         DELETE: async (req) => {
           await sessionOf(req).close();
+          return noContent();
+        },
+      }),
+      '/api/sessions/:id/seen': api({
+        POST: async (req) => {
+          const session = sessionOf(req);
+          const at = (await readJson(req))?.at;
+          if (!Number.isFinite(at)) throw new HttpError(400, 'expected { at: a time in daemon milliseconds }');
+          session.markSeen(at);
           return noContent();
         },
       }),

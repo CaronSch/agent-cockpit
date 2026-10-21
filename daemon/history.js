@@ -15,7 +15,8 @@
  * listed the same way.
  *
  * `watch` hears when either directory's journals change (omp writing one, a session archived
- * or restored), at most once per COALESCE_MS, so the Sessions window refreshes without polling.
+ * or restored), at most once per COALESCE_MS, and says which journals did, so the Sessions
+ * window refreshes without polling.
  */
 import { createReadStream, mkdirSync, watch } from 'node:fs';
 import { link, lstat, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
@@ -224,24 +225,30 @@ async function moveSession(fromRoot, toRoot, rel) {
 export function createHistory({ root, archive }) {
   const sessions = createShelf(root);
   const archived = createShelf(archive);
-  /** @type {Set<() => void>} */
+  /** @type {Set<(changed: ReadonlySet<string | null>) => void>} */
   const listeners = new Set();
+  /** Journals changed since the last notice; null for a change the platform could not place. @type {Set<string | null>} */
+  let changes = new Set();
   /** @type {import('node:fs').FSWatcher[]} */
   let watchers = [];
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let pending;
 
   /**
-   * @param {string | null} rel the changed path under a watched directory, null when the
-   *   platform could not say which (then anything may have changed)
+   * @param {string} dir the watched directory
+   * @param {string | null} rel the changed path under `dir`, null when the platform could not
+   *   say which (then anything may have changed)
    */
-  function changed(rel) {
+  function changed(dir, rel) {
     // A journal is `<project>/<name>.jsonl`; deeper files are subagents' and artifacts'.
     const parts = rel?.split(sep);
-    if (pending || (parts && (parts.length !== 2 || !parts[1].endsWith('.jsonl')))) return;
-    pending = setTimeout(() => {
+    if (parts && (parts.length !== 2 || !parts[1].endsWith('.jsonl'))) return;
+    changes.add(rel === null ? null : join(dir, rel));
+    pending ??= setTimeout(() => {
       pending = undefined;
-      for (const fn of listeners) fn();
+      const told = changes;
+      changes = new Set();
+      for (const fn of listeners) fn(told);
     }, COALESCE_MS);
   }
 
@@ -249,7 +256,7 @@ export function createHistory({ root, archive }) {
     watchers = [root, archive].flatMap((dir) => {
       try {
         mkdirSync(dir, { recursive: true }); // a directory that is not there yet cannot be watched
-        return [watch(dir, { recursive: true }, (_type, name) => changed(name ? String(name) : null))];
+        return [watch(dir, { recursive: true }, (_type, name) => changed(dir, name ? String(name) : null))];
       } catch (err) {
         console.error(`[history] not watching ${dir}; the Sessions window refreshes only on request:`, err);
         return [];
@@ -260,8 +267,9 @@ export function createHistory({ root, archive }) {
   return {
     /**
      * Calls `fn` (coalesced) whenever a journal in omp's sessions or the archive changes,
-     * appears or goes, until the returned function is called.
-     * @param {() => void} fn @returns {() => void}
+     * appears or goes, with the paths of the journals that did (null for a change the platform
+     * could not place), until the returned function is called.
+     * @param {(changed: ReadonlySet<string | null>) => void} fn @returns {() => void}
      */
     watch(fn) {
       if (listeners.size === 0) startWatching();
@@ -273,6 +281,7 @@ export function createHistory({ root, archive }) {
         watchers = [];
         clearTimeout(pending);
         pending = undefined;
+        changes = new Set();
       };
     },
     /**

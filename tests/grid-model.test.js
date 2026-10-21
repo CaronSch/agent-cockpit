@@ -11,6 +11,7 @@ import {
   moveLeaf,
   swapLeaves,
   applyDrop,
+  canDropInto,
   setSizes,
   normalize,
   isValidTree,
@@ -164,6 +165,21 @@ describe('applyDrop', () => {
     }));
     assert.equal(next.axis, 'col');
     assert.equal(asLeaf(next.children[1]).id, 'a');
+  });
+
+  test('a new window marked `into` dropped on the middle of one of its type gives that one its params', () => {
+    const shown = { ...leaf('n', 'x'), params: { session: 's2' } };
+    const into = applyDrop({ ...tree, children: [{ ...leaf('a', 'x'), params: { session: 's1', mine: true } }, leaf('b', 'x')] }, {
+      source: { kind: 'new', leaf: shown, into: true },
+      target: { kind: 'leaf', id: 'a' },
+      dir: 'center',
+    });
+    assert.deepEqual(ids(into), ['a', 'b'], 'no window added');
+    assert.deepEqual(findLeaf(into, 'a')?.params, { session: 's2', mine: true });
+    assert.equal(canDropInto(tree, { kind: 'new', leaf: shown, into: true }, 'a'), true);
+    assert.equal(canDropInto(tree, { kind: 'new', leaf: shown }, 'a'), false, 'only when asked for');
+    assert.equal(canDropInto(tree, { kind: 'new', leaf: leaf('n', 'other'), into: true }, 'a'), false, 'only onto its own type');
+    assert.equal(applyDrop(tree, { source: { kind: 'new', leaf: shown }, target: { kind: 'leaf', id: 'a' }, dir: 'center' }), tree);
   });
 
   test('handles a drop into an empty grid', () => {

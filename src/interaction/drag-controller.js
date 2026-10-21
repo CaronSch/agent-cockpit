@@ -6,7 +6,7 @@
  * of the drop (applyDrop + computeLayout), recomputed only when the hovered
  * target/zone changes.
  */
-import { applyDrop } from '../layout/grid-model.js';
+import { applyDrop, canDropInto } from '../layout/grid-model.js';
 import { computeLayout } from '../layout/compute-layout.js';
 import { computeDropZone, detectEdgeZone } from '../layout/drop-zone.js';
 
@@ -99,7 +99,8 @@ export function createDragController(app) {
     for (const [id, rect] of app.getLayout().leaves) {
       if (!contains(rect, x, y)) continue;
       if (s.source.kind === 'move' && id === s.source.id) return null;
-      return { target: { kind: 'leaf', id }, dir: computeDropZone(x, y, rect, { allowCenter: s.source.kind === 'move' }) };
+      const allowCenter = s.source.kind === 'move' || canDropInto(app.getTree(), s.source, id);
+      return { target: { kind: 'leaf', id }, dir: computeDropZone(x, y, rect, { allowCenter }) };
     }
     return undefined;
   }
@@ -132,12 +133,16 @@ export function createDragController(app) {
     /** @type {DropOp} */
     const op = { source: s.source, ...hit };
     const next = applyDrop(tree, op);
-    const rect = next === tree ? null : computeLayout(next, app.getBounds(), app.layoutOptions).leaves.get(s.movingId);
+    // A new window dropped into another shows there: that window is where it lands.
+    const landing = s.source.kind === 'new' && hit.dir === 'center' && hit.target.kind === 'leaf' ? hit.target.id : s.movingId;
+    const into = landing !== s.movingId;
+    const rect = next === tree ? null : computeLayout(next, app.getBounds(), app.layoutOptions).leaves.get(landing);
     if (!rect) return clearTarget(s);
 
     s.op = op;
     s.nextTree = next;
-    indicator.show(rect, app.getBounds(), `${ZONE_LABEL[hit.dir] ?? 'Place'} · ${rect.w}×${rect.h}`);
+    const zone = into ? 'Show here' : (ZONE_LABEL[hit.dir] ?? 'Place');
+    indicator.show(rect, app.getBounds(), `${zone} · ${rect.w}×${rect.h}`);
   }
 
   /** @param {DragSession} s */

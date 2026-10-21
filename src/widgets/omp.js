@@ -2,6 +2,11 @@
  * The omp pane: starts an omp coding agent in a chosen directory through the daemon and
  * lets the user chat with it and set it up, rendered from omp's structured event stream.
  *
+ * The window shows one session at a time; the session is the daemon's, not the window's. New
+ * starts another one here and Sessions shows any other here, while the one shown before runs
+ * on; closing the window leaves its session running too. Only End (or the Sessions window's
+ * Stop) ends one.
+ *
  * Params (persisted with the layout): `session` (daemon session id), `cwd`,
  * `sessionFile` (omp's transcript file, for resuming after the process is gone), `name` (the
  * conversation's title, shown in the window's top bar), `resume` or `fork` while the window is
@@ -12,7 +17,7 @@
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
-import { addNote, applyEvent, conversationName, createTranscript } from '../omp/transcript.js';
+import { addNote, applyEvent, conversationName, createTranscript, needsLogin } from '../omp/transcript.js';
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
@@ -21,12 +26,12 @@ import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { createSuggestions } from '../omp/suggestions.js';
 import { createFileSuggest } from '../omp/file-suggest.js';
 import { MENTIONS, PLAIN_PATH } from '../omp/file-mention.js';
-import { awaitsUser } from '../omp/activity.js';
+import { awaitedAfter } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
 import { turnProgress } from '../omp/todos.js';
 import { createPromptHistory, sentPrompts } from '../omp/prompt-history.js';
+import { confirmBeside } from '../ui/confirm.js';
 /** @import { WidgetContext } from './registry.js' */
-/** @import { LeafParams } from '../layout/grid-model.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { SlashCommand } from '../omp/transcript.js' */
@@ -55,8 +60,6 @@ const SETTINGS = [
 
 const MAX_SUGGESTIONS = 8;
 const BOTTOM_SLACK_PX = 24;
-/** Seen-up-to is saved this long after it last moved, not on every streamed token. */
-const READ_SAVE_MS = 1000;
 const REFUSED = 'The daemon refused this page.';
 const FORK_TITLE = 'Fork: continue a copy of this conversation in a new window';
 const NOTHING_TO_FORK = 'Nothing to fork yet: omp saves a conversation once the model has replied';
@@ -70,29 +73,12 @@ export default {
 
   /** @param {HTMLElement} body @param {WidgetContext} ctx */
   mount(body, ctx) {
-    const pane = createPane(body, ctx, getDaemon());
-    return { destroy: pane.destroy };
-  },
-
-  /** @param {LeafParams} params */
-  close(params) {
-    const session = str(params.session);
-    if (session) endSession(getDaemon(), session);
+    return createPane(body, ctx, getDaemon());
   },
 };
 
 /** @param {unknown} v @returns {string | null} */
 const str = (v) => (typeof v === 'string' && v ? v : null);
-
-/**
- * Closing the window ends its agent, as closing a terminal pane does; otherwise omp keeps
- * working with nothing left that can reach it.
- * @param {DaemonClient} daemon @param {string} session
- */
-function endSession(daemon, session) {
-  const status = daemon.meta(session)?.status;
-  if (status === 'starting' || status === 'ready') daemon.closeSession(session).catch(() => {});
-}
 
 /**
  * @param {HTMLElement} body @param {WidgetContext} ctx @param {DaemonClient} daemon
@@ -140,54 +126,13 @@ function createPane(body, ctx, daemon) {
     schedule();
   });
 
-  // ── unread: a final response or question the user has not looked at (omp/activity.js) ──
-  /**
-   * The newest of those the user has seen, in daemon time; saved with the window. A window
-   * without one has seen what its session did so far (nothing, for a new session).
-   */
-  let readAt = typeof ctx.params.readAt === 'number' ? ctx.params.readAt : daemon.lastEventAt(str(ctx.params.session));
-  let latest = readAt;
-  let unread = false;
+  // ── unread: a final response or question nobody has looked at (omp/activity.js) ──
+  // What was seen is the daemon's (SessionMeta `seenAt`), so every window showing the session,
+  // and the Sessions window, agree on it.
   let pointerInside = false;
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let readSave;
   /** Looking at this window: the pointer is over it, in a page that has focus. */
   const reading = () => pointerInside && document.visibilityState === 'visible' && document.hasFocus();
-
-  /**
-   * Saves `readAt` with the window: `soon` while output streams in under the reader's eyes
-   * (every token moves it), at once when something unread has just been read.
-   * @param {{ soon?: boolean }} [options]
-   */
-  function saveReadAt({ soon = false } = {}) {
-    clearTimeout(readSave);
-    const save = () => {
-      if (!destroyed && ctx.params.readAt !== readAt) ctx.setParams({ readAt });
-    };
-    if (soon) readSave = setTimeout(save, READ_SAVE_MS);
-    else save();
-  }
-
-  function markRead() {
-    if (latest <= readAt && !unread) return;
-    readAt = Math.max(readAt, latest);
-    saveReadAt({ soon: !unread });
-    if (unread) {
-      unread = false;
-      ctx.setUnread(false);
-    }
-  }
-
-  /** @param {SessionEvent} event */
-  function noteActivity(event) {
-    if (!awaitsUser(event) || event.at <= readAt) return;
-    latest = Math.max(latest, event.at);
-    if (reading()) return markRead();
-    if (!unread) {
-      unread = true;
-      ctx.setUnread(true);
-    }
-  }
+  const markRead = () => view?.markRead();
 
   // Moving over the pane, scrolling it, clicking or typing in it: all count as reading it.
   body.addEventListener('pointerenter', () => {
@@ -199,7 +144,6 @@ function createPane(body, ctx, daemon) {
   for (const type of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'focusin']) {
     body.addEventListener(type, markRead, { passive: true });
   }
-  if (typeof ctx.params.readAt !== 'number') saveReadAt();
 
   function schedule() {
     if (frame || destroyed) return;
@@ -223,6 +167,7 @@ function createPane(body, ctx, daemon) {
     if (view && view.session !== p.session) {
       view.destroy();
       view = null;
+      ctx.setUnread(false);
     }
     if (!view && status !== 'open') {
       mode = null; // the status text changes with the status: always redraw it
@@ -422,17 +367,27 @@ function createPane(body, ctx, daemon) {
   }
 
   /**
-   * @typedef {{ session: string, root: HTMLElement, update(): void, destroy(): void }} SessionView
+   * @typedef {{ session: string, root: HTMLElement, update(): void, markRead(): void, destroy(): void }} SessionView
    * @param {string} session
    * @returns {SessionView}
    */
   function createSessionView(session) {
     const state = createTranscript();
+    /** When the session last waited on its user (omp/activity.js), and what this window told the daemon they saw. */
+    let awaitedAt = 0;
+    let seenSent = 0;
     const subscription = daemon.subscribe(session, (event) => {
       applyEvent(state, event);
-      noteActivity(event);
+      awaitedAt = awaitedAfter(awaitedAt, event);
       schedule();
     });
+    const seenAt = () => Math.max(daemon.meta(session)?.seenAt ?? Infinity, seenSent);
+    function markRead() {
+      if (awaitedAt <= seenAt()) return;
+      seenSent = awaitedAt;
+      ctx.setUnread(false);
+      daemon.markSeen(session, awaitedAt).catch(() => {});
+    }
     // The subscription replayed history synchronously: requests in it are already handled.
     let editorSeen = state.editorText?.seq ?? 0;
     /** @type {Set<string>} */
@@ -443,7 +398,8 @@ function createPane(body, ctx, daemon) {
     const toolbar = el('div', 'omp-toolbar');
     const cwdEl = el('span', 'omp-cwd');
     const modelBtn = toolButton('model…', 'Choose model');
-    const thinkingBtn = toolButton('thinking…', 'Choose thinking level');
+    modelBtn.classList.add('omp-model');
+    const thinkingBtn = toolButton('think…', 'Choose thinking level');
     const activity = el('span', 'omp-activity');
     // How far through its todo list the agent is, while a turn runs (omp/todos.js).
     const progressEl = el('span', 'omp-progress');
@@ -458,12 +414,27 @@ function createPane(body, ctx, daemon) {
     costEl.title = 'Cost of this session';
     const errorBadge = el('span', 'omp-badge-error', 'error');
     const spacer = el('span', 'omp-spacer');
-    const forkBtn = toolButton('Fork', FORK_TITLE);
-    const configBtn = toolButton('Config', 'Settings for this pane');
-    const loginBtn = toolButton('Login', 'Log in to a model provider');
+    const newBtn = toolButton('New', 'Start a new session in this window (this one keeps running: Sessions lists it)');
     const stopBtn = toolButton('Stop', 'Stop the agent and restore queued messages (Esc)');
-    const closeBtn = toolButton('Close', 'End this omp session');
-    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, progressEl, contextEl, costEl, errorBadge, spacer, forkBtn, configBtn, loginBtn, stopBtn, closeBtn);
+    // Shown only while the session has to log in to talk to its model; More always has Login.
+    const loginBtn = toolButton('Login', 'Log in to a model provider: this session’s model needs it');
+    // The rest sits in one menu, so the toolbar keeps to one line at usual pane widths.
+    const moreBtn = toolButton('⋯', 'More: Fork, Config, Login, End');
+    moreBtn.setAttribute('aria-label', 'More actions');
+    const moreMenu = el('div', 'omp-menu omp-more');
+    moreMenu.popover = 'auto';
+    moreBtn.popoverTargetElement = moreMenu;
+    const menuItem = (/** @type {string} */ label, /** @type {string} */ title) => {
+      const b = button('omp-menu-item', label);
+      b.title = title;
+      return b;
+    };
+    const forkBtn = menuItem('Fork', FORK_TITLE);
+    const configBtn = menuItem('Config', 'Settings for this pane');
+    const loginItem = menuItem('Login', 'Log in to a model provider');
+    const endBtn = menuItem('End', 'End this omp session (closing the window leaves it running)');
+    moreMenu.append(forkBtn, configBtn, loginItem, endBtn);
+    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, progressEl, contextEl, costEl, errorBadge, spacer, loginBtn, newBtn, stopBtn, moreBtn, moreMenu);
 
     const strip = el('div', 'omp-strip');
     const loginStrip = el('div', 'omp-login');
@@ -679,19 +650,16 @@ function createPane(body, ctx, daemon) {
       })),
     );
 
-    attachMenu(
-      loginBtn,
-      async () =>
-        (await listFrom({ type: 'get_login_providers' }, 'providers'))
-          .filter((p) => p?.available !== false)
-          .map((p) => ({
-            label: String(p?.name ?? p?.id),
-            detail: p?.authenticated ? '✓ logged in' : undefined,
-            current: Boolean(p?.authenticated),
-            pick: () => void rpc({ type: 'login', providerId: p?.id }),
-          })),
-      { filter: true },
-    );
+    const loginProviders = async () =>
+      (await listFrom({ type: 'get_login_providers' }, 'providers'))
+        .filter((p) => p?.available !== false)
+        .map((p) => ({
+          label: String(p?.name ?? p?.id),
+          detail: p?.authenticated ? '✓ logged in' : undefined,
+          current: Boolean(p?.authenticated),
+          pick: () => void rpc({ type: 'login', providerId: p?.id }),
+        }));
+    for (const anchor of [loginBtn, loginItem]) attachMenu(anchor, loginProviders, { filter: true });
 
     // ── Config: this window's own settings (`SETTINGS`), saved with it ──
     const settingsPanel = el('div', 'omp-menu omp-settings');
@@ -720,20 +688,31 @@ function createPane(body, ctx, daemon) {
     stopBtn.addEventListener('click', () => void stop());
     // The copy is omp's own (`--fork`): a new session in a new window; this one carries on.
     forkBtn.addEventListener('click', () => {
+      moreMenu.hidePopover();
       const m = meta();
       if (m?.sessionFile) ctx.addWidget('omp', { fork: m.sessionFile, cwd: m.cwd, session: null, sessionFile: null, name: params().name });
     });
-    closeBtn.addEventListener('click', () => {
-      closeBtn.disabled = true;
+    newBtn.addEventListener('click', () => {
+      // The setup screen starts it, in this session's directory unless the user picks another.
+      ctx.setParams({ session: null, cwd: cwd() || null, sessionFile: null, name: null, resume: null, fork: null, prompt: null });
+      schedule();
+    });
+    function end() {
+      endBtn.disabled = true;
       daemon
         .closeSession(session)
         .catch((err) => {
-          addNote(state, 'error', 'close', errorMessage(err));
+          addNote(state, 'error', 'end', errorMessage(err));
           schedule();
         })
         .finally(() => {
-          closeBtn.disabled = false;
+          endBtn.disabled = false;
         });
+    }
+    endBtn.addEventListener('click', () => {
+      moreMenu.hidePopover();
+      if (!state.streaming) return end();
+      confirmBeside(moreBtn, { message: 'The agent is working on a turn. End the session anyway?', action: 'End session', run: end });
     });
 
     // ── composer: `/` commands and `@` files suggested as they are typed ──
@@ -985,7 +964,7 @@ function createPane(body, ctx, daemon) {
       const s = state.session;
       modelBtn.textContent = s.model ? s.model.name || s.model.id : 'model…';
       modelBtn.title = s.model ? `${s.model.provider}/${s.model.id}` : 'Choose model';
-      thinkingBtn.textContent = s.thinkingLevel ? `thinking: ${s.thinkingLevel}` : 'thinking…';
+      thinkingBtn.textContent = s.thinkingLevel ? `think: ${s.thinkingLevel}` : 'think…';
       activity.textContent = state.streaming ? 'working' : 'idle';
       activity.classList.toggle('is-streaming', state.streaming);
       const progress = turnProgress(state);
@@ -1001,9 +980,10 @@ function createPane(body, ctx, daemon) {
       errorBadge.hidden = !state.lastError;
       errorBadge.title = state.lastError ?? '';
       const live = ready();
-      for (const b of [modelBtn, thinkingBtn, loginBtn]) b.disabled = !live;
+      for (const b of [modelBtn, thinkingBtn, loginBtn, loginItem]) b.disabled = !live;
+      loginBtn.hidden = !needsLogin(state);
       stopBtn.disabled = !live || !state.streaming;
-      closeBtn.hidden = !live && m?.status !== 'starting';
+      endBtn.hidden = !live && m?.status !== 'starting';
       forkBtn.disabled = !forkable();
       forkBtn.title = forkable() ? FORK_TITLE : NOTHING_TO_FORK;
     }
@@ -1059,12 +1039,16 @@ function createPane(body, ctx, daemon) {
       drawQueue();
       drawComposer();
       selectionPopup.refresh();
+      // News that lands under the reader's eyes is read as it comes.
+      if (reading()) markRead();
+      ctx.setUnread(awaitedAt > seenAt());
     }
 
     return {
       session,
       root: node,
       update,
+      markRead,
       destroy() {
         subscription();
         resizes.disconnect();
@@ -1082,14 +1066,14 @@ function createPane(body, ctx, daemon) {
   }
 
   return {
+    // Sessions or a drop switched this window to another session: show it.
+    paramsChanged: schedule,
     destroy() {
       destroyed = true;
       if (frame) cancelAnimationFrame(frame);
-      clearTimeout(readSave);
       offStatus();
       offReset();
-      // A page reload never gets here, so its agents keep running.
-      if (view) endSession(daemon, view.session);
+      // The session runs on: the daemon's, not this window's.
       view?.destroy();
       view = null;
       root.remove();

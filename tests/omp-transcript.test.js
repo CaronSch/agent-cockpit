@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { addNote, applyEvent, askAnswers, conversationName, createTranscript } from '../src/omp/transcript.js';
+import { addNote, applyEvent, askAnswers, conversationName, createTranscript, needsLogin } from '../src/omp/transcript.js';
 /** @import { SessionEvent } from '../daemon/wire.js' */
 /** @import { Transcript } from '../src/omp/transcript.js' */
 
@@ -390,7 +390,7 @@ describe('bash and resume', () => {
   /** @param {string | null} resume @returns {SessionEvent} */
   const session = (resume) => ({
     kind: 'session',
-    meta: { id: 's1', cwd: '/w', resume, fork: null, sessionFile: resume, status: 'ready', pid: 1, exitCode: null, error: null, startedAt: 0 },
+    meta: { id: 's1', cwd: '/w', resume, fork: null, sessionFile: resume, status: 'ready', pid: 1, exitCode: null, error: null, startedAt: 0, seenAt: 0 },
     seq: ++seq,
     at: 0,
     session: 's1',
@@ -417,5 +417,27 @@ describe('conversation name', () => {
   test('omp’s title, once the user names the session, wins over the first prompt', () => {
     const state = run([user('fix the login bug'), frame({ type: 'session_info_update', title: 'Login fix', sessionId: 'x' })]);
     assert.equal(conversationName(state), 'Login fix');
+  });
+});
+
+describe('needsLogin', () => {
+  /** @param {Record<string, unknown>} frame @returns {SessionEvent} */
+  const ev = (frame) => ({ kind: 'frame', frame, seq: 1, at: 1, session: 's1' });
+  const state = (/** @type {string | null} */ provider, /** @type {Array<{ id: string, authenticated: boolean }> | null} */ providers) => {
+    const t = createTranscript();
+    if (providers) applyEvent(t, ev({ type: 'response', command: 'get_login_providers', success: true, data: { providers } }));
+    applyEvent(t, ev({ type: 'response', command: 'get_state', success: true, data: provider ? { model: { provider, id: 'm', name: 'M' } } : {} }));
+    return t;
+  };
+
+  test('without a model, or with one whose login provider is logged out', () => {
+    assert.equal(needsLogin(state(null, null)), true);
+    assert.equal(needsLogin(state('fake', [{ id: 'fake', authenticated: false }])), true);
+  });
+
+  test('not with a logged-in provider, a provider omp does not log in to (keys), or before omp said', () => {
+    assert.equal(needsLogin(state('keyed', [{ id: 'keyed', authenticated: true }])), false);
+    assert.equal(needsLogin(state('openrouter', [{ id: 'fake', authenticated: false }])), false);
+    assert.equal(needsLogin(state('fake', null)), false);
   });
 });

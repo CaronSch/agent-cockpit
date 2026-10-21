@@ -130,7 +130,6 @@
 .omp-toolbar {
   flex: none;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1) var(--space-2);
   padding: var(--space-1) var(--space-2);
@@ -138,12 +137,28 @@
   font: var(--text-xs) / 1.4 var(--font-mono);
 }
 
-.omp-cwd {
+/* One line: the directory gives way first (ellipsis), then the model's name; the rest keep their size. */
+.omp-toolbar > * {
+  flex: none;
+}
+
+.omp-toolbar > .omp-cwd {
+  flex: 0 1000 auto;
+  min-width: 2em;
+  overflow: hidden;
   color: var(--color-text-dim);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.omp-spacer {
+.omp-toolbar > .omp-model {
+  flex: 0 1 auto;
+  min-width: 4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.omp-toolbar > .omp-spacer {
   flex: 1;
 }
 
@@ -273,6 +288,13 @@
   border-radius: var(--radius-m);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-lift);
+}
+
+/* The toolbar's More menu: a short list under its button, at the toolbar's right end. */
+.omp-more:popover-open {
+  position-area: bottom span-left;
+  width: auto;
+  min-width: 9rem;
 }
 
 .omp-menu-list {

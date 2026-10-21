@@ -4,6 +4,9 @@
  * Every event for every session gets the next sequence number. A browser that reconnects
  * asks for events after the last one it saw; a fresh page gets the whole log. The log is
  * kept in memory for the daemon's lifetime (see RISKS.md, telemetry store growth).
+ *
+ * A session runs until the user stops it or the daemon exits: no window owns one, so closing
+ * or switching a window never ends it.
  */
 import { randomBytes } from 'node:crypto';
 import { launchOmp } from './omp-session.js';
@@ -16,6 +19,7 @@ import { launchOmp } from './omp-session.js';
  *   create(options: { cwd: string, resume: string | null, fork: string | null }): SessionMeta,
  *   get(id: string): OmpSession | null,
  *   list(): SessionMeta[],
+ *   writing(file: string): SessionMeta | null,
  *   since(seq: number): SessionEvent[],
  *   subscribe(fn: (event: SessionEvent) => void): () => void,
  *   closeAll(): Promise<void>,
@@ -52,6 +56,8 @@ export function createHub({ ompPath, now = Date.now, launch = launchOmp }) {
     },
     get: (id) => sessions.get(id) ?? null,
     list: () => [...sessions.values()].map((s) => s.meta()),
+    // Two omp processes must never write one journal: resuming it twice, or archiving it under one.
+    writing: (file) => [...sessions.values()].map((s) => s.meta()).find((m) => (m.status === 'starting' || m.status === 'ready') && m.sessionFile === file) ?? null,
     // Sequence numbers are 1-based log positions, so events after `seq` start at index `seq`.
     since: (seq) => log.slice(Math.max(0, seq)),
     subscribe(fn) {

@@ -200,7 +200,7 @@ test('a duplicated tab takes a screen of its own at once', async ({ context }) =
   await expect.poll(() => shownIds(one)).toEqual([a]);
 });
 
-test('the switcher opens a screen open nowhere in this window, keeping agents running, and deletes one, ending its agents', async ({ context }) => {
+test('the switcher opens a screen open nowhere in this window, and deletes one, its agents running on either way', async ({ context }) => {
   const workspace = newWorkspace();
   const path = workbenchPath(workspace);
   const one = await openWindow(context, path);
@@ -237,7 +237,7 @@ test('the switcher opens a screen open nowhere in this window, keeping agents ru
   expect((await session(two, agent)).status).toBe('ready');
   expect(isRunning(pid)).toBe(true);
 
-  // Delete asks first, then closes the screen's windows as closing them would: the agent ends.
+  // Delete asks first, then closes the screen's windows; as closing a window does not, it ends no agent.
   await switcher(two).click();
   await two.getByRole('button', { name: 'Delete Screen 1' }).click();
   const menu = two.locator('.screen-menu');
@@ -249,7 +249,9 @@ test('the switcher opens a screen open nowhere in this window, keeping agents ru
   await expect(row(two, 1)).toContainText('this window');
   await expect(switcher(two)).toHaveText('Screen 1 of 1');
   expect(await storedIds(two, workspace)).toEqual([[p]]);
-  await expect.poll(async () => (await session(two, agent)).status).toBe('exited');
+  expect((await session(two, agent)).status).toBe('ready');
+  expect(isRunning(pid)).toBe(true);
+  await two.evaluate((id) => fetch(`/api/sessions/${id}`, { method: 'DELETE' }).then(() => {}), agent);
   await expect.poll(() => isRunning(pid)).toBe(false);
 });
 

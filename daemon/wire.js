@@ -9,7 +9,7 @@
  *   GET    /api/history?q=words&archived=1 → { sessions: PastSession[] } (unordered; every word must
  *                                      match; `archived=1` lists the archived sessions instead)
  *   POST   /api/history/archive        { file } → { file }: the journal (with its folder) moved from omp's
- *                                      sessions into the archive, 409 while a session writes it
+ *                                      sessions into the archive, 409 while a running session writes it
  *   POST   /api/history/restore        { file } → { file }: an archived journal moved back where it was,
  *                                      409 if something is there now; both are 400 for a path that is
  *                                      not a journal they list, 404 for one that is gone
@@ -17,8 +17,14 @@
  *   POST   /api/sessions               { cwd, resume? | fork? } → 201 { session: SessionMeta }
  *                                      (`cwd` relative to home, `~/…` or absolute; `resume`
  *                                      continues a journal, `fork` starts a new session from a
- *                                      copy of one; either must be an existing file)
- *   DELETE /api/sessions/:id           → 204 (closes omp's stdin, kills it if it lingers)
+ *                                      copy of one; either must be an existing file). Resuming
+ *                                      a journal a running session writes answers 200 with that
+ *                                      session instead: two omps never write one journal
+ *   DELETE /api/sessions/:id           → 204: the user stopped the session (closes omp's stdin,
+ *                                      kills it if it lingers); nothing else ends one but the
+ *                                      daemon exiting
+ *   POST   /api/sessions/:id/seen      { at } → 204: the user has seen what the session did up to
+ *                                      `at` (daemon time; see SessionMeta `seenAt`)
  *   POST   /api/sessions/:id/rpc       omp command without `id` → 202 { id }: the id the daemon gave
  *                                      the command; omp's response frame, carrying it, arrives on
  *                                      the stream
@@ -57,7 +63,9 @@
  * One omp process the daemon launched, started from the journal `resume` (continuing it) or
  * `fork` (a new session copied from it), or from nothing. `sessionFile` is the journal it
  * writes, learned from omp's `get_state` answers (the resumed file until then); it changes
- * on /new or /fork.
+ * on /new or /fork. `seenAt` is the daemon time up to which the user has seen what it did,
+ * in whichever window: a final response or question after it needs their attention
+ * (src/omp/activity.js). It starts at `startedAt`.
  * @typedef {{
  *   id: string,
  *   cwd: string,
@@ -69,6 +77,7 @@
  *   exitCode: number | null,
  *   error: string | null,
  *   startedAt: number,
+ *   seenAt: number,
  * }} SessionMeta
  */
 

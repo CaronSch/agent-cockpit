@@ -61,11 +61,6 @@ function stackProjection(tree) {
 /** @param {string} widget */
 const titleOf = (widget) => WIDGETS[widget]?.title ?? widget;
 
-/** Ends what the windows of a tree that is not mounted own, as closing each would. @param {Tree} tree */
-function closeWindows(tree) {
-  for (const leaf of listLeaves(tree)) WIDGETS[leaf.widget]?.close?.(leaf.params ?? {});
-}
-
 /** @param {ParentNode} root */
 export async function createApp(root) {
   const gridEl = query(root, '#grid');
@@ -120,8 +115,9 @@ export async function createApp(root) {
       },
       setParams: (/** @type {LeafParams} */ patch) => api.commitTree(setLeafParams(layoutAtom.get(), leaf.id, patch)),
       addWidget: (/** @type {string} */ type, /** @type {LeafParams} */ params) => addWidget(type, params),
+      showWidget: (/** @type {string} */ type, /** @type {LeafParams} */ params) => showWidget(type, params),
       dragWidget(/** @type {string} */ type, /** @type {LeafParams} */ params, /** @type {PointerEvent} */ event, options = {}) {
-        drag.start({ kind: 'new', leaf: newWidgetLeaf(type, params) }, event, {
+        drag.start({ kind: 'new', leaf: newWidgetLeaf(type, params), into: options.into }, event, {
           label: options.label ?? WIDGETS[type]?.title ?? type,
           onEnd: options.onEnd,
         });
@@ -138,6 +134,7 @@ export async function createApp(root) {
       },
     };
 
+    /** @type {{ destroy(): void, paramsChanged?(): void }} */
     let instance = { destroy() {} };
     if (!def) {
       body.append(el('p', 'widget-empty', 'This widget type is not installed.'));
@@ -149,7 +146,21 @@ export async function createApp(root) {
         body.replaceChildren(el('p', 'widget-empty widget-error', 'This widget failed to load.'));
       }
     }
-    return { el: frameEl, destroy: () => instance.destroy?.() };
+    // Settings also change from outside the window: another window shows something in it.
+    let params = leaf.params;
+    const offParams = layoutAtom.subscribe((tree) => {
+      const next = findLeaf(tree, leaf.id)?.params;
+      if (next === params) return;
+      params = next;
+      instance.paramsChanged?.();
+    });
+    return {
+      el: frameEl,
+      destroy() {
+        offParams();
+        instance.destroy?.();
+      },
+    };
   }
 
   const renderer = createGridRenderer(gridEl, { mountWidget, prefersReducedMotion: () => reducedMotion.matches });
@@ -220,6 +231,33 @@ export async function createApp(root) {
     api.commitTree(next, { animate: true });
   }
 
+  /** When each window was last used (pressed or focused), in order of use. @type {Map<string, number>} */
+  const usedAt = new Map();
+  let uses = 0;
+  for (const type of ['pointerdown', 'focusin']) {
+    gridEl.addEventListener(
+      type,
+      (event) => {
+        const id = /** @type {HTMLElement | null} */ (/** @type {Element} */ (event.target).closest?.('.widget'))?.dataset.id;
+        if (id) usedAt.set(id, ++uses);
+      },
+      { capture: true },
+    );
+  }
+
+  /**
+   * Shows `params` in the window of `type` used last in this screen, else the first one; opens
+   * a new window when there is none.
+   * @param {string} type @param {LeafParams} params
+   */
+  function showWidget(type, params) {
+    const tree = layoutAtom.get();
+    const windows = listLeaves(tree).filter((l) => l.widget === type);
+    const target = windows.reduce((best, l) => ((usedAt.get(l.id) ?? 0) > (usedAt.get(best.id) ?? 0) ? l : best), windows[0]);
+    if (!target) return addWidget(type, params);
+    api.commitTree(setLeafParams(tree, target.id, params));
+  }
+
   attachSashController(api);
   const drag = createDragController(api);
 
@@ -269,7 +307,7 @@ export async function createApp(root) {
 
   query(root, '.brand').after(createUpdateNotice({ daemon }).root);
   query(root, '.topbar-actions').prepend(
-    createScreenSwitcher({ opened, describe: (tree) => describeWindows(tree, titleOf), closeWindows }).root,
+    createScreenSwitcher({ opened, describe: (tree) => describeWindows(tree, titleOf) }).root,
   );
 
   schedule();
