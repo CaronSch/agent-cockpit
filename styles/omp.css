@@ -191,6 +191,36 @@
   }
 }
 
+.omp-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.omp-progress progress {
+  width: 56px;
+  height: 5px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--color-line);
+  appearance: none;
+  overflow: hidden;
+}
+
+.omp-progress progress::-webkit-progress-bar {
+  background: var(--color-line);
+}
+
+.omp-progress progress::-webkit-progress-value {
+  background: var(--color-accent);
+}
+
+.omp-progress progress::-moz-progress-bar {
+  background: var(--color-accent);
+}
+
 .omp-meter {
   color: var(--color-text-dim);
 }
@@ -429,6 +459,46 @@
   border-radius: var(--radius-s);
   background: var(--color-deck);
   font: var(--text-xs) / 1.45 var(--font-mono);
+}
+
+/* Sized to its table, so the Copy control lands on the table's own top-right corner. */
+.md-table-block {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* Shown while the table is pointed at or focused, or its menu is open; never part of a text selection. */
+.md-table-copy {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  padding: 0 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  font: var(--text-2xs) / 1.6 var(--font-mono);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+}
+
+.md-table-block:hover > .md-table-copy,
+.md-table-block:focus-within > .md-table-copy,
+.md-table-copy:has(+ :popover-open) {
+  opacity: 1;
+}
+
+.md-table-copy:hover,
+.md-table-copy:has(+ :popover-open) {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.md-table-copy-menu:popover-open {
+  position-area: bottom span-left;
+  width: max-content;
 }
 
 .md-table-wrap {

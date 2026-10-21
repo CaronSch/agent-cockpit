@@ -27,10 +27,12 @@
  *   | { type: 'code', lang: string, text: string }
  *   | { type: 'list', ordered: boolean, start: number, items: Block[][] }
  *   | { type: 'quote', children: Block[] }
- *   | { type: 'table', align: Align[], head: Inline[][], rows: Inline[][][] }
+ *   | { type: 'table', align: Align[], head: Inline[][], rows: Inline[][][], source: string }
  *   | { type: 'rule' }
  * )} Block
  */
+
+/** @typedef {Extract<Block, { type: 'table' }>} TableBlock */
 
 /** @typedef {'left' | 'center' | 'right' | null} Align */
 
@@ -171,12 +173,14 @@ function parseBlocks(lines) {
         // Every row has the header's columns: missing cells are empty, extra ones dropped.
         return align.map((_, c) => parseInline(raw[c] ?? ''));
       };
+      const start = i;
       const head = cells(lines[i]);
       i += 2;
       /** @type {Inline[][][]} */
       const rows = [];
       while (i < lines.length && !isBlank(lines[i]) && lines[i].includes('|')) rows.push(cells(lines[i++]));
-      blocks.push({ type: 'table', align, head, rows });
+      // The table's own lines as written, for copying it back out as Markdown.
+      blocks.push({ type: 'table', align, head, rows, source: lines.slice(start, i).join('\n') });
       continue;
     }
 

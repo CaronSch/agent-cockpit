@@ -101,6 +101,10 @@ export async function createApp(root) {
     glyph.setAttribute('aria-hidden', 'true');
     const heading = el('h2', 'widget-title', title);
     heading.id = `title-${leaf.id}`;
+    // What the window shows, beside its type: part of the heading, so it names the window too.
+    const label = el('span', 'widget-label');
+    label.hidden = true;
+    heading.append(' ', label); // a space, so the heading reads "omp <name>", not "omp<name>"
     const close = button('widget-close', '×');
     close.setAttribute('aria-label', `Close ${title}`);
     head.append(grip, glyph, heading, close);
@@ -125,6 +129,12 @@ export async function createApp(root) {
       setUnread(/** @type {boolean} */ unread) {
         frameEl.classList.toggle('is-unread', unread);
         frameEl.dataset.unread = String(unread);
+      },
+      setLabel(/** @type {string | null} */ text) {
+        if (label.textContent === (text ?? '')) return;
+        label.textContent = text ?? '';
+        label.hidden = !text;
+        heading.title = text ?? '';
       },
     };
 

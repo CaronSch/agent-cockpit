@@ -156,6 +156,26 @@ test('dragging a session onto the grid resumes it in a new omp window, and it ca
   await expect(pane).toHaveCount(1);
 });
 
+test('the Resume button drags out too, resuming the session where it is dropped', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  const resume = row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' });
+  const from = await resume.boundingBox();
+  const grid = await page.locator('#grid').boundingBox();
+  if (!from || !grid) throw new Error('nothing to drag');
+  // The grid's left edge: a click on Resume would open it beside the list instead.
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
+  await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
+  await page.mouse.up();
+
+  const pane = page.locator('.widget[data-widget="omp"]');
+  await expect(pane).toHaveCount(1);
+  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  const [placed, list] = [await pane.boundingBox(), await window.boundingBox()];
+  expect(placed && list && placed.x < list.x).toBe(true);
+});
+
 test('Resume opens the session beside the list, and Enter does the same from the keyboard', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' }).click();

@@ -53,7 +53,9 @@ is newer. The daemon prints its version at start.
   turns, a generated title) were checked against 18.12.3's source only, because no
   model call succeeded during the recording; their recorded shapes are still 18.10.3's.
   The fake's `--fork` and the journals it writes follow omp 18.10.3's source
-  (`SessionManager.forkFrom`), not a recording.
+  (`SessionManager.forkFrom`), not a recording. Its `todo` tool frames match
+  live omp 18.10.3 frames (a result's `details` carry its `op` and the whole
+  `phases` list), minus fields the pane does not read.
   Tests stay green while a newer omp sends something else. *Response:*
   re-record a session with the real omp (with a working model, so those turn
   frames are recorded too), diff its frame and message types against the fake,
@@ -66,7 +68,7 @@ is newer. The daemon prints its version at start.
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
-- **Auto-titles, attachments, Ask, Fork, `!` commands and the responses-only view lean on omp internals.** Titles rely on
+- **Auto-titles, attachments, Ask, Fork, `!` commands, the responses-only view, window names and todo progress lean on omp internals.** Titles rely on
   `/rename` with no title generating one in RPC mode (it is not gated by
   `PI_NO_TITLE`), and on `session_settled` following only agent activity (if it
   followed a builtin command too, the daemon's own `/rename` would trigger the next
@@ -90,25 +92,32 @@ is newer. The daemon prints its version at start.
   wants tools ending with `stopReason: 'toolUse'`, on `agent_end` with `yielded`
   marking the hand-back, on messages omp injects being user messages with
   `attribution: 'agent'` (or `synthetic`), and on `bashExecution` /
-  `pythonExecution` messages coming only from the user's own `!` commands. A
+  `pythonExecution` messages coming only from the user's own `!` commands (Up in
+  the message box recalls those too). Window names rely on `get_state`'s
+  `sessionName` and `session_info_update`'s `title`. The toolbar's progress relies
+  on every `todo` tool result carrying the agent's whole list in `details.phases`
+  (`details.op` is `view` for a read), on `get_state`'s `todoPhases`, and on
+  `todo_auto_clear` meaning the list changed. A
   change shows up as sessions that stay untitled, files
   that reach the model only as a bare path, side answers that never arrive or turn
   up in the chat, follow-ups answered under the wrong question or without knowing
   what was asked before, a forked pane that opens empty or shows its history twice, a
   Fork button that stays off with the journal on disk (or is on without it, and the
   daemon refuses the fork: `fork is not an existing file`), `!` runs that wait for
-  the turn to end or show twice, or a responses-only pane that shows tool work,
-  drops a final reply or never stops "Working…". *Response:* re-read
+  the turn to end or show twice, a responses-only pane that shows tool work,
+  drops a final reply or never stops "Working…", windows that stay unnamed, or a
+  progress bar that never shows or lags the agent's list. *Response:* re-read
   omp's `slash-commands/builtin-lifecycle.ts` (`rename`),
   `modes/rpc/rpc-session-settle.ts`, `utils/file-mentions.ts`,
   `modes/rpc/rpc-btw.ts`, `session/btw-turn.ts`, `session/btw-history.ts`,
-  `modes/rpc/rpc-mode.ts` (`BACKGROUND_COMMANDS`, `bash`), `session/bash-runner.ts`,
+  `modes/rpc/rpc-mode.ts` (`BACKGROUND_COMMANDS`, `bash`, `get_state`), `session/bash-runner.ts`,
+  `tools/todo.ts`,
   and `main.ts` (`createSessionManager`) with `session/session-manager.ts` (`forkFrom`,
   `#shouldHaveSessionFile`) (in `packages/coding-agent/src/` of
   github.com/can1357/oh-my-pi at the installed version's tag) and `StopReason` in
   `packages/ai/src/types.ts`, then update `daemon/omp-session.js`,
-  `src/omp/message.js`, `src/omp/transcript.js`, `src/omp/visibility.js`,
-  `src/widgets/omp.js` and the fake.
+  `src/omp/message.js`, `src/omp/transcript.js`, `src/omp/todos.js`,
+  `src/omp/visibility.js`, `src/widgets/omp.js` and the fake.
 
 ## When the session history reaches thousands of journals
 

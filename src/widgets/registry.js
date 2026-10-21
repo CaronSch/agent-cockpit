@@ -18,6 +18,8 @@ import scratchpad from './scratchpad.js';
  * `ctx.dragWidget(type, params, pointerdown)` lets the user drop it where they want, exactly
  * like dragging from the palette (a plain click does nothing).
  * `ctx.setUnread(true)` lights the window's border: it has news its user has not seen.
+ * `ctx.setLabel(text)` names what the window shows (e.g. the omp window's conversation) in
+ * its top bar, beside its type's title; null removes the name.
  */
 /** @import { LeafParams } from '../layout/grid-model.js' */
 /** @import { DragEndResult } from '../interaction/drag-controller.js' */
@@ -28,6 +30,7 @@ import scratchpad from './scratchpad.js';
  *   addWidget(type: string, params: LeafParams): void,
  *   dragWidget(type: string, params: LeafParams, event: PointerEvent, options?: { label?: string, onEnd?: (result: DragEndResult) => void }): void,
  *   setUnread(unread: boolean): void,
+ *   setLabel(text: string | null): void,
  * }} WidgetContext
  */
 /**

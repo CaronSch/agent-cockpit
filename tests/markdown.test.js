@@ -50,6 +50,7 @@ describe('blocks', () => {
         align: [null, null, null],
         head: [[t('When')], [t('What happens')], [t('Code')]],
         rows: [[[t('Now')], [t('Stuff '), { type: 'strong', children: [t('happened')] }], [{ type: 'code', text: 'tracked.rs:67' }]]],
+        source: '| When | What happens | Code |\n|---|---|---|\n| Now | Stuff **happened** | `tracked.rs:67` |',
       },
     ]);
   });
@@ -66,6 +67,15 @@ describe('blocks', () => {
     assert.deepEqual(parseMarkdown('Here it is:\n| a | b |\n|---|---|').map((b) => b.type), ['paragraph', 'table']);
     assert.deepEqual(parseMarkdown('a | b\n---').map((b) => b.type), ['paragraph', 'rule'], 'a rule under text with a pipe');
     assert.deepEqual(parseMarkdown('| a | b |\n|---|').map((b) => b.type), ['paragraph']);
+  });
+
+  test("a table's source is its own lines as written, without a paragraph above, text after, or quote markers", () => {
+    const [, table] = parseMarkdown('Here it is:\n|a|b \\| c|\n|:-|-:|\n| 1 |  **2** |\n\nafter');
+    assert.ok(table.type === 'table');
+    assert.equal(table.source, '|a|b \\| c|\n|:-|-:|\n| 1 |  **2** |');
+    const [quote] = parseMarkdown('> Note:\n> | a | b |\n> |---|---|\n> | 1 | 2 |\n\n| x |\n|---|');
+    assert.ok(quote.type === 'quote' && quote.children[1].type === 'table');
+    assert.equal(quote.children[1].source, '| a | b |\n|---|---|\n| 1 | 2 |');
   });
 });
 

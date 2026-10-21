@@ -10,6 +10,8 @@
  * - contains "garble": writes a stdout line that is not JSON
  * - contains "table": replies with a markdown table
  * - contains "slow": an intermediate reply and a tool run, then 1.5 s before the final reply
+ * - contains "todo": a `todo` tool call setting a three-task list, one done and one in progress
+ *   (its result carries the whole list in `details.phases`, as omp's does; so does `get_state`)
  * - contains "think": the final reply opens with a thinking block
  * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
  *   prompt that says something: "hi" alone is too little to name a session by)
@@ -125,24 +127,43 @@ function streamAssistant(text, thinking = null) {
 
 /** Each call gets its own id, as omp's do: a session may run the same tool many times. */
 let toolCalls = 0;
+/** The agent's todo list, as `get_state` reports it. @type {Record<string, any>[]} */
+let todoPhases = [];
 
-function toolCall() {
+/**
+ * One tool call, run and answered: the assistant message asking for it, its execution frames,
+ * then its result message.
+ * @param {string} name @param {Record<string, any>} args @param {string} intent
+ * @param {Record<string, any>} result `{ content, details }`
+ */
+function runTool(name, args, intent, result) {
   const toolCallId = `tool-${++toolCalls}`;
-  const call = { type: 'toolCall', id: toolCallId, name: 'bash', arguments: { command: 'echo hi' }, intent: 'Running echo' };
+  const call = { type: 'toolCall', id: toolCallId, name, arguments: args, intent };
   const assistant = { role: 'assistant', content: [call], provider: model.provider, model: model.id, usage, stopReason: 'toolUse', timestamp: Date.now() };
   const messageId = record(assistant);
   out({ type: 'message_start', message: assistant, messageId });
   out({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0 }, message: { role: 'assistant' }, messageId });
   out({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_end', contentIndex: 0, toolCall: call }, message: { role: 'assistant' }, messageId });
   out({ type: 'message_end', message: assistant, messageId });
-  out({ type: 'tool_execution_start', toolCallId, toolName: 'bash', args: { command: 'echo hi' }, intent: 'Running echo' });
-  out({ type: 'tool_execution_update', toolCallId, toolName: 'bash', args: { command: 'echo hi' }, partialResult: { content: [{ type: 'text', text: 'hi\n' }], details: {} } });
-  const result = { content: [{ type: 'text', text: 'hi\n' }], details: {} };
-  out({ type: 'tool_execution_end', toolCallId, toolName: 'bash', result, isError: false });
-  const toolResult = { role: 'toolResult', toolCallId, toolName: 'bash', content: result.content, isError: false, timestamp: Date.now() };
+  out({ type: 'tool_execution_start', toolCallId, toolName: name, args, intent: call.intent });
+  out({ type: 'tool_execution_update', toolCallId, toolName: name, args, partialResult: result });
+  out({ type: 'tool_execution_end', toolCallId, toolName: name, result, isError: false });
+  const toolResult = { role: 'toolResult', toolCallId, toolName: name, content: result.content, details: result.details, isError: false, timestamp: Date.now() };
   const resultId = record(toolResult);
   out({ type: 'message_start', message: toolResult, messageId: resultId });
   out({ type: 'message_end', message: toolResult, messageId: resultId });
+}
+
+const toolCall = () => runTool('bash', { command: 'echo hi' }, 'Running echo', { content: [{ type: 'text', text: 'hi\n' }], details: {} });
+
+function todoCall() {
+  const tasks = [
+    { content: 'Read the code', status: 'completed' },
+    { content: 'Write the fix', status: 'in_progress' },
+    { content: 'Run the tests', status: 'pending' },
+  ];
+  todoPhases = [{ name: 'Fix', tasks }];
+  runTool('todo', { op: 'start', task: 'Write the fix' }, 'Writing the fix', { content: [{ type: 'text', text: 'Fix: 1/3 done' }], details: { op: 'start', phases: todoPhases } });
 }
 
 /** @returns {Promise<Record<string, any>>} */
@@ -169,6 +190,7 @@ async function runPrompt(id, text) {
   if (/mystery/.test(text)) out({ type: 'mystery_frame', payload: 42 });
   if (/garble/.test(text)) process.stdout.write('this line is not json\n');
   if (/tool/.test(text)) toolCall();
+  if (/todo/.test(text)) todoCall();
   if (/slow/.test(text)) {
     // A turn's middle: an intermediate reply and a tool run, then a pause before the final reply.
     streamAssistant('Let me check first.');
@@ -311,6 +333,7 @@ lines.on('line', (line) => {
         messageCount: messages.length,
         contextUsage: { tokens: 120, contextWindow: 1000, percent: 12 },
         goal: null,
+        todoPhases,
       });
     case 'get_messages':
       return ok(id, type, { messages });
