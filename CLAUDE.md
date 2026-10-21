@@ -62,6 +62,15 @@ Planned capabilities:
   not in the layout: anything that must outlive a window, a browser profile or
   a port change (the scratchpad's notes) is a file in the state directory
   (`~/.cockpit`). Closing a window must never delete it.
+- **Layouts live with the daemon too.** Each browser window is one **screen** of
+  a **workspace**, like an extra monitor: its own layout tree, kept in
+  `~/.cockpit/workspaces/<name>.json` (`daemon/workspace.js`). The page's
+  `?workspace=<name>` picks the workspace (default `main`). A window holds a Web
+  Lock on its screen for as long as it is open, so two windows never show one
+  screen; a reload keeps the tab's screen, and a new window takes the first saved
+  screen no window shows, else a new one (`src/workspace/screen.js`). A screen is
+  stored once it holds a window and deleted when it holds none. A page that
+  cannot use the daemon (signed out) keeps its layout in memory only, and says so.
 - **Telemetry provenance**: every recorded fact carries its source: `harness`
   (omp said so), `proxy` (seen on the wire), or `os` (seen by the kernel or the
   filesystem). The UI shows the source. The gap between what an agent claims it
@@ -73,9 +82,13 @@ Planned capabilities:
 What runs today:
 
 - The split-tree window grid: windows (widgets) are dragged, dropped, split and
-  resized with magnetic snapping, and the layout persists in localStorage. A tab
-  running older UI code than the daemon serves says so in the top bar and offers
-  Reload (the files' version: `daemon/ui-files.js`).
+  resized with magnetic snapping. Each browser window is a screen of its
+  workspace, saved by the daemon; the top bar's switcher says which screen this
+  window is, lists every screen with what it holds and where it is open, and opens
+  one that is open nowhere in this window (a reload, so its agents keep running)
+  or deletes it (asking first; its omp agents end, as closing their windows
+  would). A tab running older UI code than the daemon serves says so in the top
+  bar and offers Reload (the files' version: `daemon/ui-files.js`).
 - The daemon and the `omp` pane: start omp in a directory, chat with it from its
   structured event stream (streamed replies with Markdown and tables, thinking,
   tool calls with output), pick model and thinking level, log in to
@@ -166,7 +179,8 @@ telemetry views, cmux-parity features beyond the above.
 - `src/layout/` stays pure (no DOM, no globals beyond `crypto`): it is where the
   layout logic is unit-tested.
 - New windows are widgets: one module in `src/widgets/` registered in
-  `src/widgets/registry.js` (contract documented there).
+  `src/widgets/registry.js` (contract documented there, including `close`: what
+  closing a window that is not mounted ends, used when a screen is deleted).
 - Every module opens with a `/** … */` comment whose first sentence says what it
   is for; the module map below is built from it.
 
@@ -280,17 +294,19 @@ particular, move a capability into "Current state" when it ships.
 - `src/scratchpad/store.js` — The page's copy of one scratchpad: every window in the page showing that pad edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
 - `src/sessions/order.js` — Sorting and labels for the Sessions window, kept free of the DOM so they can be tested.
 - `src/state/atom.js` — Tiny observable cell: get/set/subscribe.
-- `src/state/persistence.js` — Versioned, schema-validated layout storage in localStorage.
 - `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
 - `src/ui/dom.js` — Element construction helpers: elements, buttons that never submit a form, and file-drag checks.
 - `src/ui/format.js` — Text formatters shared across the UI: error messages, home-relative paths and JSON dumps, with no DOM.
 - `src/ui/palette.js` — "Add widget" palette.
+- `src/ui/screen-switcher.js` — The screen switcher in the top bar: which screen of its workspace this window shows, and a menu of every screen, with what it holds and where it is open, to open one here or delete it.
 - `src/ui/update-notice.js` — The "updated, reload" notice in the top bar: shown while the daemon serves other UI files than this page loaded (see daemon/ui-files.js), so a tab left open never runs stale code unknowingly.
 - `src/widgets/omp.js` — The omp pane: starts an omp coding agent in a chosen directory through the daemon and lets the user chat with it and set it up, rendered from omp's structured event stream.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
 - `src/widgets/scratchpad.js` — Notes beside the agents: text with screenshots and files in it.
 - `src/widgets/sessions.js` — Past omp sessions, searchable and sortable: drag one onto the grid, or press Resume, to continue it in a new omp window.
+- `src/workspace/model.js` — Workspaces and their screens, kept free of the DOM and shared with the daemon: valid names and ids, which screen a new window claims, and how a screen is described.
+- `src/workspace/screen.js` — This window's screen of its workspace: claimed for as long as the window is open, loaded from the daemon, and saved back as its layout changes.
 - `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
 - `daemon/frame-decoder.js` — Decodes omp's stdout: newline-delimited JSON frames, with protocol-v2 `rpc_chunk` sequences reassembled into the one frame they carry.
 - `daemon/guard.js` — Loopback guard: decides which requests may reach the daemon (CLAUDE.md, Invariants).
@@ -303,6 +319,7 @@ particular, move a capability into "Current state" when it ships.
 - `daemon/token.js` — The daemon's access token: random, created once, kept owner-only in the state directory so a browser stays signed in across daemon restarts.
 - `daemon/ui-files.js` — The files that make up the browser UI: which ones the daemon serves, and a version that changes whenever any of them does, so an open page can tell it is running older code.
 - `daemon/wire.js` — Wire contract between the daemon and the browser: session metadata, stream events and HTTP payloads.
+- `daemon/workspace.js` — Workspaces: the screens of each one (a layout tree per browser window), kept by the daemon so a layout outlives a browser profile and an address change.
 
 ### Registered widgets
 
@@ -324,6 +341,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/persistence.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/ui-files.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->

@@ -2,7 +2,7 @@
 import { createApp } from './app.js';
 
 try {
-  createApp(document);
+  await createApp(document);
 } catch (err) {
   console.error('[cockpit] failed to start', err);
   const message = document.createElement('p');

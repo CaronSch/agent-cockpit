@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { E2E_STATE_DIR, e2eToken } from './daemon.js';
+import { E2E_STATE_DIR, newWorkspace, savedLayout, workbenchPath } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 
@@ -14,7 +14,7 @@ const PROJECT = mkdtempSync(join(tmpdir(), 'ac-e2e-project-'));
 /** @type {string[]} */
 let problems = [];
 
-/** @param {Page} page @param {{ signIn?: boolean }} [options] */
+/** Opens the workbench in a workspace of its own, and returns its name. @param {Page} page @param {{ signIn?: boolean }} [options] */
 async function openWorkbench(page, { signIn = true } = {}) {
   problems = [];
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
@@ -25,10 +25,10 @@ async function openWorkbench(page, { signIn = true } = {}) {
   await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
   );
-  await page.goto(signIn ? `/?token=${e2eToken()}` : '/');
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await expect(page.locator('#grid')).toBeVisible();
+  const workspace = newWorkspace();
+  await page.goto(workbenchPath(workspace, { signIn }));
+  await expect(page.locator('.screen-switch')).toBeVisible(); // the app has started
+  return workspace;
 }
 
 test.afterEach(() => {
@@ -92,6 +92,15 @@ test('a browser without the token is told how to sign in, and the daemon serves 
   const pane = await addOmpPane(page);
   await expect(pane.getByText('Open the URL printed by `bun start`')).toBeVisible();
   expect((await page.request.get('/api/sessions')).status()).toBe(401);
+
+  // Its layout works but is kept only in memory, and the switcher says so.
+  const switcher = page.locator('.screen-switch');
+  await expect(switcher).toHaveText(/^Not saved/);
+  await switcher.click();
+  await expect(page.locator('.screen-menu')).toContainText('not signed in');
+  await page.reload();
+  await expect(switcher).toHaveText(/^Not saved/);
+  await expect(page.locator('.widget')).toHaveCount(0);
 });
 
 test('a streamed reply renders once, as markdown, even though omp pre-fills message_start', async ({ page }) => {
@@ -659,7 +668,7 @@ test('two panes run separate sessions side by side', async ({ page }) => {
 });
 
 test('Fork continues a copy of the conversation in a new pane, as a session of its own', async ({ page }) => {
-  await openWorkbench(page);
+  const workspace = await openWorkbench(page);
   const source = await startedPane(page);
   const fork = source.getByRole('button', { name: 'Fork', exact: true });
   await expect(fork, 'omp has saved nothing yet').toBeDisabled();
@@ -682,11 +691,9 @@ test('Fork continues a copy of the conversation in a new pane, as a session of i
   // daemon restart its Resume continues the fork instead of forking again.
   const savedParams = async (/** @type {import('@playwright/test').Locator} */ pane) => {
     const id = await pane.getAttribute('data-id');
-    return page.evaluate((leafId) => {
-      /** @param {any} node @returns {any} */
-      const find = (node) => (node?.id === leafId ? node : (node?.children ?? []).map(find).find(Boolean));
-      return find(JSON.parse(localStorage.getItem('cockpit.layout.v1') ?? 'null')?.tree)?.params;
-    }, id);
+    /** @param {any} node @returns {any} */
+    const find = (node) => (node?.id === id ? node : (node?.children ?? []).map(find).find(Boolean));
+    return find(await savedLayout(page.request, workspace))?.params;
   };
   await expect.poll(async () => (await savedParams(forked))?.sessionFile).toMatch(/\.jsonl$/);
   const [mine, theirs] = [await savedParams(forked), await savedParams(source)];
@@ -696,10 +703,9 @@ test('Fork continues a copy of the conversation in a new pane, as a session of i
 });
 
 test('closing the window ends its omp session', async ({ page }) => {
-  await openWorkbench(page);
+  const workspace = await openWorkbench(page);
   const pane = await startedPane(page);
-  const sessionOf = () =>
-    page.evaluate(() => JSON.parse(localStorage.getItem('cockpit.layout.v1') ?? 'null')?.tree?.params?.session);
+  const sessionOf = async () => (await savedLayout(page.request, workspace))?.params?.session;
   await expect.poll(sessionOf).toBeTruthy();
   const session = await sessionOf();
   await pane.locator('.widget-close').click();

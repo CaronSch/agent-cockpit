@@ -7,6 +7,7 @@ import { createHistory } from '../daemon/history.js';
 import { createHub } from '../daemon/hub.js';
 import { createAttachments } from '../daemon/attachments.js';
 import { createScratchpads } from '../daemon/scratchpad.js';
+import { createWorkspaces } from '../daemon/workspace.js';
 import { createDaemonServer } from '../daemon/server.js';
 import { SETUP_COMMANDS } from '../daemon/omp-session.js';
 /** @import { StreamEvent, SessionEvent, SessionMeta } from '../daemon/wire.js' */
@@ -104,6 +105,7 @@ beforeAll(async () => {
     history: createHistory({ root: join(cwd, 'no-sessions-yet') }),
     scratchpads: createScratchpads({ dir: join(cwd, 'state', 'scratchpads') }),
     attachments: createAttachments({ dir: join(cwd, 'state', 'attachments') }),
+    workspaces: createWorkspaces({ dir: join(cwd, 'state', 'workspaces') }),
     token: TOKEN,
     root: ROOT,
     config: { defaultCwd: cwd, home: cwd, scratchpadDir: join(cwd, 'state', 'scratchpads') },
@@ -143,10 +145,10 @@ describe('loopback guard', () => {
     }
   });
 
-  test('the token link sets an HttpOnly, SameSite=Strict cookie and drops the token from the URL', async () => {
-    const res = await call({ path: `/?token=${TOKEN}&x=1`, auth: false });
+  test('the token link sets an HttpOnly, SameSite=Strict cookie and drops only the token from the URL', async () => {
+    const res = await call({ path: `/?token=${TOKEN}&workspace=side`, auth: false });
     assert.equal(res.status, 302);
-    assert.equal(res.headers.get('location'), '/?x=1');
+    assert.equal(res.headers.get('location'), '/?workspace=side');
     const cookie = String(res.headers.get('set-cookie'));
     assert.match(cookie, new RegExp(`^ac_token=${TOKEN};`));
     assert.match(cookie, /HttpOnly/);
@@ -455,6 +457,48 @@ describe('scratchpads', () => {
     assert.equal((await call({ path: '/api/scratchpads/doomed' })).json.text, '');
     assert.equal((await call({ path: `/api/scratchpads/doomed/assets/${up.json.path.split('/')[1]}` })).status, 404);
     assert.ok(!(await call({ path: '/api/scratchpads' })).json.pads.some((/** @type {any} */ p) => p.id === 'doomed'));
+  });
+});
+
+describe('workspaces', () => {
+  const tree = { kind: 'leaf', id: 'w_1', widget: 'pane' };
+  const screen = '/api/workspaces/desk/screens/s_0000000a';
+
+  test('like every API route, workspaces need the token, and saving one needs the page’s Origin', async () => {
+    assert.equal((await call({ path: '/api/workspaces/desk', auth: false })).status, 401);
+    assert.equal((await call({ method: 'PUT', path: screen, body: { tree, base: null }, auth: false })).status, 401);
+    assert.equal((await call({ method: 'PUT', path: screen, body: { tree, base: null }, origin: false })).status, 403);
+    assert.deepEqual((await call({ path: '/api/workspaces/desk' })).json, { screens: [] }, 'nothing was saved');
+  });
+
+  test('a screen is stored by its first save, refused from an older rev, and deleted when emptied', async () => {
+    assert.deepEqual((await call({ method: 'PUT', path: screen, body: { tree, base: null } })).json, { rev: 1 });
+    assert.deepEqual((await call({ path: '/api/workspaces/desk' })).json, { screens: [{ id: 's_0000000a', rev: 1, tree }] });
+    const stale = await call({ method: 'PUT', path: screen, body: { tree: null, base: null } });
+    assert.equal(stale.status, 409);
+    assert.deepEqual(stale.json.current, { id: 's_0000000a', rev: 1, tree });
+    assert.deepEqual((await call({ method: 'PUT', path: screen, body: { tree: null, base: 1 } })).json, { rev: null });
+    assert.deepEqual((await call({ path: '/api/workspaces/desk' })).json, { screens: [] });
+  });
+
+  test('a layout that is not one is a 400; a name or screen id that is not one is a 404', async () => {
+    for (const body of [{ tree: { kind: 'leaf', id: 7 }, base: null }, { tree, base: 0 }, { tree, base: '1' }, { tree }, []]) {
+      assert.equal((await call({ method: 'PUT', path: screen, body })).status, 400, JSON.stringify(body));
+    }
+    assert.equal((await call({ path: '/api/workspaces/..%2Ftoken' })).status, 404);
+    assert.equal((await call({ path: '/api/workspaces/Desk' })).status, 404);
+    assert.equal((await call({ method: 'PUT', path: '/api/workspaces/desk/screens/..%2Fx', body: { tree, base: null } })).status, 404);
+    assert.deepEqual((await call({ path: '/api/workspaces/desk' })).json, { screens: [] });
+  });
+
+  test('a corrupt workspace file is reported, not replaced', async () => {
+    const file = join(cwd, 'state', 'workspaces', 'broken.json');
+    await Bun.write(file, '{not json');
+    const read = await call({ path: '/api/workspaces/broken' });
+    assert.equal(read.status, 500);
+    assert.match(read.json.error, /broken\.json is not a workspace file/);
+    assert.equal((await call({ method: 'PUT', path: '/api/workspaces/broken/screens/s_0000000a', body: { tree, base: null } })).status, 500);
+    assert.equal(await Bun.file(file).text(), '{not json');
   });
 });
 

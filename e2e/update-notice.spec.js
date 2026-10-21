@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { e2eToken } from './daemon.js';
+import { newWorkspace, workbenchPath } from './daemon.js';
 
 /** A served file the test adds and removes, as a `git pull` under the running daemon would. */
 const PROBE = fileURLToPath(new URL('../styles/e2e-update-probe.css', import.meta.url));
@@ -13,7 +13,7 @@ test('a page running older UI code says so when you come back to it, and Reload 
   /** @type {string[]} */
   const problems = [];
   page.on('pageerror', (err) => problems.push(err.message));
-  await page.goto(`/?token=${e2eToken()}`);
+  await page.goto(workbenchPath(newWorkspace()));
   const notice = page.locator('.update-notice');
   await expect(notice).toBeAttached(); // the app is running (`#grid` is static HTML, there before it)
   /** Returning to the tab, which is when the page asks again (once it is connected). */

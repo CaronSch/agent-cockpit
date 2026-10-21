@@ -19,6 +19,7 @@ import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { awaitsUser } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
 /** @import { WidgetContext } from './registry.js' */
+/** @import { LeafParams } from '../layout/grid-model.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { SlashCommand } from '../omp/transcript.js' */
@@ -63,10 +64,26 @@ export default {
     const pane = createPane(body, ctx, getDaemon());
     return { destroy: pane.destroy };
   },
+
+  /** @param {LeafParams} params */
+  close(params) {
+    const session = str(params.session);
+    if (session) endSession(getDaemon(), session);
+  },
 };
 
 /** @param {unknown} v @returns {string | null} */
 const str = (v) => (typeof v === 'string' && v ? v : null);
+
+/**
+ * Closing the window ends its agent, as closing a terminal pane does; otherwise omp keeps
+ * working with nothing left that can reach it.
+ * @param {DaemonClient} daemon @param {string} session
+ */
+function endSession(daemon, session) {
+  const status = daemon.meta(session)?.status;
+  if (status === 'starting' || status === 'ready') daemon.closeSession(session).catch(() => {});
+}
 
 /**
  * @param {HTMLElement} body @param {WidgetContext} ctx @param {DaemonClient} daemon
@@ -1018,11 +1035,8 @@ function createPane(body, ctx, daemon) {
       clearTimeout(readSave);
       offStatus();
       offReset();
-      // Closing the window ends its agent, as closing a terminal pane does; otherwise omp
-      // keeps working with nothing left that can reach it. A page reload never gets here.
-      const session = view?.session;
-      const status = session ? daemon.meta(session)?.status : undefined;
-      if (session && (status === 'starting' || status === 'ready')) daemon.closeSession(session).catch(() => {});
+      // A page reload never gets here, so its agents keep running.
+      if (view) endSession(daemon, view.session);
       view?.destroy();
       view = null;
       root.remove();

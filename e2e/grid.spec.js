@@ -1,11 +1,13 @@
 // Behaviour tests for the cockpit grid, driven through real pointer and keyboard input.
 import { test, expect } from '@playwright/test';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { newWorkspace, savedLayout, workbenchPath, workspaceFile } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {{ x: number, y: number, w: number, h: number }} Rect */
 /** @typedef {Record<string, Rect>} Rects */
 
-const LAYOUT_KEY = 'cockpit.layout.v1';
 const GAP = 6; // LAYOUT_OPTIONS.gap in src/app.js
 const EDGE_PX = 18; // outer-edge drop band in src/interaction/drag-controller.js
 const WIDE = { width: 1280, height: 720 };
@@ -15,23 +17,25 @@ test.use({ viewport: WIDE, contextOptions: { reducedMotion: 'reduce' } });
 
 /** @type {string[]} */
 let problems = [];
+/** Console errors a test causes on purpose. @type {RegExp | null} */
+let expectedErrors = null;
+/** This test's own workspace, where its one window's screen is saved. */
+let workspace = '';
 
 test.beforeEach(async ({ page }) => {
   problems = [];
+  expectedErrors = null;
+  workspace = newWorkspace();
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
   page.on('console', (msg) => {
-    // These pages are signed out on purpose (the grid needs no daemon): the app's connection
-    // is refused with 401, and the browser logs that.
-    if (msg.type() === 'error' && !msg.text().includes('401')) problems.push(`console.error: ${msg.text()}`);
+    if (msg.type() === 'error' && !expectedErrors?.test(msg.text())) problems.push(`console.error: ${msg.text()}`);
   });
   // Keep runs hermetic: the web-font stylesheet is the only off-origin request.
   await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
   );
-  await page.goto('/');
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await expect(page.locator('#grid')).toBeVisible();
+  await page.goto(workbenchPath(workspace));
+  await expect(page.locator('.screen-switch')).toBeVisible(); // the app has started
 });
 
 test.afterEach(() => {
@@ -72,14 +76,21 @@ async function gridBox(/** @type {Page} */ page) {
   return { left: box.x, top: box.y, w: Math.round(box.width), h: Math.round(box.height) };
 }
 
-/** @returns {Promise<string | null>} */
-const stored = (/** @type {Page} */ page) => page.evaluate((key) => localStorage.getItem(key), LAYOUT_KEY);
+/**
+ * The layout the daemon keeps for this test's window (as JSON, to compare), or null when it
+ * keeps none.
+ * @returns {Promise<string | null>}
+ */
+async function stored(/** @type {Page} */ page) {
+  const tree = await savedLayout(page.request, workspace);
+  return tree ? JSON.stringify(tree) : null;
+}
 
-/** Waits for the debounced save to write something different from `previous`; returns the stored tree. */
+/** Waits for the debounced save to store something different from `previous`; returns the stored tree. */
 async function savedAfter(/** @type {Page} */ page, /** @type {string | null} */ previous) {
   await expect.poll(() => stored(page)).not.toBe(previous);
   const raw = await stored(page);
-  return JSON.parse(/** @type {string} */ (raw)).tree;
+  return raw === null ? null : JSON.parse(raw);
 }
 
 /** Waits until the stored tree holds exactly `ids` (in any order). */
@@ -90,7 +101,7 @@ async function savedLeafIds(/** @type {Page} */ page, /** @type {string[]} */ id
     const found = [];
     /** @param {any} node */
     const walk = (node) => (node?.kind === 'leaf' ? found.push(node.id) : node?.children?.forEach(walk));
-    walk(raw ? JSON.parse(raw).tree : null);
+    walk(raw ? JSON.parse(raw) : null);
     return found.sort();
   };
   await expect.poll(leafIds).toEqual([...ids].sort());
@@ -429,24 +440,34 @@ test.describe('persistence', () => {
     await expect(page.locator(`.widget[data-id="${a}"]`)).toBeVisible();
   });
 
+  const pane = { kind: 'leaf', id: 'w_1', widget: 'pane' };
   for (const [name, value] of [
     ['unparseable JSON', '{not json'],
-    ['a schema-invalid tree', JSON.stringify({ version: 1, tree: { kind: 'leaf', id: 7 } })],
-    ['an unknown version', JSON.stringify({ version: 99, tree: { kind: 'leaf', id: 'w_1', widget: 'pane' } })],
+    ['a schema-invalid tree', JSON.stringify({ version: 1, screens: [{ id: 's_00000001', rev: 1, tree: { kind: 'leaf', id: 7 } }] })],
+    ['an unknown version', JSON.stringify({ version: 99, screens: [{ id: 's_00000001', rev: 1, tree: pane }] })],
   ]) {
-    test(`corrupt storage (${name}) falls back to a working empty grid`, async ({ page }) => {
-      await page.evaluate(([key, raw]) => localStorage.setItem(key, raw), [LAYOUT_KEY, value]);
+    test(`a corrupt workspace file (${name}) leaves a working grid that says it is not saved, and the file as it was`, async ({ page }) => {
+      expectedErrors = /status of 500/; // the daemon refuses to read the file, and the browser logs that
+      mkdirSync(dirname(workspaceFile(workspace)), { recursive: true });
+      writeFileSync(workspaceFile(workspace), value);
       await page.reload();
+      const switcher = page.locator('.screen-switch');
+      await expect(switcher).toHaveText(/^Not saved/);
       await settle(page);
       await expect(page.locator('.boot-error')).toHaveCount(0);
       await expect(page.locator('.grid-empty')).toBeVisible();
       await expect(page.locator('.widget')).toHaveCount(0);
 
-      // The app is fully alive, and the next save replaces the bad data.
+      // The app is fully alive, and the switcher says why nothing is saved.
       const id = await addPane(page);
       const g = await gridBox(page);
       expect(await rects(page)).toEqual({ [id]: { x: 0, y: 0, w: g.w, h: g.h } });
-      expect(await savedAfter(page, value)).toMatchObject({ kind: 'leaf', id });
+      await switcher.click();
+      await expect(page.locator('.screen-menu')).toContainText(`${workspace}.json is not a workspace file`);
+
+      // The pane is never saved over the file.
+      await page.waitForTimeout(600);
+      expect(readFileSync(workspaceFile(workspace), 'utf8')).toBe(value);
     });
   }
 });

@@ -2,8 +2,8 @@
 // E2E_STATE_DIR/scratchpads/<id>.md with their files in <id>.assets/.
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { E2E_STATE_DIR, e2eToken } from './daemon.js';
+import { dirname, join } from 'node:path';
+import { E2E_STATE_DIR, newWorkspace, workbenchPath, workspaceFile } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {import('@playwright/test').Locator} Locator */
@@ -17,8 +17,8 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 /** @type {string[]} */
 let problems = [];
 
-/** @param {Page} page @param {{ clear?: boolean }} [options] */
-async function openWorkbench(page, { clear = true } = {}) {
+/** Opens the workbench, in a workspace of its own unless told which. @param {Page} page @param {string} [workspace] */
+async function openWorkbench(page, workspace = newWorkspace()) {
   page.on('pageerror', (err) => problems.push(`pageerror: ${err.message}`));
   page.on('console', (msg) => {
     if (msg.type() === 'error') problems.push(`console.error: ${msg.text()}`);
@@ -26,12 +26,8 @@ async function openWorkbench(page, { clear = true } = {}) {
   await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
   );
-  await page.goto(`/?token=${e2eToken()}`);
-  if (clear) {
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
-  }
-  await expect(page.locator('#grid')).toBeVisible();
+  await page.goto(workbenchPath(workspace));
+  await expect(page.locator('.screen-switch')).toBeVisible(); // the app has started
 }
 
 /**
@@ -224,12 +220,11 @@ test('deleting a pad removes its file, and the window moves on to a fresh pad', 
 test('a window whose layout names no pad shows the default pad', async ({ page }) => {
   mkdirSync(PADS, { recursive: true });
   writeFileSync(join(PADS, 'scratchpad.md'), 'default notes');
-  await openWorkbench(page);
-  await page.evaluate(() => {
-    const tree = { kind: 'leaf', id: 'w_nopad01', widget: 'scratchpad' };
-    localStorage.setItem('cockpit.layout.v1', JSON.stringify({ version: 1, savedAt: new Date().toISOString(), tree }));
-  });
-  await page.reload();
+  const workspace = newWorkspace();
+  const tree = { kind: 'leaf', id: 'w_nopad01', widget: 'scratchpad' };
+  mkdirSync(dirname(workspaceFile(workspace)), { recursive: true });
+  writeFileSync(workspaceFile(workspace), JSON.stringify({ version: 1, screens: [{ id: 's_00000001', rev: 1, tree }] }));
+  await openWorkbench(page, workspace);
   await expect(page.locator('.widget[data-widget="scratchpad"] .pad-text').first()).toHaveValue('default notes');
 });
 

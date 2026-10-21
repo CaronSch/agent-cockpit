@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { E2E_OMP_SESSIONS, e2eToken } from './daemon.js';
+import { E2E_OMP_SESSIONS, newWorkspace, workbenchPath } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {import('@playwright/test').Locator} Locator */
@@ -52,10 +52,8 @@ test.beforeEach(async ({ page }) => {
   await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, (route) =>
     route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
   );
-  await page.goto(`/?token=${e2eToken()}`);
-  await page.evaluate(() => localStorage.clear());
-  await page.reload();
-  await expect(page.locator('#grid')).toBeVisible();
+  await page.goto(workbenchPath(newWorkspace()));
+  await expect(page.locator('.screen-switch')).toBeVisible(); // the app has started
 });
 
 test.afterEach(async ({ page }) => {
