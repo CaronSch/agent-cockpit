@@ -3,6 +3,7 @@
  */
 import { el } from '../ui/dom.js';
 import { parseMarkdown } from './markdown.js';
+import { tableCopy } from './table-copy.js';
 /** @import { Block, Inline } from './markdown.js' */
 
 /** @param {string} source @returns {DocumentFragment} */
@@ -44,10 +45,13 @@ function renderBlock(block) {
       const body = el('tbody');
       for (const cells of block.rows) body.append(row('td', cells));
       table.append(head, body);
-      // Wide tables scroll sideways inside the transcript instead of squeezing their columns.
+      // Wide tables scroll sideways inside the transcript instead of squeezing their columns;
+      // the Copy control sits outside that scroller so it stays in the corner.
       const wrap = el('div', 'md-table-wrap');
       wrap.append(table);
-      return wrap;
+      const tableBlock = el('div', 'md-table-block');
+      tableBlock.append(...tableCopy(block, table), wrap);
+      return tableBlock;
     }
     case 'rule':
       return el('hr');

@@ -305,12 +305,13 @@ export function createComposer({ pane, upload, onError, shellDir }) {
       await Promise.all(items.map((c) => (c.kind === 'file' ? c.stored : null)));
     },
     /**
-     * Empties the composer for sending: the draft alone (`withCards` false, for commands) or
-     * with every card whose file is stored. `restore()` puts it back if the message was
-     * refused, unless something new has been written meanwhile.
+     * What Send would send now, without sending it: the draft alone (`withCards` false, for
+     * commands) or with every card whose file is stored. `take()` empties the composer of
+     * exactly that (the draft only if it is unchanged); `restore()` puts it back if the
+     * message was refused, unless something new has been written meanwhile.
      * @param {{ withCards: boolean }} options
      */
-    take({ withCards }) {
+    compose({ withCards }) {
       const text = draft.value;
       const taken = withCards ? items.filter((c) => c.kind !== 'file' || c.path !== null) : [];
       /** @type {QuoteComment[]} */
@@ -322,20 +323,23 @@ export function createComposer({ pane, upload, onError, shellDir }) {
         else if (card.kind === 'text') attachments.push({ kind: 'text', text: card.text });
         else if (card.path) attachments.push({ kind: 'file', path: card.path });
       }
-      const message = withCards ? composeMessage(text, comments, attachments) : text.trim();
-      draft.value = '';
-      items = items.filter((c) => !taken.includes(c));
-      closeEditor();
-      changed();
-      drawCards();
       return {
-        message,
-        restore() {
-          if (draft.value || (taken.length && items.length)) return;
-          draft.value = text;
-          items = [...taken, ...items];
+        message: withCards ? composeMessage(text, comments, attachments) : text.trim(),
+        take() {
+          if (draft.value === text) draft.value = '';
+          items = items.filter((c) => !taken.includes(c));
+          closeEditor();
           changed();
           drawCards();
+          return {
+            restore() {
+              if (draft.value || (taken.length && items.length)) return;
+              draft.value = text;
+              items = [...taken, ...items];
+              changed();
+              drawCards();
+            },
+          };
         },
       };
     },

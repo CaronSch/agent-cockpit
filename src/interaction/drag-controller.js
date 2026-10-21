@@ -59,6 +59,22 @@ const ZONE_LABEL = { left: 'Left', right: 'Right', up: 'Top', down: 'Bottom', ce
 /** @param {Rect} rect @param {number} x @param {number} y */
 const contains = (rect, x, y) => x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
 
+/** @param {Event} event */
+const swallow = (event) => {
+  event.stopPropagation();
+  event.preventDefault();
+};
+
+/**
+ * The release that ends a drag is no click on what it lands on, not even on the button the drag
+ * started from (Send, Resume), whose click would do what the drag did not. Call it as the
+ * pointer is released: the click follows in the same task.
+ */
+const swallowReleaseClick = () => {
+  window.addEventListener('click', swallow, { capture: true, once: true });
+  setTimeout(() => window.removeEventListener('click', swallow, true));
+};
+
 /** @param {GridApi} app */
 export function createDragController(app) {
   const { gridEl, indicator } = app;
@@ -177,7 +193,9 @@ export function createDragController(app) {
 
   /** @param {PointerEvent} event */
   function onPointerUp(event) {
-    if (session && event.pointerId === session.pointerId) end({ commit: true });
+    if (!session || event.pointerId !== session.pointerId) return;
+    if (session.active) swallowReleaseClick();
+    end({ commit: true });
   }
 
   /** @param {PointerEvent} event */
@@ -190,6 +208,8 @@ export function createDragController(app) {
     if (event.key !== 'Escape' || !session?.active) return;
     event.stopPropagation();
     end({ commit: false });
+    // The pointer is still down: its release ends the gesture Esc cancelled.
+    window.addEventListener('pointerup', swallowReleaseClick, { once: true });
   }
 
   /** @param {DropSource} source @param {PointerEvent} event @param {DragStartOptions} [options] */

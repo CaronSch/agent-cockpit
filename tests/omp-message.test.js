@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { asQuote, composeAsk, composeMessage, isCommand, isLargePaste } from '../src/omp/message.js';
+import { ANSWER_BRIEFLY, asQuote, composeAsk, composeFollowUp, composeMessage, isCommand, isLargePaste } from '../src/omp/message.js';
 
 describe('the message the omp pane sends', () => {
   test('each comment quotes its text, then says its piece, before the prompt', () => {
@@ -26,8 +26,12 @@ describe('the message the omp pane sends', () => {
     assert.equal(isCommand('use /tmp for it'), false);
   });
 
-  test('a side question quotes the text it is about, then asks', () => {
-    assert.equal(composeAsk('line one\n\nline three', '  why both?  '), 'About this part of our conversation:\n\n> line one\n>\n> line three\n\nwhy both?');
+  test('a side question quotes the text it is about, asks, and asks for a short answer; so does each follow-up', () => {
+    const asked = composeAsk('line one\n\nline three', '  why both?  ');
+    const quoted = asked.indexOf(asQuote('line one\n\nline three'));
+    assert.ok(quoted >= 0 && quoted < asked.indexOf('why both?'), 'the quote comes before the question');
+    assert.ok(asked.endsWith(`why both?\n\n${ANSWER_BRIEFLY}`));
+    assert.equal(composeFollowUp('  and then?  '), `and then?\n\n${ANSWER_BRIEFLY}`);
   });
 
   test('pasted text follows the prompt as one attachment block; files follow as omp mentions', () => {

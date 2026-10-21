@@ -484,6 +484,15 @@ button {
   white-space: nowrap;
 }
 
+.widget-label {
+  margin-left: 4px;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .widget-body {
   flex: 1;
   min-height: 0;

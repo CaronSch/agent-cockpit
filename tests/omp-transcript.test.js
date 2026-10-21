@@ -265,12 +265,12 @@ describe('derived state', () => {
     assert.equal(state.streaming, false);
   });
 
-  test('omp’s nerd-font icons, which browsers draw as a box, are dropped from the title and from command output', () => {
+  test('omp’s nerd-font icons, which browsers draw as a box, are dropped from the session’s name and from command output', () => {
     const state = run([
       frame({ type: 'session_info_update', title: '\u{F056E} Fix the login flow', sessionId: 'x' }),
       frame({ type: 'command_output', text: 'Session renamed to \u{F056E} Fix the login flow.' }),
     ]);
-    assert.equal(state.title, 'Fix the login flow');
+    assert.equal(state.session.name, 'Fix the login flow');
     const output = state.items.at(-1);
     assert.equal(output?.kind === 'note' ? output.detail : null, 'Session renamed to Fix the login flow.');
   });
@@ -340,13 +340,20 @@ describe('derived state', () => {
         id: 'ac_5',
         command: 'get_state',
         success: true,
-        data: { model: { provider: 'acme', id: 'model-1', name: 'Model One' }, thinkingLevel: 'medium', contextUsage: { tokens: 10, contextWindow: 1000, percent: 1.5 }, sessionFile: '/s/a.jsonl' },
+        data: {
+          model: { provider: 'acme', id: 'model-1', name: 'Model One' },
+          thinkingLevel: 'medium',
+          contextUsage: { tokens: 10, contextWindow: 1000, percent: 1.5 },
+          sessionFile: '/s/a.jsonl',
+          sessionName: '\u{F056E} Fix the login flow',
+        },
       }),
     ]);
     assert.deepEqual(state.session, {
       model: { provider: 'acme', id: 'model-1', name: 'Model One' },
       thinkingLevel: 'medium',
       contextPercent: 1.5,
+      name: 'Fix the login flow',
     });
   });
 });

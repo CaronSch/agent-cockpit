@@ -12,7 +12,9 @@
  * `KNOWN_UNRENDERED` set with the reason, or surfaced as an `unrecognised` item.
  */
 import { json } from '../ui/format.js';
+import { todoPhases } from './todos.js';
 /** @import { SessionEvent, SessionMeta } from '../../daemon/wire.js' */
+/** @import { TodoPhase } from './todos.js' */
 
 /**
  * One block of an assistant message, in content order.
@@ -62,12 +64,19 @@ import { json } from '../ui/format.js';
 /** @typedef {{ name: string, aliases: string[], description: string, hint: string }} SlashCommand */
 
 /**
- * The parts of omp's `get_state` the pane shows.
+ * The parts of omp's `get_state` the pane shows; `name` is the session's title.
  * @typedef {{
  *   model: { provider: string, id: string, name: string } | null,
  *   thinkingLevel: string | null,
  *   contextPercent: number | null,
+ *   name: string | null,
  * }} SessionInfo
+ */
+
+/**
+ * The agent's todo list as it last reported it (omp/todos.js), and whether it changed during
+ * the turn running now.
+ * @typedef {{ phases: TodoPhase[], updatedInTurn: boolean }} TodoList
  */
 
 /**
@@ -92,6 +101,7 @@ import { json } from '../ui/format.js';
  *   statuses: Record<string, string>,
  *   widgets: Record<string, string[]>,
  *   title: string | null,
+ *   todo: TodoList | null,
  *   lastError: string | null,
  *   cost: number,
  *   editorText: { seq: number, text: string } | null,
@@ -120,14 +130,13 @@ const KNOWN_UNRENDERED = new Set([
   'config_warnings_changed', // no payload; warnings are not exposed over rpc
   'cache_warming_start', // background prompt-cache refreshes, not conversation
   'cache_warming_end',
-  'todo_auto_clear', // no payload
 ]);
 
 /** Assistant stream events with nothing to apply: `message_end` carries the result. */
 const KNOWN_STREAM_NOOPS = new Set(['start', 'done', 'error']);
 
-/** Frame types after which the pane should re-read `get_state`. */
-const REFRESH_TRIGGERS = new Set(['agent_end', 'model_changed', 'thinking_level_changed', 'config_update']);
+/** Frame types after which the pane should re-read `get_state` (`todo_auto_clear`: omp emptied the todo list). */
+const REFRESH_TRIGGERS = new Set(['agent_end', 'model_changed', 'thinking_level_changed', 'config_update', 'todo_auto_clear']);
 
 /** Successful responses that change what `get_state` reports. */
 const REFRESH_COMMANDS = new Set(['set_model', 'cycle_model', 'set_thinking_level', 'cycle_thinking_level', 'login', 'new_session', 'switch_session', 'fork', 'branch', 'compact']);
@@ -141,7 +150,7 @@ export function createTranscript() {
     items: [],
     tools: new Map(),
     meta: null,
-    session: { model: null, thinkingLevel: null, contextPercent: null },
+    session: { model: null, thinkingLevel: null, contextPercent: null, name: null },
     dialogs: [],
     sideAnswers: new Map(),
     streaming: false,
@@ -150,6 +159,7 @@ export function createTranscript() {
     statuses: {},
     widgets: {},
     title: null,
+    todo: null,
     lastError: null,
     cost: 0,
     editorText: null,
@@ -260,6 +270,7 @@ function applyFrame(state, frame) {
       return applyResponse(state, frame);
     case 'agent_start':
       state.streaming = true;
+      if (state.todo) state.todo.updatedInTurn = false;
       return;
     case 'agent_end': {
       // `messages` repeats what message_end frames already delivered (and may be compacted).
@@ -324,6 +335,7 @@ function applyFrame(state, frame) {
     case 'retry_fallback_succeeded':
       return note(state, 'muted', 'retry', `Fallback model ${frame.model} answered`);
     case 'model_changed':
+    case 'todo_auto_clear':
       return; // no payload; the refresh trigger above re-reads get_state
     case 'thinking_level_changed':
       if (typeof frame.thinkingLevel === 'string') state.session.thinkingLevel = frame.thinkingLevel;
@@ -361,7 +373,7 @@ function applyFrame(state, frame) {
     case 'command_output':
       return note(state, 'info', 'command', '', withoutIcons(String(frame.text ?? '')));
     case 'session_info_update':
-      if (typeof frame.title === 'string') state.title = withoutIcons(frame.title);
+      if (typeof frame.title === 'string') state.session.name = withoutIcons(frame.title) || null;
       return;
     // Side questions: each topic's answers, one per turn, go to `sideAnswers`, never into the chat.
     case 'btw_record': {
@@ -427,7 +439,10 @@ function applyState(state, data) {
     model: data.model && typeof data.model === 'object' ? modelInfo(data.model) : null,
     thinkingLevel: typeof data.thinkingLevel === 'string' ? data.thinkingLevel : null,
     contextPercent: typeof data.contextUsage?.percent === 'number' ? data.contextUsage.percent : null,
+    name: typeof data.sessionName === 'string' ? withoutIcons(data.sessionName) || null : null,
   };
+  const phases = todoPhases(data.todoPhases);
+  if (phases) state.todo = { phases, updatedInTurn: state.todo?.updatedInTurn ?? false };
 }
 
 /** @param {Transcript} state @param {Record<string, any>} frame */
@@ -596,6 +611,9 @@ function applyMessage(state, message, key, final) {
       if (!run) return unrecognised(state, 'toolResult without toolCallId', message);
       run.result = contentText(message.content);
       run.status = message.isError ? 'error' : 'ok';
+      // A `todo` result carries the agent's whole list (a `view` only reads it).
+      const phases = message.toolName === 'todo' && !message.isError && message.details?.op !== 'view' ? todoPhases(message.details?.phases) : null;
+      if (final && phases) state.todo = { phases, updatedInTurn: true };
       return touchTool(state, run.id);
     }
     case 'bashExecution':

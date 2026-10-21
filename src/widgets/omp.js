@@ -3,9 +3,11 @@
  * lets the user chat with it and set it up, rendered from omp's structured event stream.
  *
  * Params (persisted with the layout): `session` (daemon session id), `cwd`,
- * `sessionFile` (omp's transcript file, for resuming after the process is gone), `resume`
- * or `fork` while the window is starting from another journal, and the pane's settings
- * from its Config panel (`SETTINGS`).
+ * `sessionFile` (omp's transcript file, for resuming after the process is gone), `name` (the
+ * conversation's title, shown in the window's top bar), `resume` or `fork` while the window is
+ * starting from another journal, `prompt` while a fork waits to send the message it was
+ * dragged off another pane's Send with, and the pane's settings from its Config panel
+ * (`SETTINGS`).
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -14,10 +16,12 @@ import { addNote, applyEvent, createTranscript, removeDialog } from '../omp/tran
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
-import { composeAsk, isCommand, shellCommand } from '../omp/message.js';
+import { composeAsk, composeFollowUp, isCommand, shellCommand } from '../omp/message.js';
 import { attachSelectionPopup } from '../omp/selection-popup.js';
 import { awaitsUser } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
+import { turnProgress } from '../omp/todos.js';
+import { createPromptHistory, sentPrompts } from '../omp/prompt-history.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { LeafParams } from '../layout/grid-model.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
@@ -27,8 +31,9 @@ import { promptsAndResponses } from '../omp/visibility.js';
 /**
  * `resume` is a journal to resume, `fork` one to fork into a new session, as soon as the
  * window is placed (set by whoever created it: the Sessions window, another pane's Fork);
- * either is cleared once the session is running, so a fork is never taken twice.
- * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, resume: string | null, fork: string | null, onlyResponses: boolean }} OmpParams
+ * either is cleared once the session is running, so a fork is never taken twice. `prompt` is
+ * cleared as it is sent.
+ * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, name: string | null, resume: string | null, fork: string | null, prompt: string | null, onlyResponses: boolean }} OmpParams
  */
 /** @typedef {{ label: string, detail?: string, current?: boolean, pick: () => void }} MenuEntry */
 /**
@@ -52,6 +57,7 @@ const READ_SAVE_MS = 1000;
 const REFUSED = 'The daemon refused this page.';
 const FORK_TITLE = 'Fork: continue a copy of this conversation in a new window';
 const NOTHING_TO_FORK = 'Nothing to fork yet: omp saves a conversation once the model has replied';
+const SEND_TITLE = 'Drag onto the grid to send this in a fork of the conversation instead';
 
 export default {
   type: 'omp',
@@ -97,8 +103,10 @@ function createPane(body, ctx, daemon) {
     session: str(ctx.params.session),
     cwd: str(ctx.params.cwd),
     sessionFile: str(ctx.params.sessionFile),
+    name: str(ctx.params.name),
     resume: str(ctx.params.resume),
     fork: str(ctx.params.fork),
+    prompt: str(ctx.params.prompt),
     onlyResponses: ctx.params.onlyResponses === true,
   });
 
@@ -206,6 +214,7 @@ function createPane(body, ctx, daemon) {
   function render() {
     const status = daemon.status();
     const p = params();
+    ctx.setLabel(p.name);
     if (view && view.session !== p.session) {
       view.destroy();
       view = null;
@@ -362,7 +371,7 @@ function createPane(body, ctx, daemon) {
     }
     row.append(
       button('btn', 'New session', () => {
-        ctx.setParams({ session: null, sessionFile: null });
+        ctx.setParams({ session: null, sessionFile: null, name: null });
         schedule();
       }),
     );
@@ -395,6 +404,8 @@ function createPane(body, ctx, daemon) {
     let messagesRequested = false;
     let refreshing = false;
     let refreshAgain = false;
+    /** Set once this view is destroyed: work still on its way must not touch the window. */
+    let closed = false;
     /** @type {Set<string>} */
     const openDetails = new Set();
 
@@ -405,6 +416,13 @@ function createPane(body, ctx, daemon) {
     const modelBtn = toolButton('model…', 'Choose model');
     const thinkingBtn = toolButton('thinking…', 'Choose thinking level');
     const activity = el('span', 'omp-activity');
+    // How far through its todo list the agent is, while a turn runs (omp/todos.js).
+    const progressEl = el('span', 'omp-progress');
+    const progressBar = el('progress');
+    progressBar.setAttribute('aria-label', 'Tasks done');
+    const progressCount = el('span', 'omp-progress-count');
+    progressEl.append(progressBar, progressCount);
+    progressEl.hidden = true;
     const contextEl = el('span', 'omp-meter');
     contextEl.title = 'Context window used';
     const costEl = el('span', 'omp-meter');
@@ -416,7 +434,7 @@ function createPane(body, ctx, daemon) {
     const loginBtn = toolButton('Login', 'Log in to a model provider');
     const stopBtn = toolButton('Stop', 'Stop the agent and restore queued messages (Esc)');
     const closeBtn = toolButton('Close', 'End this omp session');
-    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, contextEl, costEl, errorBadge, spacer, forkBtn, configBtn, loginBtn, stopBtn, closeBtn);
+    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, progressEl, contextEl, costEl, errorBadge, spacer, forkBtn, configBtn, loginBtn, stopBtn, closeBtn);
 
     const strip = el('div', 'omp-strip');
     const loginStrip = el('div', 'omp-login');
@@ -461,8 +479,7 @@ function createPane(body, ctx, daemon) {
       ask: {
         async send(quote, question, topic) {
           if (!ready()) return { error: 'omp is not running.' };
-          // A follow-up goes as written: omp replays its topic's earlier turns, quote included.
-          const command = topic === undefined ? { type: 'btw', question: composeAsk(quote, question) } : { type: 'btw', question, recordId: topic };
+          const command = topic === undefined ? { type: 'btw', question: composeAsk(quote, question) } : { type: 'btw', question: composeFollowUp(question), recordId: topic };
           try {
             const res = await daemon.rpc(session, command);
             const record = res.success ? res.data?.record : null;
@@ -488,6 +505,7 @@ function createPane(body, ctx, daemon) {
      * started from exists already, and omp writes a new session's once the model has replied.
      */
     const saved = () => Boolean(meta()?.resume || meta()?.fork) || state.items.some((i) => i.kind === 'assistant' && i.ended);
+    const forkable = () => Boolean(meta()?.sessionFile) && saved();
 
     // ── commands ──
     /**
@@ -533,9 +551,10 @@ function createPane(body, ctx, daemon) {
       // A file dropped a moment ago may still be on its way to the daemon: send it too.
       if (!command) await composer.settled();
       if (!ready()) return;
-      const taken = composer.take({ withCards: !command });
-      const text = taken.message;
+      const outgoing = composer.compose({ withCards: !command });
+      const text = outgoing.message;
       if (!text) return;
+      const taken = outgoing.take();
       hideSuggestions();
       const shell = shellCommand(text);
       /** @type {Record<string, unknown>} */
@@ -697,7 +716,7 @@ function createPane(body, ctx, daemon) {
     // The copy is omp's own (`--fork`): a new session in a new window; this one carries on.
     forkBtn.addEventListener('click', () => {
       const m = meta();
-      if (m?.sessionFile) ctx.addWidget('omp', { fork: m.sessionFile, cwd: m.cwd, session: null, sessionFile: null });
+      if (m?.sessionFile) ctx.addWidget('omp', { fork: m.sessionFile, cwd: m.cwd, session: null, sessionFile: null, name: params().name });
     });
     closeBtn.addEventListener('click', () => {
       closeBtn.disabled = true;
@@ -756,6 +775,7 @@ function createPane(body, ctx, daemon) {
       draft.focus();
     }
 
+    const history = createPromptHistory(() => sentPrompts(state.items));
     draft.addEventListener('input', () => {
       selected = 0;
       updateSuggestions();
@@ -773,6 +793,20 @@ function createPane(body, ctx, daemon) {
           return updateSuggestions();
         }
       }
+      // Up and Down step through what was sent, as in omp's own editor (omp/prompt-history.js).
+      const plain = !(e.shiftKey || e.altKey || e.metaKey || e.ctrlKey);
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && plain && draft.selectionStart === draft.selectionEnd) {
+        const older = e.key === 'ArrowUp';
+        const text = history.step(older ? 'older' : 'newer', draft.value, draft.selectionStart);
+        if (text !== null) {
+          e.preventDefault();
+          composer.setText(text);
+          // Up opens an entry at its top and Down at its bottom, so one press steps one entry.
+          const at = older ? 0 : text.length;
+          draft.setSelectionRange(at, at);
+        }
+        return;
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         void send();
@@ -782,6 +816,20 @@ function createPane(body, ctx, daemon) {
       }
     });
     sendBtn.addEventListener('click', () => void send());
+    // Dragging Send sends the message in a fork instead: a new window, placed where it is
+    // dropped, continuing a copy of this conversation. This box lets go of it once it is placed.
+    sendBtn.addEventListener('pointerdown', (e) => {
+      const m = meta();
+      if (e.button !== 0 || sendBtn.disabled || !m?.sessionFile || !forkable()) return;
+      const outgoing = composer.compose({ withCards: !isCommand(draft.value) });
+      const line = outgoing.message.replace(/\s+/g, ' ').trim();
+      ctx.dragWidget('omp', { fork: m.sessionFile, cwd: m.cwd, session: null, sessionFile: null, name: params().name, prompt: outgoing.message || null }, e, {
+        label: line ? `Fork: ${line.length > 40 ? `${line.slice(0, 39)}…` : line}` : 'Fork',
+        onEnd: ({ dropped }) => {
+          if (dropped) outgoing.take();
+        },
+      });
+    });
 
     // ── drawing ──
     /** @type {Map<string, { rev: number, node: HTMLElement }>} */
@@ -951,6 +999,14 @@ function createPane(body, ctx, daemon) {
       thinkingBtn.textContent = s.thinkingLevel ? `thinking: ${s.thinkingLevel}` : 'thinking…';
       activity.textContent = state.streaming ? 'working' : 'idle';
       activity.classList.toggle('is-streaming', state.streaming);
+      const progress = turnProgress(state);
+      progressEl.hidden = !progress;
+      if (progress) {
+        progressBar.max = progress.total;
+        progressBar.value = progress.done;
+        progressCount.textContent = `${progress.done}/${progress.total}`;
+        progressEl.title = `${progress.done} of ${progress.total} tasks done${progress.current ? `\nNow: ${progress.current}` : ''}`;
+      }
       contextEl.textContent = s.contextPercent !== null ? `ctx ${s.contextPercent.toFixed(1)}%` : '';
       costEl.textContent = state.cost > 0 ? `$${state.cost < 1 ? state.cost.toFixed(3) : state.cost.toFixed(2)}` : '';
       errorBadge.hidden = !state.lastError;
@@ -959,15 +1015,15 @@ function createPane(body, ctx, daemon) {
       for (const b of [modelBtn, thinkingBtn, loginBtn]) b.disabled = !live;
       stopBtn.disabled = !live || !state.streaming;
       closeBtn.hidden = !live && m?.status !== 'starting';
-      const forkable = Boolean(m?.sessionFile) && saved();
-      forkBtn.disabled = !forkable;
-      forkBtn.title = forkable ? FORK_TITLE : NOTHING_TO_FORK;
+      forkBtn.disabled = !forkable();
+      forkBtn.title = forkable() ? FORK_TITLE : NOTHING_TO_FORK;
     }
 
     function drawComposer() {
       const live = ready();
       draft.disabled = !live;
       sendBtn.disabled = !live;
+      sendBtn.title = live && forkable() ? SEND_TITLE : '';
       draft.placeholder = !live
         ? 'omp is not running'
         : state.streaming
@@ -981,21 +1037,43 @@ function createPane(body, ctx, daemon) {
       }
     }
 
+    /**
+     * Sends the message this window was forked with (dragged off another pane's Send), once:
+     * the param is cleared as it goes. A session that is not that fork after all (the fork
+     * failed and a fresh one was started) gets it in the box, unsent.
+     */
+    function sendCarried() {
+      const { prompt } = params();
+      if (closed || !prompt || params().session !== session) return;
+      ctx.setParams({ prompt: null });
+      composer.setText(prompt);
+      if (meta()?.fork) void send();
+    }
+
     function update() {
       if (ready()) {
         if (!readyHandled) {
           readyHandled = true;
           refreshSeen = state.refreshSeq;
           void refreshState();
-          // A process started from a journal streams none of its earlier history: fetch it once.
-          if ((meta()?.resume || meta()?.fork) && !state.seeded && !messagesRequested) {
-            messagesRequested = true;
-            void rpc({ type: 'get_messages' });
-          }
+          // A process started from a journal streams none of its earlier history: fetch it
+          // once, and only then send anything new, so that the history goes above it.
+          const earlier = Boolean(meta()?.resume || meta()?.fork) && !state.seeded && !messagesRequested;
+          if (earlier) messagesRequested = true;
+          void (earlier ? rpc({ type: 'get_messages' }) : Promise.resolve(null)).then(sendCarried);
         } else if (state.refreshSeq !== refreshSeen) {
           refreshSeen = state.refreshSeq;
           void refreshState();
         }
+      }
+      // The conversation's title names the window, and is saved with it for when omp is gone.
+      const name = state.session.name;
+      if (name && name !== params().name) {
+        queueMicrotask(() => {
+          if (closed || params().session !== session) return;
+          ctx.setParams({ name });
+          schedule();
+        });
       }
       drawToolbar();
       drawStrips();
@@ -1013,6 +1091,7 @@ function createPane(body, ctx, daemon) {
       root: node,
       update,
       destroy() {
+        closed = true;
         subscription();
         resizes.disconnect();
         composer.destroy();

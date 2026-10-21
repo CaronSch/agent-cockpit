@@ -95,17 +95,28 @@ What runs today:
   tool calls with output), pick model and thinking level, log in to
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
   a running turn, and resume the conversation after a daemon restart. Several
-  panes can run side by side, each bound to its own session. **Fork** continues
+  panes can run side by side, each bound to its own session; the window's top
+  bar names its conversation (omp's session title, saved with the window, so it
+  still shows once the session has ended). **Fork** continues
   a copy of a pane's conversation in a new pane, as a session of its own (omp's
   `--fork`: a new journal, the original runs on untouched); it stays off until
   omp has saved the conversation, which a new session does once the model has
-  replied. The message box grows with the prompt; a line starting with `!` runs
+  replied. Dragging **Send** onto the grid does the same, placed where it is
+  dropped, and sends the message there instead (the box empties once the fork is
+  placed; a click still sends here). The message box grows with the prompt; Up
+  in an empty box steps back through the conversation's prompts and `!` commands
+  (Down forward), as omp's own editor does; a line starting with `!` runs
   as a shell command in the session's directory, at once even mid-turn, and while
   the draft is one the box turns into a shell line (monospace, `$ shell · <dir>`,
-  Run instead of Send, the cards shown as waiting for the next prompt). Selected
+  Run instead of Send, the cards shown as waiting for the next prompt). While a
+  turn runs, the toolbar shows how far the agent is through its todo list (tasks
+  done of tasks, the current one on hover), read from omp's `todo` results; work
+  without a list shows none. A Markdown table in a reply has a Copy button (on
+  hover) for Markdown, CSV or a PNG image drawn from its cells. Selected
   reply text can be commented on (the comment goes quoted with the next prompt)
   or asked about (omp's `btw` answers in the popup, outside the chat, where
-  follow-up questions continue the same topic, one at a time); long pastes become
+  follow-up questions continue the same topic, one at a time; every question asks
+  for an answer of at most three sentences); long pastes become
   editable cards and pasted or dropped files are stored in
   `~/.cockpit/attachments/` and sent as omp `@"<path>"` mentions. A pane whose
   agent finished its turn (or asks something) while its user was not looking
@@ -115,7 +126,8 @@ What runs today:
   and the messages in between, with one "Working…" line while a turn runs.
 - The Sessions window: every past omp conversation (read from omp's session
   files), searchable across titles, directories and prompts, sortable, and
-  draggable onto the grid to resume it in a new omp pane. Sessions already open
+  draggable onto the grid (by its row or its Resume button) to resume it in a new
+  omp pane there; Resume clicked opens it beside the list. Sessions already open
   in a pane are marked and cannot be opened twice. Sessions the daemon runs get a
   summarising title: after a turn settles in an unnamed session it sends omp
   `/rename`, which RPC mode otherwise never does by itself. A fork is listed as a
@@ -289,7 +301,11 @@ particular, move a capability into "Current state" when it ships.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
 - `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then attachments), `!` shell commands, and side questions about a quote.
+- `src/omp/prompt-history.js` — Up and Down in the omp pane's message box step through what was sent in its conversation, as omp's own editor and a shell do: the user's prompts and `!` commands, newest first.
 - `src/omp/selection-popup.js` — Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons appear at the end of the selection.
+- `src/omp/table-copy.js` — Copy control for a rendered Markdown table: a button whose menu copies the table as Markdown, CSV or a PNG image.
+- `src/omp/table-text.js` — Plain-text forms of a parsed Markdown table: a cell's text without its formatting, and the table as CSV.
+- `src/omp/todos.js` — How far along the agent is, from the todo list omp agents keep with their `todo` tool: how many of its tasks are done and which one it is on.
 - `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
 - `src/omp/visibility.js` — Which transcript items an omp pane shows when it is set to only prompts and responses: what the user said and ran, and what the agent finally answered, without the work in between.
 - `src/render/drop-indicator.js` — Landing preview for drag & drop, plus the sash snap guide.
@@ -308,7 +324,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
 - `src/widgets/scratchpad.js` — Notes beside the agents: text with screenshots and files in it.
-- `src/widgets/sessions.js` — Past omp sessions, searchable and sortable: drag one onto the grid, or press Resume, to continue it in a new omp window.
+- `src/widgets/sessions.js` — Past omp sessions, searchable and sortable: drag one (or its Resume button) onto the grid to continue it in a new omp window there, or press Resume to open it beside the list.
 - `src/workspace/model.js` — Workspaces and their screens, kept free of the DOM and shared with the daemon: valid names and ids, which screen a new window claims, and how a screen is described.
 - `src/workspace/screen.js` — This window's screen of its workspace: claimed for as long as the window is open, loaded from the daemon, and saved back as its layout changes.
 - `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
@@ -345,6 +361,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->

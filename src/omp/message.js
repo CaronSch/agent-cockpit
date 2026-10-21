@@ -8,7 +8,8 @@
  * Pasted text goes after the draft wrapped in `<attachment>` tags, as omp's own "wrapped
  * block" paste does. A file goes as an `@"<path>"` mention: omp reads it when the prompt
  * starts a turn (images to the model, text inline); a steer keeps the path, which the model
- * can open itself. A side question quotes its text the same way, for omp's `btw`.
+ * can open itself. A side question quotes its text the same way, for omp's `btw`, and asks
+ * for a short answer.
  */
 
 /** A comment on a quoted part of the transcript. @typedef {{ quote: string, comment: string }} QuoteComment */
@@ -63,8 +64,17 @@ export function shellCommand(draft) {
 }
 
 /**
+ * Ends every side question, follow-ups included: omp's side-question prompt only asks for a
+ * "brief" answer; this one bounds it.
+ */
+export const ANSWER_BRIEFLY = 'Answer in at most three sentences, or a short list; no preamble.';
+
+/**
  * A side question about `quote`, for omp's `btw`: answered from the session's context, kept
- * out of it. omp's own side-question prompt already asks for a brief, direct answer.
+ * out of it.
  * @param {string} quote @param {string} question
  */
-export const composeAsk = (quote, question) => `About this part of our conversation:\n\n${asQuote(quote)}\n\n${question.trim()}`;
+export const composeAsk = (quote, question) => `About this part of our conversation:\n\n${asQuote(quote)}\n\n${question.trim()}\n\n${ANSWER_BRIEFLY}`;
+
+/** A follow-up in a side topic: omp replays the topic's earlier turns, quote included. @param {string} question */
+export const composeFollowUp = (question) => `${question.trim()}\n\n${ANSWER_BRIEFLY}`;

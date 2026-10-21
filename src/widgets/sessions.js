@@ -1,6 +1,6 @@
 /**
- * Past omp sessions, searchable and sortable: drag one onto the grid, or press Resume, to
- * continue it in a new omp window.
+ * Past omp sessions, searchable and sortable: drag one (or its Resume button) onto the grid to
+ * continue it in a new omp window there, or press Resume to open it beside the list.
  *
  * Search runs in the daemon (every word must match the title, directory or a prompt); sorting
  * runs here. The query and sort order are this window's own settings, so two Sessions windows
@@ -128,7 +128,7 @@ function createSessionsWindow(body, ctx, daemon) {
   }
 
   /** @param {PastSession} s */
-  const paneParams = (s) => ({ resume: s.file, cwd: s.cwd, session: null, sessionFile: null });
+  const paneParams = (s) => ({ resume: s.file, cwd: s.cwd, session: null, sessionFile: null, name: s.title });
 
   /** @param {PastSession} s */
   function resume(s) {
@@ -218,8 +218,9 @@ function createSessionsWindow(body, ctx, daemon) {
     return row ? (byFile.get(row.dataset.file ?? '') ?? null) : null;
   };
 
+  // A row drags out from anywhere on it, its Resume button included; a click on Resume opens it beside the list.
   list.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('button')) return;
+    if (event.button !== 0) return;
     const s = sessionAt(event.target);
     if (!s || openFiles().has(s.file)) return;
     ctx.dragWidget('omp', paneParams(s), event, { label: displayTitle(s) });

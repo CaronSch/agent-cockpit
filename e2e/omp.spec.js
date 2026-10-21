@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { E2E_STATE_DIR, newWorkspace, savedLayout, workbenchPath } from './daemon.js';
+import { composeAsk, composeFollowUp } from '../src/omp/message.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 
@@ -78,6 +79,17 @@ async function send(pane, text) {
 const rpcSent = (page, type) => page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === type);
 
 /**
+ * The settings saved with `pane`'s window in `workspace`, as the daemon has them.
+ * @param {Page} page @param {string} workspace @param {import('@playwright/test').Locator} pane
+ */
+async function savedParams(page, workspace, pane) {
+  const id = await pane.getAttribute('data-id');
+  /** @param {any} node @returns {any} */
+  const find = (node) => (node?.id === id ? node : (node?.children ?? []).map(find).find(Boolean));
+  return find(await savedLayout(page.request, workspace))?.params;
+}
+
+/**
  * Selects the bold word in `reply` and opens Ask on it; resolves to the question box.
  * @param {import('@playwright/test').Locator} pane @param {import('@playwright/test').Locator} reply
  */
@@ -123,6 +135,44 @@ test('a markdown table in a reply renders as a table, not as pipes', async ({ pa
   await expect(table.locator('tbody td')).toHaveText(['Now', 'Stuff happened', 'tracked.rs:67']);
   await expect(table.locator('tbody td code')).toHaveText('tracked.rs:67');
   await expect(pane.locator('.omp-assistant').last()).not.toContainText('|');
+});
+
+test('a markdown table copies as Markdown, as CSV, and as a PNG image of the table', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'show me a table');
+  const block = pane.locator('.omp-assistant').last().locator('.md-table-block');
+  const table = block.locator('table');
+  const copy = block.locator('.md-table-copy');
+  const menu = block.locator('.md-table-copy-menu');
+  /** @param {string} format */
+  const copyAs = async (format) => {
+    await expect(copy).toHaveText('Copy'); // the previous copy's report has gone
+    await table.hover();
+    await copy.click();
+    await menu.getByRole('button', { name: format }).click();
+    await expect(menu).toBeHidden();
+    await expect(copy).toHaveText('Copied');
+  };
+  const clipboardText = () => page.evaluate(() => navigator.clipboard.readText());
+
+  await copyAs('Markdown');
+  expect(await clipboardText()).toBe('| When | What happens | Code |\n|---|---|---|\n| Now | Stuff happened | `tracked.rs:67` |');
+  await copyAs('CSV');
+  expect(await clipboardText()).toBe('When,What happens,Code\nNow,Stuff happened,tracked.rs:67');
+  await copyAs('PNG image');
+  const image = await page.evaluate(async () => {
+    const item = (await navigator.clipboard.read()).find((i) => i.types.includes('image/png'));
+    if (!item) return null;
+    const bitmap = await createImageBitmap(await item.getType('image/png'));
+    return { width: bitmap.width, height: bitmap.height };
+  });
+  const box = await table.boundingBox();
+  if (!image || !box) throw new Error(`no image on the clipboard (${JSON.stringify(image)}) or no table (${JSON.stringify(box)})`);
+  // Drawn at 2× from the table's own cells: about twice the rendered table, not a blank or the whole pane.
+  expect(Math.abs(image.width / (2 * box.width) - 1)).toBeLessThan(0.35);
+  expect(Math.abs(image.height / (2 * box.height) - 1)).toBeLessThan(0.35);
 });
 
 test('the message box grows with the prompt, up to half the pane, and shrinks again after sending', async ({ page }) => {
@@ -316,7 +366,7 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
   const asked = rpcSent(page, 'btw');
   await box.fill('slow: what does this mean?');
   await box.press('Enter');
-  expect((await asked).postDataJSON().question).toBe('About this part of our conversation:\n\n> hello\n\nslow: what does this mean?');
+  expect((await asked).postDataJSON().question).toBe(composeAsk('hello', 'slow: what does this mean?'));
   const pop = pane.locator('.omp-quote-pop');
   await expect(pop.locator('.omp-ask-question')).toHaveText('slow: what does this mean?');
   await expect(pop.locator('.omp-ask-status')).toHaveText('Thinking…');
@@ -397,14 +447,14 @@ test('Ask takes follow-ups in the same topic, one at a time, and keeps the whole
   await expect(answers.nth(0).locator('strong')).toHaveText('hello');
   await expect(followUp).toBeFocused();
 
-  // Shift+Enter starts a new line; Enter sends the follow-up in the topic, as written.
+  // Shift+Enter starts a new line; Enter sends the follow-up in the topic, asking for a short answer.
   await followUp.fill('slow: and');
   await followUp.press('Shift+Enter');
   await followUp.pressSequentially('why?');
   await expect(followUp).toHaveValue('slow: and\nwhy?');
   const asked = rpcSent(page, 'btw');
   await followUp.press('Enter');
-  expect((await asked).postDataJSON()).toMatchObject({ question: 'slow: and\nwhy?', recordId: topic });
+  expect((await asked).postDataJSON()).toMatchObject({ question: composeFollowUp('slow: and\nwhy?'), recordId: topic });
   // omp answers one side question at a time: nothing more can be asked until this answer is in.
   await expect(answers.nth(1)).toHaveText('Thinking…');
   await expect(followUp).toBeDisabled();
@@ -689,17 +739,114 @@ test('Fork continues a copy of the conversation in a new pane, as a session of i
 
   // The window saves its own journal, not the source's, and drops the fork request: after a
   // daemon restart its Resume continues the fork instead of forking again.
-  const savedParams = async (/** @type {import('@playwright/test').Locator} */ pane) => {
-    const id = await pane.getAttribute('data-id');
-    /** @param {any} node @returns {any} */
-    const find = (node) => (node?.id === id ? node : (node?.children ?? []).map(find).find(Boolean));
-    return find(await savedLayout(page.request, workspace))?.params;
-  };
-  await expect.poll(async () => (await savedParams(forked))?.sessionFile).toMatch(/\.jsonl$/);
-  const [mine, theirs] = [await savedParams(forked), await savedParams(source)];
+  await expect.poll(async () => (await savedParams(page, workspace, forked))?.sessionFile).toMatch(/\.jsonl$/);
+  const [mine, theirs] = [await savedParams(page, workspace, forked), await savedParams(page, workspace, source)];
   expect(theirs.sessionFile).toMatch(/\.jsonl$/);
   expect(mine.sessionFile).not.toBe(theirs.sessionFile);
   expect(mine.fork).toBeNull();
+});
+
+test('dragging Send sends the message in a fork placed where it is dropped, and empties this box', async ({ page }) => {
+  const workspace = await openWorkbench(page);
+  const source = await startedPane(page);
+  await send(source, 'shared start');
+  await expect(source.locator('.omp-assistant').last()).toContainText('You said: shared start');
+  const draft = source.locator('textarea');
+  const sendBtn = source.getByRole('button', { name: 'Send', exact: true });
+  const grid = await page.locator('#grid').boundingBox();
+  const button = await sendBtn.boundingBox();
+  if (!grid || !button) throw new Error('not laid out');
+  const onSend = { x: button.x + button.width / 2, y: button.y + button.height / 2 };
+
+  // Dropped on the grid's left edge: the fork goes left of this pane, not beside it as Fork's would.
+  await draft.fill('fork only');
+  const forked = await paneAddedBy(page, async () => {
+    await page.mouse.move(onSend.x, onSend.y);
+    await page.mouse.down();
+    await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
+    await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
+    await page.mouse.up();
+  });
+  await expect(forked.locator('.omp-user')).toHaveText([/shared start$/, /fork only$/]);
+  await expect(forked.locator('.omp-assistant').last()).toContainText('You said: fork only');
+  await expect(draft).toHaveValue('');
+  const [mine, theirs] = [await forked.boundingBox(), await source.boundingBox()];
+  expect(mine && theirs && mine.x < theirs.x).toBe(true);
+  // Sent once: the window drops the message as it sends it, so a reload does not send it again.
+  await expect.poll(async () => (await savedParams(page, workspace, forked))?.prompt).toBeNull();
+  await page.reload();
+  const again = page.locator(`.widget[data-id="${await forked.getAttribute('data-id')}"]`);
+  await expect(again.locator('.omp-assistant').last()).toContainText('You said: fork only');
+  await expect(again.locator('.omp-user')).toHaveText([/shared start$/, /fork only$/]);
+
+  // A drag called off with Esc and let go over Send sends nothing anywhere; the message stays.
+  const box = page.locator(`.widget[data-id="${await source.getAttribute('data-id')}"] textarea`);
+  await box.fill('stay here');
+  await page.mouse.move(onSend.x, onSend.y);
+  await page.mouse.down();
+  await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
+  await page.keyboard.press('Escape');
+  await page.mouse.move(onSend.x, onSend.y, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(2);
+  await expect(box).toHaveValue('stay here');
+  await box.press('Enter');
+  const home = page.locator(`.widget[data-id="${await source.getAttribute('data-id')}"]`);
+  await expect(home.locator('.omp-assistant').last()).toContainText('You said: stay here');
+  await expect(home.locator('.omp-user')).toHaveText([/shared start$/, /stay here$/]);
+});
+
+test('the window’s top bar names its conversation, and the name is saved with the window', async ({ page }) => {
+  const workspace = await openWorkbench(page);
+  const pane = await startedPane(page);
+  const label = pane.locator('.widget-label');
+  await expect(label, 'a new session has no name yet').toBeHidden();
+  await send(pane, 'fix the login bug');
+  await expect(label).toHaveText('About fix the login bug');
+  await expect(pane.getByRole('heading', { name: 'omp About fix the login bug' })).toBeVisible();
+  await expect.poll(async () => (await savedParams(page, workspace, pane))?.name).toBe('About fix the login bug');
+});
+
+test('Up and Down in the message box step through what was sent, as in a shell', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const draft = pane.locator('textarea');
+  await send(pane, 'first');
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: first');
+  await send(pane, '!echo hi');
+  await expect(pane.locator('.omp-bash.is-ok')).toContainText('hi');
+  await send(pane, 'third');
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: third');
+
+  await draft.press('ArrowUp');
+  await expect(draft).toHaveValue('third');
+  await draft.press('ArrowUp');
+  await expect(draft).toHaveValue('!echo hi');
+  await expect(pane.locator('.omp-composer')).toHaveClass(/is-shell/); // recalled as the command it was
+  await draft.press('ArrowUp');
+  await expect(draft).toHaveValue('first');
+  await draft.press('ArrowDown');
+  await draft.press('ArrowDown');
+  await expect(draft).toHaveValue('third');
+  await draft.press('ArrowDown');
+  await expect(draft).toHaveValue('');
+
+  // Up never throws away what the user is writing.
+  await draft.fill('my draft');
+  await draft.press('ArrowUp');
+  await expect(draft).toHaveValue('my draft');
+});
+
+test('while the agent works through its todo list, the toolbar shows how far it is', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const progress = pane.locator('.omp-progress');
+  await send(pane, 'slow todo'); // a three-task list, one done, then 1.5 s of work
+  await expect(progress).toHaveText('1/3');
+  await expect(progress).toHaveAttribute('title', '1 of 3 tasks done\nNow: Write the fix');
+  await expect(progress.locator('progress')).toHaveJSProperty('value', 1);
+  await expect(pane.getByText('idle')).toBeVisible();
+  await expect(progress, 'no turn, no progress').toBeHidden();
 });
 
 test('closing the window ends its omp session', async ({ page }) => {
