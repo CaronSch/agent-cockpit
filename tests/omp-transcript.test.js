@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { addNote, applyEvent, askAnswers, conversationName, createTranscript, removeDialog } from '../src/omp/transcript.js';
+import { addNote, applyEvent, askAnswers, conversationName, createTranscript } from '../src/omp/transcript.js';
 /** @import { SessionEvent } from '../daemon/wire.js' */
 /** @import { Transcript } from '../src/omp/transcript.js' */
 
@@ -232,9 +232,6 @@ describe('dialogs', () => {
     assert.equal(state.dialogs.length, 1);
     applyEvent(state, sent({ type: 'extension_ui_response', id: 'u1', confirmed: true }));
     assert.deepEqual(state.dialogs, []);
-    const local = run([frame(confirm)]);
-    removeDialog(local, 'u1');
-    assert.deepEqual(local.dialogs, []);
   });
 
   test('ask answers have the exact rpc.md shape', () => {

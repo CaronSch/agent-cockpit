@@ -12,7 +12,7 @@
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { getDaemon } from '../daemon/client.js';
-import { addNote, applyEvent, conversationName, createTranscript, removeDialog } from '../omp/transcript.js';
+import { addNote, applyEvent, conversationName, createTranscript } from '../omp/transcript.js';
 import { renderItem } from '../omp/items-view.js';
 import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
@@ -891,17 +891,12 @@ function createPane(body, ctx, daemon) {
       }
       for (const dialog of state.dialogs) {
         if (dialogNodes.has(dialog.id)) continue;
+        // The daemon reports the answer as `sent` before it replies, which removes the dialog.
         const n = renderDialog(dialog, (payload) => {
-          daemon
-            .respondUi(session, { type: 'extension_ui_response', id: dialog.id, ...payload })
-            .then(() => {
-              removeDialog(state, dialog.id);
-              schedule();
-            })
-            .catch((err) => {
-              addNote(state, 'error', 'dialog', errorMessage(err));
-              schedule();
-            });
+          daemon.respondUi(session, { type: 'extension_ui_response', id: dialog.id, ...payload }).catch((err) => {
+            addNote(state, 'error', 'dialog', errorMessage(err));
+            schedule();
+          });
         });
         dialogNodes.set(dialog.id, n);
         dialogs.append(n);

@@ -217,14 +217,6 @@ export function addNote(state, level, source, text) {
 }
 
 /**
- * Hides a dialog the user just answered, before omp's echo of the answer arrives.
- * @param {Transcript} state @param {string} id
- */
-export function removeDialog(state, id) {
-  state.dialogs = state.dialogs.filter((d) => d.id !== id);
-}
-
-/**
  * Builds the `answers` of an `ask` response exactly as omp's rpc docs require: one entry
  * per question in request order, exact option labels without duplicates, a single-select
  * holding at most one option and never both an option and free text, free text trimmed
