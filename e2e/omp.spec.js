@@ -475,6 +475,7 @@ test('a comment on selected reply text goes with the next prompt, quoting what i
   await reply.locator('strong').dblclick(); // selects the word, as a reader would
   await pane.getByRole('button', { name: 'Comment' }).click();
   const box = pane.getByRole('textbox', { name: 'Comment on the selected text' });
+  await expect(box).toBeFocused(); // not the message box, though the click was in the pane
   await expect(pane.locator('.omp-quote-pop .omp-quote-preview')).toHaveText('hello');
   await box.fill('why this word?');
   await box.press('Enter');
@@ -712,6 +713,7 @@ test('Ask on selected reply text answers in the popup and leaves the chat as it 
 
   // "slow": the answer streams in well after omp has taken the question.
   const box = await askAbout(pane, reply);
+  await expect(box).toBeFocused();
   const asked = rpcSent(page, 'btw');
   await box.fill('slow: what does this mean?');
   await box.press('Enter');
@@ -790,7 +792,7 @@ test('Ask takes follow-ups in the same topic, one at a time, and keeps the whole
   const box = await askAbout(pane, reply);
   const first = rpcSent(page, 'btw');
   await box.fill('what does this mean?');
-  await box.press('Enter');
+  await pop.getByRole('button', { name: 'Ask', exact: true }).click(); // focus stays in the popup
   const topic = (await rpcAnswer(await first)).data?.record?.id;
   expect(topic).toEqual(expect.any(String));
   await expect(answers.nth(0).locator('strong')).toHaveText('hello');

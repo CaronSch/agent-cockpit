@@ -35,9 +35,12 @@ const INTERACTIVE = [
 export function focusOnClick(surface, field, ignore) {
   surface.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
-    if (field.disabled || !(e.target instanceof Element)) return;
-    const own = e.target.closest(`${INTERACTIVE}, ${ignore}`);
-    if (own && surface.contains(own)) return;
+    if (field.disabled) return;
+    // The path as dispatched, not the target's ancestors now: a control's own handler may
+    // already have replaced it (Comment swaps itself for its box), detaching it from the pane.
+    const path = e.composedPath();
+    const inside = path.slice(0, path.indexOf(surface));
+    if (inside.some((node) => node instanceof Element && node.matches(`${INTERACTIVE}, ${ignore}`))) return;
     if (!(document.getSelection()?.isCollapsed ?? true)) return;
     field.focus({ preventScroll: true });
     const end = field.value.length;
