@@ -6,6 +6,10 @@
  * runs here. The query and sort order are this window's own settings, so two Sessions windows
  * can show different slices. A session already open in a window is marked and cannot be
  * resumed a second time: omp would fork it rather than share it.
+ *
+ * Archive moves a session out of omp's sessions into the daemon's archive (omp's own resume
+ * no longer offers it); "Archived" switches the window to the archived sessions, each with
+ * Restore. An open session cannot be archived: omp is still writing its journal.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -41,6 +45,7 @@ function createSessionsWindow(body, ctx, daemon) {
   /** @returns {SortDir} */
   const sortDir = () => (ctx.params.dir === 'asc' || ctx.params.dir === 'desc' ? ctx.params.dir : naturalDir(sortKey()));
   const query = () => (typeof ctx.params.query === 'string' ? ctx.params.query : '');
+  const showArchived = () => ctx.params.archived === true;
 
   // ── toolbar ──
   const bar = el('div', 'sessions-bar');
@@ -61,7 +66,9 @@ function createSessionsWindow(body, ctx, daemon) {
   const refresh = button('sessions-icon-btn', '⟳');
   refresh.title = 'Refresh';
   refresh.setAttribute('aria-label', 'Refresh');
-  bar.append(search, sort, direction, refresh);
+  const archivedToggle = button('sessions-toggle', 'Archived');
+  archivedToggle.title = 'Show archived sessions instead';
+  bar.append(search, sort, direction, archivedToggle, refresh);
   const status = el('p', 'sessions-status');
   status.setAttribute('aria-live', 'polite');
   const list = el('ul', 'sessions-list');
@@ -74,6 +81,8 @@ function createSessionsWindow(body, ctx, daemon) {
   let byFile = new Map();
   /** @type {string | null} */
   let error = null;
+  /** Why the last Archive or Restore failed, until the next one. @type {string | null} */
+  let moveError = null;
   let loading = false;
   let loaded = false;
   let requestSeq = 0;
@@ -104,7 +113,7 @@ function createSessionsWindow(body, ctx, daemon) {
     loading = true;
     drawStatus();
     try {
-      const next = await daemon.history(query());
+      const next = await daemon.history(query(), { archived: showArchived() });
       if (seq !== requestSeq) return;
       sessions = next;
       byFile = new Map(next.map((s) => [s.file, s]));
@@ -132,16 +141,34 @@ function createSessionsWindow(body, ctx, daemon) {
 
   /** @param {PastSession} s */
   function resume(s) {
-    if (openFiles().has(s.file)) return;
+    if (showArchived() || openFiles().has(s.file)) return;
     ctx.addWidget('omp', paneParams(s));
+  }
+
+  /**
+   * Archives or restores `s`, then lists again: the row moves to the other list.
+   * @param {PastSession} s @param {HTMLButtonElement} control
+   */
+  async function move(s, control) {
+    control.disabled = true;
+    moveError = null;
+    try {
+      await (showArchived() ? daemon.restorePastSession(s.file) : daemon.archivePastSession(s.file));
+    } catch (err) {
+      moveError = `Could not ${showArchived() ? 'restore' : 'archive'} “${displayTitle(s)}”: ${errorMessage(err)}`;
+      control.disabled = false;
+    }
+    await load();
   }
 
   /** @param {PastSession} s @param {boolean} open @param {number} now */
   function renderRow(s, open, now) {
-    const row = el('li', `sessions-item${open ? ' is-open' : ''}`);
+    const archived = showArchived();
+    const row = el('li', `sessions-item${open ? ' is-open' : ''}${archived ? ' is-archived' : ''}`);
     row.tabIndex = 0;
     row.dataset.file = s.file;
-    row.title = `${s.file}\nLast active ${new Date(s.modifiedAt).toLocaleString()}${open ? '\nOpen in a window' : '\nDrag onto the grid to resume'}`;
+    const hint = archived ? 'Archived: Restore to resume it' : open ? 'Open in a window' : 'Drag onto the grid to resume';
+    row.title = `${s.file}\nLast active ${new Date(s.modifiedAt).toLocaleString()}\n${hint}`;
     const main = el('div', 'sessions-main');
     main.append(el('div', 'sessions-title', displayTitle(s)));
     if (s.title && s.firstPrompt) main.append(el('div', 'sessions-preview', s.firstPrompt));
@@ -157,20 +184,29 @@ function createSessionsWindow(body, ctx, daemon) {
     if (open) meta.append(' ', el('span', 'sessions-badge', 'open'));
     main.append(meta);
     row.append(main);
-    if (!open) {
-      const resume = button('btn sessions-resume', 'Resume');
-      row.append(resume);
+    if (archived) {
+      row.append(button('btn sessions-restore', 'Restore'));
+    } else {
+      if (!open) row.append(button('btn sessions-resume', 'Resume'));
+      const archive = button('btn sessions-archive', 'Archive');
+      if (open) {
+        archive.disabled = true;
+        archive.title = 'Open in a window: close it to archive it';
+      }
+      row.append(archive);
     }
     return row;
   }
 
   function drawStatus() {
     const shown = sessions.length;
-    status.classList.toggle('is-error', error !== null);
+    const kind = showArchived() ? 'archived session' : 'session';
+    status.classList.toggle('is-error', error !== null || moveError !== null);
     if (error) status.textContent = `Could not list sessions: ${error}`;
+    else if (moveError) status.textContent = moveError;
     else if (!loaded) status.textContent = 'Loading sessions…';
-    else if (shown === 0) status.textContent = query() ? 'No session matches.' : 'No past sessions yet.';
-    else status.textContent = `${shown} session${shown === 1 ? '' : 's'}${loading ? ' · refreshing…' : ''}`;
+    else if (shown === 0) status.textContent = query() ? 'No session matches.' : showArchived() ? 'No archived sessions.' : 'No past sessions yet.';
+    else status.textContent = `${shown} ${kind}${shown === 1 ? '' : 's'}${loading ? ' · refreshing…' : ''}`;
   }
 
   function draw() {
@@ -178,6 +214,8 @@ function createSessionsWindow(body, ctx, daemon) {
     const dir = sortDir();
     direction.textContent = dir === 'asc' ? '↑' : '↓';
     direction.title = `${dir === 'asc' ? 'Ascending' : 'Descending'}: click to reverse`;
+    archivedToggle.setAttribute('aria-pressed', String(showArchived()));
+    list.setAttribute('aria-label', showArchived() ? 'Archived sessions' : 'Past sessions');
     drawStatus();
 
     const open = openFiles();
@@ -188,7 +226,7 @@ function createSessionsWindow(body, ctx, daemon) {
       live.add(s.file);
       const isOpen = open.has(s.file);
       // Rows are kept by file so a refresh does not steal focus from the one being used.
-      const signature = JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), isOpen, home]);
+      const signature = JSON.stringify([s.title, s.firstPrompt, s.cwd, s.prompts, relativeTime(s.modifiedAt, now), isOpen, home, showArchived()]);
       let entry = rows.get(s.file);
       if (!entry || entry.signature !== signature) {
         const node = renderRow(s, isOpen, now);
@@ -222,13 +260,15 @@ function createSessionsWindow(body, ctx, daemon) {
   list.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
     const s = sessionAt(event.target);
-    if (!s || openFiles().has(s.file)) return;
+    if (!s || showArchived() || openFiles().has(s.file)) return;
     ctx.dragWidget('omp', paneParams(s), event, { label: displayTitle(s) });
   });
   list.addEventListener('click', (event) => {
-    if (!(/** @type {Element} */ (event.target).closest('.sessions-resume'))) return;
+    const control = /** @type {Element} */ (event.target).closest('button');
     const s = sessionAt(event.target);
-    if (s) resume(s);
+    if (!control || !s) return;
+    if (control.classList.contains('sessions-resume')) resume(s);
+    else if (control.classList.contains('sessions-archive') || control.classList.contains('sessions-restore')) void move(s, control);
   });
   list.addEventListener('dblclick', (event) => {
     const s = sessionAt(event.target);
@@ -267,6 +307,16 @@ function createSessionsWindow(body, ctx, daemon) {
     draw();
   });
   refresh.addEventListener('click', () => void load());
+  archivedToggle.addEventListener('click', () => {
+    ctx.setParams({ archived: !showArchived() });
+    // The other list's rows are not these; show none until it arrives.
+    sessions = [];
+    byFile = new Map();
+    loaded = false;
+    moveError = null;
+    draw();
+    void load();
+  });
 
   const offSessions = daemon.onSessions(draw);
   const offStatus = daemon.onStatus((s) => {

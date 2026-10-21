@@ -6,7 +6,13 @@
  *
  *   GET    /api/config                 → DaemonConfig
  *   GET    /api/ui                     → { version }: the UI files' version now (see `ui-files.js`)
- *   GET    /api/history?q=words        → { sessions: PastSession[] } (unordered; every word must match)
+ *   GET    /api/history?q=words&archived=1 → { sessions: PastSession[] } (unordered; every word must
+ *                                      match; `archived=1` lists the archived sessions instead)
+ *   POST   /api/history/archive        { file } → { file }: the journal (with its folder) moved from omp's
+ *                                      sessions into the archive, 409 while a session writes it
+ *   POST   /api/history/restore        { file } → { file }: an archived journal moved back where it was,
+ *                                      409 if something is there now; both are 400 for a path that is
+ *                                      not a journal they list, 404 for one that is gone
  *   GET    /api/sessions               → { sessions: SessionMeta[] }
  *   POST   /api/sessions               { cwd, resume? | fork? } → 201 { session: SessionMeta }
  *                                      (`resume` continues a journal, `fork` starts a new session

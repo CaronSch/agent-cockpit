@@ -1,10 +1,11 @@
-// Behaviour tests for the Sessions window: listing, search, sort, and resuming a past session
-// into a new omp window, against the real daemon reading journals from E2E_OMP_SESSIONS.
+// Behaviour tests for the Sessions window: listing, search, sort, resuming a past session
+// into a new omp window, and archiving, against the real daemon reading journals from
+// E2E_OMP_SESSIONS.
 import { test, expect } from '@playwright/test';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { E2E_OMP_SESSIONS, newWorkspace, workbenchPath } from './daemon.js';
+import { E2E_OMP_SESSIONS, E2E_STATE_DIR, newWorkspace, workbenchPath } from './daemon.js';
 
 /** @typedef {import('@playwright/test').Page} Page */
 /** @typedef {import('@playwright/test').Locator} Locator */
@@ -26,12 +27,14 @@ const JOURNALS = [
 ];
 /** @param {string} name */
 const fileOf = (name) => join(E2E_OMP_SESSIONS, '-e2e-project', `2026-10-01_${name}.jsonl`);
+const ARCHIVE = join(E2E_STATE_DIR, 'archive', 'sessions');
 
 /** @type {string[]} */
 let problems = [];
 
 test.beforeEach(async ({ page }) => {
   rmSync(E2E_OMP_SESSIONS, { recursive: true, force: true });
+  rmSync(ARCHIVE, { recursive: true, force: true });
   mkdirSync(join(E2E_OMP_SESSIONS, '-e2e-project'), { recursive: true });
   for (const j of JOURNALS) {
     const lines = [
@@ -202,4 +205,40 @@ test('a session whose directory is gone says so instead of starting omp somewher
   await expect(pane.getByRole('button', { name: 'New session' })).toBeVisible();
   // A failed request logs a console error in the browser; that is the expected outcome here.
   problems = problems.filter((p) => !p.includes('400'));
+});
+
+test('Archive hides a session from the list (and from omp), Archived lists it, and Restore puts it back', async ({ page }) => {
+  mkdirSync(fileOf('zebra').replace(/\.jsonl$/, ''));
+  writeFileSync(join(fileOf('zebra').replace(/\.jsonl$/, ''), 'Explorer.jsonl'), '');
+  const window = await addSessionsWindow(page);
+  await row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' }).click();
+  await expect(titles(window)).toHaveText(['deploy staging', 'Fix the login flow']);
+  expect(existsSync(fileOf('zebra')), 'gone from where omp resumes sessions').toBe(false);
+  expect(existsSync(join(ARCHIVE, '-e2e-project', '2026-10-01_zebra', 'Explorer.jsonl')), 'kept, folder and all').toBe(true);
+
+  const toggle = window.getByRole('button', { name: 'Archived' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(titles(window)).toHaveText(['Zebra cleanup']);
+  await expect(window.locator('.sessions-status')).toHaveText('1 archived session');
+  const archived = row(window, 'Zebra cleanup');
+  await expect(archived.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+  await archived.dblclick();
+  await settle(page);
+  await expect(page.locator('.widget[data-widget="omp"]'), 'an archived session does not resume').toHaveCount(0);
+
+  await archived.getByRole('button', { name: 'Restore' }).click();
+  await expect(window.locator('.sessions-status')).toHaveText('No archived sessions.');
+  await toggle.click();
+  await expect(titles(window)).toHaveText(['Zebra cleanup', 'deploy staging', 'Fix the login flow']);
+  expect(existsSync(join(fileOf('zebra').replace(/\.jsonl$/, ''), 'Explorer.jsonl'))).toBe(true);
+});
+
+test('a session open in a window cannot be archived, and says why', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  const archive = row(window, 'deploy staging').getByRole('button', { name: 'Archive' });
+  await expect(archive).toBeDisabled();
+  await expect(archive).toHaveAttribute('title', /close it to archive it/);
+  await expect(row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' })).toBeEnabled();
 });

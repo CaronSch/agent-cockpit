@@ -37,7 +37,9 @@ export class DaemonError extends Error {
  *   meta(session: string): SessionMeta | null,
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
- *   history(query?: string): Promise<PastSession[]>,
+ *   history(query?: string, options?: { archived?: boolean }): Promise<PastSession[]>,
+ *   archivePastSession(file: string): Promise<string>,
+ *   restorePastSession(file: string): Promise<string>,
  *   scratchpads(): Promise<ScratchpadSummary[]>,
  *   scratchpad(id: string): Promise<Scratchpad>,
  *   saveScratchpad(id: string, text: string, base: string, options?: { keepalive?: boolean }): Promise<ScratchpadSave>,
@@ -283,9 +285,16 @@ export function createDaemonClient(env = {}) {
       sessionListeners.add(fn);
       return () => sessionListeners.delete(fn);
     },
-    async history(query = '') {
-      const body = await request(`/api/history${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+    async history(query = '', { archived = false } = {}) {
+      const params = new URLSearchParams({ ...(query ? { q: query } : {}), ...(archived ? { archived: '1' } : {}) });
+      const body = await request(`/api/history${params.size ? `?${params}` : ''}`);
       return body.sessions;
+    },
+    async archivePastSession(file) {
+      return (await request('/api/history/archive', { method: 'POST', body: JSON.stringify({ file }) })).file;
+    },
+    async restorePastSession(file) {
+      return (await request('/api/history/restore', { method: 'POST', body: JSON.stringify({ file }) })).file;
     },
     async scratchpads() {
       return (await request('/api/scratchpads')).pads;

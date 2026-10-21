@@ -70,6 +70,20 @@ is newer. The daemon prints its version at start.
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
+- **Archiving leans on omp's session layout, and `omp gc` cannot see the archive.**
+  Archive moves `<project>/<name>.jsonl` and the `<project>/<name>/` folder beside it
+  (subagent sessions, artifacts), the same pair omp's own `omp gc` archive moves; the
+  inert `.<name>.jsonl.lock.os` sidecar stays. If omp starts keeping more per session
+  elsewhere, an archived session leaves that behind. And `omp gc --apply` keeps only
+  blobs (`blob:sha256:` references, e.g. large images) that journals in omp's sessions
+  or its own archive name, so it may delete blobs a session archived here still uses:
+  restored, it would show those as missing. `omp gc` never runs by itself. Archiving
+  checks only the daemon's own sessions, so a session open in omp in another terminal
+  can be archived; that omp then writes on into the moved file or starts a new one at
+  the old path (nothing is lost, but the conversation may be split). *Response:* re-read `cli/gc-cli.ts` (`moveSessionWithArtifacts`,
+  `runBlobGc`) and `session/session-storage.ts`; if blobs matter, register archived
+  journals with omp or archive into omp's own `archive/sessions/`.
+
 - **Attachments, `@` mentions, Ask, Fork, `!` commands, the responses-only view, window names and todo progress lean on omp internals.** Attachments rely on `@"<absolute path>"` mentions
   being read when a prompt starts a turn; `@` mentions typed in the draft also rely on a
   bare `@path` ending at whitespace or `@`, with quotes, brackets and sentence

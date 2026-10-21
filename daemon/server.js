@@ -5,6 +5,7 @@
 import { homedir } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
+import { MoveRefused } from './history.js';
 import { SessionNotRunning } from './omp-session.js';
 import { listDirectory } from './files.js';
 import { PAD_ID } from '../src/scratchpad/blocks.js';
@@ -12,7 +13,7 @@ import { SCREEN_ID, WORKSPACE_NAME } from '../src/workspace/model.js';
 import { isValidTree } from '../src/layout/grid-model.js';
 import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-files.js';
 /** @import { BunRequest, Server } from 'bun' */
-/** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
+/** @import { DaemonConfig, Scratchpad, SessionEvent, SessionMeta } from './wire.js' */
 /** @import { Hub } from './hub.js' */
 /** @typedef {ReturnType<typeof import('./history.js').createHistory>} History */
 /** @typedef {ReturnType<typeof import('./scratchpad.js').createScratchpads>} Scratchpads */
@@ -97,7 +98,7 @@ function lastSeenSeq(header, bootId) {
 
 /** @param {unknown} err */
 function errorResponse(err) {
-  const status = err instanceof HttpError ? err.status : err instanceof SessionNotRunning ? 409 : 500;
+  const status = err instanceof HttpError || err instanceof MoveRefused ? err.status : err instanceof SessionNotRunning ? 409 : 500;
   if (status === 500) console.error('[daemon]', err);
   return json({ error: err instanceof Error ? err.message : String(err) }, status);
 }
@@ -226,7 +227,22 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
       '/api/stream': api({ GET: stream }),
       '/api/config': api({ GET: () => json(config) }),
       '/api/ui': api({ GET: async () => json({ version: await uiVersion.current() }) }),
-      '/api/history': api({ GET: async (req) => json({ sessions: await history.list(new URL(req.url).searchParams.get('q') ?? '') }) }),
+      '/api/history': api({
+        GET: async (req) => {
+          const params = new URL(req.url).searchParams;
+          return json({ sessions: await history.list(params.get('q') ?? '', { archived: params.get('archived') === '1' }) });
+        },
+      }),
+      '/api/history/archive': api({
+        POST: async (req) => {
+          const { file } = (await readJson(req)) ?? {};
+          const writing = (/** @type {SessionMeta} */ m) => m.status === 'starting' || m.status === 'ready';
+          const open = typeof file === 'string' && hub.list().some((m) => writing(m) && m.sessionFile === resolve(file));
+          if (open) throw new HttpError(409, 'the session is open in a window; close it to archive it');
+          return json({ file: await history.archive(file) });
+        },
+      }),
+      '/api/history/restore': api({ POST: async (req) => json({ file: await history.restore((await readJson(req))?.file) }) }),
       '/api/scratchpads': api({ GET: async () => json({ pads: await scratchpads.list() }) }),
       '/api/scratchpads/:id': api({
         GET: async (req) => json(await scratchpads.read(padOf(req))),
