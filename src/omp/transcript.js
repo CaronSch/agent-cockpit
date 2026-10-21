@@ -535,6 +535,9 @@ function applySent(state, command) {
     });
   } else if (command?.type === 'extension_ui_response' && typeof command.id === 'string') {
     state.dialogs = state.dialogs.filter((d) => d.id !== command.id);
+  } else if (command?.type === 'login') {
+    // omp answers a login only once it is done: say what is under way meanwhile.
+    note(state, 'muted', 'login', `Logging in to ${String(command.providerId ?? 'a provider')}…`);
   }
   // Every other command shows up through omp's own frames (messages, responses).
 }

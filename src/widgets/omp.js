@@ -680,11 +680,7 @@ function createPane(body, ctx, daemon) {
             label: String(p?.name ?? p?.id),
             detail: p?.authenticated ? '✓ logged in' : undefined,
             current: Boolean(p?.authenticated),
-            pick: () => {
-              addNote(state, 'muted', 'login', `Logging in to ${p?.name ?? p?.id}…`);
-              schedule();
-              void rpc({ type: 'login', providerId: p?.id });
-            },
+            pick: () => void rpc({ type: 'login', providerId: p?.id }),
           })),
       { filter: true },
     );

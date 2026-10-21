@@ -463,6 +463,16 @@ test('the toolbar menus open under their button, close on Esc or a click outside
   await expect(thinkingBtn).toHaveText(/high/);
 });
 
+test('a login under way is shown from the stream, so a reload still shows it', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await pane.getByRole('button', { name: 'Login', exact: true }).click();
+  await pane.locator('.omp-menu:popover-open').getByRole('button', { name: /Fake Provider/ }).click();
+  await expect(pane.getByText('Logging in to fake…')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('.widget[data-widget="omp"]').getByText('Logging in to fake…')).toBeVisible();
+});
+
 test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

@@ -212,6 +212,11 @@ describe('notes', () => {
     assert.equal(state.lastError, 'no model');
   });
 
+  test('a login under way is a note, from the command the daemon sent', () => {
+    const state = run([sent({ type: 'login', providerId: 'anthropic', id: 'ac_7' })]);
+    assert.ok(state.items[0].kind === 'note' && state.items[0].text === 'Logging in to anthropic…');
+  });
+
   test('the pane can add its own notes', () => {
     const state = createTranscript();
     addNote(state, 'error', 'daemon', 'unreachable');
