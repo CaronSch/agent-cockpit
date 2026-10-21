@@ -58,7 +58,7 @@ export function renderItem(item, ctx) {
       return node;
     }
     case 'note': {
-      // A slash command's output is the answer to what the user just asked: show it open.
+      // A slash command's multi-line output is the answer to what was asked: show it open.
       if (item.source === 'command' && item.detail) return el('pre', 'omp-pre omp-command-output', item.detail);
       const cls = `omp-note is-${item.level}${item.hidden ? ' is-hidden' : ''}`;
       const label = [item.source, item.text].filter(Boolean).join(': ');

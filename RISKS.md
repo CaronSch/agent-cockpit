@@ -49,7 +49,7 @@ is newer. The daemon prints its version at start.
   `get_state`, models, thinking levels, login providers, `bash`, aborts,
   builtin `/rename` (with no title, omp generates one in the background, so the
   fake answers first and reports the outcome after; that order follows 18.12.3's
-  source), the start of a `btw`, failed prompts and `--resume`. The
+  source), `/dirs` (its output shape from 18.12.3's source), the start of a `btw`, failed prompts and `--resume`. The
   frames of a turn a model actually answers (a pre-filled assistant
   `message_start`, deltas, tool calls, `ask` dialogs, `btw_delta`, follow-up `btw`
   turns, a generated title) were checked against 18.12.3's source only, because no
@@ -62,6 +62,16 @@ is newer. The daemon prints its version at start.
   re-record a session with the real omp (with a working model, so those turn
   frames are recorded too), diff its frame and message types against the fake,
   update the fake and this version number.
+
+- **Auto-titles lean on omp's `/rename` and `session_settled`.** After the first turn
+  of an untitled session the daemon sends `/rename` with no title, once. That relies on
+  omp generating a title for it in the background in RPC mode (and reporting it with
+  `session_info_update`), and on `session_settled` following only agent activity, so
+  the first one ends the first turn. A change shows up as sessions that stay untitled
+  (they keep showing their first prompt) or a title asked for before the conversation
+  says anything. *Response:* re-read omp's `slash-commands/builtin-lifecycle.ts`
+  (`rename`) and `modes/rpc/rpc-session-settle.ts`, then update `daemon/omp-session.js`
+  and the fake.
 
 - **The Sessions window reads omp's private journal format.** `daemon/history.js`
   parses `~/.omp/agent/sessions/<project>/*.jsonl` directly (the `title` and

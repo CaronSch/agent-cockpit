@@ -19,6 +19,7 @@
  * - `/rename [title]`: like omp's builtin, names the session (with no title, from the first
  *   prompt that says something: "hi" alone is too little to name a session by; that
  *   outcome follows the answer, as omp's background title generation does)
+ * - `/dirs`: like omp's builtin, lists the workspace directories (output of several lines)
  * - `btw`: a side question, answered from the conversation and kept out of it as omp's is;
  *   the answer bolds the first quoted line; a follow-up (`recordId`) appends a turn to its
  *   topic and answers from the topic's quote. A question containing "slow" waits 1.5 s, one
@@ -329,6 +330,7 @@ out({
       source: 'builtin',
     },
     { name: 'rename', description: 'Rename the current session (omit title to generate)', input: { hint: '[title]' }, source: 'builtin' },
+    { name: 'dirs', description: "List this session's workspace directories", source: 'builtin' },
   ],
 });
 
@@ -410,6 +412,10 @@ lines.on('line', (line) => {
       return ok(id, type, { steering: [], followUp: [] });
     case 'prompt':
       if (/^\/rename(\s|$)/.test(cmd.message)) return rename(id, cmd.message.slice('/rename'.length).trim());
+      if (cmd.message.trim() === '/dirs') {
+        out({ type: 'command_output', text: `Workspace directories:\n  ${process.cwd()} (working directory)` });
+        return ok(id, type, { agentInvoked: false });
+      }
       ok(id, type);
       return void runPrompt(id, cmd.message);
     default:

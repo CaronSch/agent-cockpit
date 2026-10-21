@@ -490,17 +490,32 @@ describe('sessions', () => {
     return forSession(hub.since(0), id);
   }
 
-  test('the daemon never names a session by itself: after a turn it only asks for the state', async () => {
+  /** @param {SessionEvent[]} log @returns {string[]} what the daemon sent after the log's first prompt */
+  const sentAfterPrompt = (log) =>
+    log.slice(log.findIndex((e) => e.kind === 'sent' && e.command.type === 'prompt')).flatMap((e) => (e.kind === 'sent' ? [String(e.command.message ?? e.command.type)] : []));
+
+  test('after the first turn of a session with no name the daemon asks omp for a title, once', async () => {
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
     const id = json.session.id;
     await waitForStatus(id, 'ready');
-    const log = await turn(id, 'fix the login bug');
-    const after = log.slice(log.findIndex((e) => e.kind === 'sent' && e.command.type === 'prompt'));
+    const from = hub.since(0).length;
     assert.deepEqual(
-      after.flatMap((e) => (e.kind === 'sent' ? [e.command.type] : [])),
-      ['prompt', 'get_state', 'get_state'],
-      'the daemon’s state refresh after the turn, then the test’s own',
+      sentAfterPrompt(await turn(id, 'hi')),
+      ['hi', 'get_state', '/rename', 'get_state'],
+      'the state refresh after the turn, the title request, then the test’s own get_state',
     );
+    await logged((e) => e.seq > from && e.session === id && e.kind === 'frame' && e.frame.type === 'command_output');
+    assert.equal(hub.since(from).filter((e) => e.session === id && e.kind === 'frame' && e.frame.type === 'session_info_update').length, 0, '"hi" is too little to name');
+    const log = await turn(id, 'fix the login bug');
+    assert.equal(sentAfterPrompt(log).filter((m) => m === '/rename').length, 1, 'a failed title is not asked for again');
+  });
+
+  test('a session that already has a name is never asked for a title', async () => {
+    const journal = join(cwd, 'titled.jsonl');
+    await Bun.write(journal, '');
+    const id = (await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } })).json.session.id;
+    await waitForStatus(id, 'ready');
+    assert.deepEqual(sentAfterPrompt(await turn(id, 'fix the login bug')), ['fix the login bug', 'get_state', 'get_state']);
   });
 
   test('a missing omp binary fails the session with the reason instead of hanging', async () => {
