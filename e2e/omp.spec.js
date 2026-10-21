@@ -1162,6 +1162,16 @@ test('after the first turn the daemon titles the session, and one line of comman
   // Output of several lines is the answer to read, shown open.
   await send(pane, '/dirs');
   await expect(pane.locator('.omp-command-output')).toContainText(/^Workspace directories:\n {2}\S.* \(working directory\)$/);
+
+  // The title is the session's, not the window's: with its window closed, the session runs
+  // on and a Sessions window opened afterwards lists it under that title.
+  const session = (await savedParams(page, workspace, pane))?.session;
+  await pane.locator('.widget-close').click();
+  await page.locator('#palette-toggle').click();
+  await page.locator('#palette [data-type="sessions"]').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator(`.sessions-running .sessions-item[data-session="${session}"] .sessions-title`)).toHaveText('About fix the login bug');
+  await stopSession(page, session);
 });
 
 test('Up and Down in the message box step through what was sent, as in a shell', async ({ page }) => {
