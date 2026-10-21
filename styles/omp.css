@@ -16,7 +16,7 @@
 /* The conversation reads like a terminal: one size and leading for every transcript item. */
 .omp-transcript,
 .omp-draft {
-  font: var(--text-md) / var(--leading-read) var(--font-mono);
+  font: var(--text-sm) / var(--leading-read) var(--font-mono);
 }
 
 .omp [hidden] {
