@@ -4,8 +4,9 @@
  *
  * Search runs in the daemon (every word must match the title, directory or a prompt); sorting
  * runs here, and so does narrowing to one directory. The query, directory and sort order are
- * this window's own settings, so two Sessions windows can show different slices. A session already open in a window is marked and cannot be
- * resumed a second time: omp would fork it rather than share it.
+ * this window's own settings, so two Sessions windows can show different slices. A session
+ * already open in a window is marked and cannot be resumed a second time: omp would fork it
+ * rather than share it.
  *
  * Archive moves a session out of omp's sessions into the daemon's archive (omp's own resume
  * no longer offers it); "Archived" switches the window to the archived sessions, each with
@@ -288,9 +289,10 @@ function createSessionsWindow(body, ctx, daemon) {
     return row ? (byFile.get(row.dataset.file ?? '') ?? null) : null;
   };
 
-  // A row drags out from anywhere on it, its Resume button included; a click on Resume opens it beside the list.
+  // A row drags out from anywhere on it, its Resume button included (a click on Resume opens it
+  // beside the list); Archive only archives.
   list.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive')) return;
     const s = sessionAt(event.target);
     if (!s || showArchived() || openFiles().has(s.file)) return;
     ctx.dragWidget('omp', paneParams(s), event, { label: displayTitle(s) });

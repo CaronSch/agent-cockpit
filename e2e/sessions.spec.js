@@ -234,6 +234,20 @@ test('Archive hides a session from the list (and from omp), Archived lists it, a
   expect(existsSync(join(fileOf('zebra').replace(/\.jsonl$/, ''), 'Explorer.jsonl'))).toBe(true);
 });
 
+test('Archive does not drag the session out: pressed and moved onto the grid, it opens nothing', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  const from = await row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' }).boundingBox();
+  const grid = await page.locator('#grid').boundingBox();
+  if (!from || !grid) throw new Error('nothing to drag');
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
+  await expect(page.locator('.drop-indicator')).not.toHaveClass(/is-visible/);
+  await page.mouse.up();
+  await settle(page);
+  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(0);
+});
+
 test('a session open in a window cannot be archived, and says why', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
