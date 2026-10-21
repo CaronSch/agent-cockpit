@@ -142,6 +142,30 @@ test('a streamed reply renders once, as markdown, even though omp pre-fills mess
   await expect(pane.getByText('idle')).toBeVisible();
 });
 
+test('the conversation reads like a terminal: no "you" label, one font for the whole app', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const user = pane.locator('.omp-user').last();
+  await expect(user).toHaveText('hello');
+  await expect(user.locator('.omp-role')).toHaveCount(0);
+  const reply = pane.locator('.omp-assistant').last().locator('.omp-md > p').first();
+  await expect(reply).toContainText('You said');
+  /** @param {import('@playwright/test').Locator} at */
+  const font = (at) => at.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { family: style.fontFamily, size: style.fontSize };
+  });
+  const box = pane.locator('textarea');
+  const text = await font(reply);
+  expect(text.family).toMatch(/^"IBM Plex Mono"/);
+  expect(await font(user.locator('.omp-md p'))).toEqual(text);
+  expect(await font(box)).toEqual(text);
+  for (const chrome of [pane.locator('.widget-title'), pane.getByRole('button', { name: 'Send' }), page.locator('#palette-toggle')]) {
+    expect((await font(chrome)).family).toBe(text.family);
+  }
+});
+
 test('a markdown table in a reply renders as a table, not as pipes', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
@@ -151,6 +175,39 @@ test('a markdown table in a reply renders as a table, not as pipes', async ({ pa
   await expect(table.locator('tbody td')).toHaveText(['Now', 'Stuff happened', 'tracked.rs:67']);
   await expect(table.locator('tbody td code')).toHaveText('tracked.rs:67');
   await expect(pane.locator('.omp-assistant').last()).not.toContainText('|');
+});
+
+test('a table wider than the pane scrolls by itself; the reply around it wraps at the pane width, a line apart', async ({ page }) => {
+  await openWorkbench(page);
+  await page.setViewportSize({ width: 480, height: 800 });
+  const pane = await startedPane(page);
+  await send(pane, 'show me a wide table');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('.md-table')).toBeVisible();
+
+  const sizes = await pane.locator('.omp-transcript').evaluate((transcript) => {
+    const md = /** @type {HTMLElement} */ ([...transcript.querySelectorAll('.omp-assistant .omp-md')].at(-1));
+    const wrap = /** @type {HTMLElement} */ (md.querySelector('.md-table-wrap'));
+    /** The right edge of the furthest-reaching line of text in `node`. @param {Node} node */
+    const textRight = (node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return Math.max(...[...range.getClientRects()].map((r) => r.right));
+    };
+    const block = (/** @type {string} */ selector) => /** @type {HTMLElement} */ (md.querySelector(selector)).getBoundingClientRect();
+    return {
+      overflow: transcript.scrollWidth - transcript.clientWidth,
+      textRight: Math.max(...[...md.querySelectorAll('p, li')].map(textRight)),
+      paneRight: transcript.getBoundingClientRect().right - parseFloat(getComputedStyle(transcript).paddingRight),
+      tableOverflow: wrap.scrollWidth - wrap.clientWidth,
+      tableToList: block('ul').top - block('.md-table-block').bottom,
+      line: parseFloat(getComputedStyle(md).lineHeight),
+    };
+  });
+  expect(sizes.overflow, 'the transcript never scrolls sideways').toBeLessThanOrEqual(0);
+  expect(sizes.textRight, 'reply text wraps inside the pane').toBeLessThanOrEqual(sizes.paneRight + 0.5);
+  expect(sizes.tableOverflow, 'the table scrolls inside its wrapper').toBeGreaterThan(0);
+  expect(sizes.tableToList, 'a blank line between the table and the list after it').toBeCloseTo(sizes.line, 0);
 });
 
 test('a markdown table copies as Markdown, as CSV, and as a PNG image of the table', async ({ page, context }) => {

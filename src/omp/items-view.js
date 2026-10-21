@@ -21,7 +21,8 @@ export function renderItem(item, ctx) {
   switch (item.kind) {
     case 'user': {
       const node = el('div', `omp-msg omp-user${item.byAgent ? ' is-agent' : ''}`);
-      node.append(el('div', 'omp-role', item.byAgent ? 'agent → omp' : 'you'));
+      // The user's own prompts need no label (the band and prompt mark say it); another agent's do.
+      if (item.byAgent) node.append(el('div', 'omp-role', 'agent → omp'));
       const body = el('div', 'omp-md');
       body.append(renderMarkdown(item.text));
       if (item.images) body.append(statusLine('muted', `[${item.images} image${item.images === 1 ? '' : 's'}]`));
@@ -122,7 +123,7 @@ function toolCard(id, block, run, ctx) {
 
 /**
  * A status line inside an item (how a reply ended, an exit code, an error), styled as a
- * transcript note so the transcript keeps one font for everything but message prose.
+ * transcript note.
  * @param {'muted' | 'error'} level @param {string} text @param {'div' | 'span'} [tag]
  */
 const statusLine = (level, text, tag = 'div') => el(tag, `omp-note is-${level}`, text);
