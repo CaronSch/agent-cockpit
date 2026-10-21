@@ -127,7 +127,9 @@ What runs today:
   replied. Dragging **Send** onto the grid does the same, placed where it is
   dropped, and sends the message there instead (the box empties once the fork is
   placed; a click still sends here). The message box starts one line high, set like
-  scratchpad text, and grows with the prompt; Tab indents by two spaces as in a code
+  scratchpad text, and grows with the prompt; a plain click anywhere else in the pane
+  (not on a control, in a dialog omp asked for, or ending a text selection) puts the caret
+  at its end without scrolling, as in a terminal (`src/ui/click-focus.js`); Tab indents by two spaces as in a code
   editor (every selected line; Shift+Tab outdents; Cmd/Ctrl+Z undoes it) unless a
   suggestion list is open, and Esc then Tab leaves the box (`src/ui/indent.js`); Up
   in an empty box steps back through the conversation's prompts and `!` commands
@@ -368,6 +370,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/sessions/running.js` — The daemon's running sessions as the Sessions window lists them, kept free of the DOM so they can be tested: which sessions run, in what order, how each is doing, and what an omp window is given to show one.
 - `src/state/atom.js` — Tiny observable cell: get/set/subscribe.
 - `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
+- `src/ui/click-focus.js` — Click-to-focus, as in a terminal: a plain click on a window's own surface puts the caret at the end of its main text box, while clicks on controls, in boxes of their own, and those that end a text selection do what they did before.
 - `src/ui/confirm.js` — Asking before an action that cannot be undone: a small popover beside the button that asked for it, saying what will happen, with the action and Cancel (Esc or a click elsewhere cancel too).
 - `src/ui/dom.js` — Element construction helpers: elements, buttons that never submit a form, and file-drag checks.
 - `src/ui/format.js` — Text formatters shared across the UI: error messages, home-relative paths and JSON dumps, with no DOM.

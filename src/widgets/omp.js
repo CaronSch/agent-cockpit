@@ -31,6 +31,7 @@ import { promptsAndResponses } from '../omp/visibility.js';
 import { turnProgress } from '../omp/todos.js';
 import { createPromptHistory, sentPrompts } from '../omp/prompt-history.js';
 import { confirmBeside } from '../ui/confirm.js';
+import { focusOnClick } from '../ui/click-focus.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -494,6 +495,9 @@ function createPane(body, ctx, daemon) {
       },
     });
     node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, queue, suggestions.root, composer.root);
+    // A click on the pane that is not on a control, in a dialog omp asked for or in the
+    // selection popup puts the caret in the message box, as in a terminal.
+    focusOnClick(node, draft, '.omp-dialogs, .omp-quote-pop');
 
     const meta = () => state.meta ?? daemon.meta(session);
     const ready = () => meta()?.status === 'ready';
