@@ -59,9 +59,11 @@
 }
 
 .omp-field:focus-visible,
-.omp-draft:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
+.omp-draft:focus-visible,
+.omp-quote-input:focus-visible,
+.omp-card-input:focus-visible {
+  outline: none;
+  border-color: var(--color-line-focus);
 }
 
 .omp-pre {
@@ -1137,12 +1139,6 @@
   background: var(--color-deck);
   color: var(--color-text);
   font: var(--text-sm) / 1.45 var(--font-mono);
-}
-
-.omp-quote-input:focus-visible,
-.omp-card-input:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
 }
 
 .omp-cards {

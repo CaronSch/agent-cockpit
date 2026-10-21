@@ -10,6 +10,8 @@
   --color-surface-raised: oklch(24.5% 0.01 270);
   --color-line: oklch(30% 0.01 270);
   --color-line-strong: oklch(38% 0.012 270);
+  /* A text field being typed in: its border lifts, quieter than the accent outline. */
+  --color-line-focus: oklch(60% 0.012 270);
 
   /* Text */
   --color-text: oklch(100% 0 0);

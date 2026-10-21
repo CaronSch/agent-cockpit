@@ -92,7 +92,12 @@
   color: var(--color-text);
 }
 
-:is(.sessions-search, .sessions-sort, .sessions-icon-btn, .sessions-toggle, .sessions-action):focus-visible,
+.sessions-search:focus-visible {
+  outline: none;
+  border-color: var(--color-line-focus);
+}
+
+:is(.sessions-sort, .sessions-icon-btn, .sessions-toggle, .sessions-action):focus-visible,
 .sessions-item:focus-visible {
   outline: 1px solid var(--color-unread);
   outline-offset: -1px;
