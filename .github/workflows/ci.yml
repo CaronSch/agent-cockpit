@@ -23,8 +23,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install unzip (setup-bun needs it; the image does not have it)
-        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
+      # The container runs as root on a checkout it does not own, which git refuses to touch
+      # (the prepare script sets the hooks path); setup-bun needs unzip, which the image lacks.
+      - name: Prepare the container
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
 
       - uses: oven-sh/setup-bun@v2
         with:
