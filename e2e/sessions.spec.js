@@ -373,7 +373,7 @@ test('Running lists every running session with how it is doing; a click shows it
   await second.locator('textarea').fill('slow');
   await second.locator('textarea').press('Enter');
   await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('working');
-  await expect(runningRow(window, fresh).locator('.sessions-title')).toHaveText('slow');
+  await expect(runningRow(window, fresh).locator('.sessions-title'), 'titled while the turn runs').toHaveText('About slow');
   await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('done', { timeout: 5000 });
   await expect(runningRow(window, fresh)).toHaveClass(/is-unread/);
   const { x, y } = await middleOf(second);
