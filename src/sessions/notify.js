@@ -19,6 +19,7 @@
  * browser.
  */
 import { button } from '../ui/dom.js';
+import { readPref, writePref } from '../ui/prefs.js';
 import { tildeHome } from '../ui/format.js';
 import { awaitsUser } from '../omp/activity.js';
 import { follow, followedName, isRunning, noteEvent, showRunning } from './running.js';
@@ -30,7 +31,7 @@ import { follow, followedName, isRunning, noteEvent, showRunning } from './runni
 /** What a notification says: the agent is done, or asks something (the question, if it gave one). @typedef {{ kind: 'done' | 'asking', question: string | null }} Alert */
 
 /** Where the choice is kept, per browser. */
-export const NOTIFY_KEY = 'cockpit.notify';
+const NOTIFY_KEY = 'cockpit.notify';
 /** How long after the event a notification waits, so a window being read can read it first. */
 const SETTLE_MS = 1000;
 
@@ -57,25 +58,6 @@ export const alertText = (alert) => (alert.kind === 'done' ? 'Finished' : alert.
  */
 export const watching = (page, session) => page.visible && page.focused && page.shown.has(session);
 
-/** @returns {boolean} */
-function stored() {
-  try {
-    return localStorage.getItem(NOTIFY_KEY) === 'on';
-  } catch {
-    return false;
-  }
-}
-
-/** @param {boolean} on */
-function store(on) {
-  try {
-    if (on) localStorage.setItem(NOTIFY_KEY, 'on');
-    else localStorage.removeItem(NOTIFY_KEY);
-  } catch {
-    // Not kept: it stays as chosen until the page reloads.
-  }
-}
-
 /**
  * @param {{
  *   daemon: DaemonClient,
@@ -86,7 +68,7 @@ function store(on) {
  */
 export function createNotifier({ daemon, shown, show }) {
   const supported = typeof Notification === 'function';
-  let on = supported && stored();
+  let on = supported && readPref(NOTIFY_KEY) === 'on';
   /** @type {string | null} */
   let home = null;
   daemon
@@ -117,7 +99,7 @@ export function createNotifier({ daemon, shown, show }) {
   async function toggle() {
     if (on && Notification.permission === 'granted') on = false;
     else on = (Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()) === 'granted';
-    store(on);
+    writePref(NOTIFY_KEY, on ? 'on' : null);
     draw();
   }
 

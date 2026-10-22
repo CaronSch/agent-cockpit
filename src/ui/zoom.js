@@ -7,6 +7,7 @@
  * nothing their ResizeObservers watch.
  */
 import { button, el } from './dom.js';
+import { readPref, writePref } from './prefs.js';
 
 const ZOOM_KEY = 'cockpit.zoom';
 export const MIN_ZOOM = 0.7;
@@ -22,24 +23,7 @@ export function parseZoom(value) {
   return value !== null && Number.isFinite(scale) && scale >= MIN_ZOOM && scale <= MAX_ZOOM ? scale : 1;
 }
 
-/** @returns {number} */
-function stored() {
-  try {
-    return parseZoom(localStorage.getItem(ZOOM_KEY));
-  } catch {
-    return 1;
-  }
-}
-
-/** @param {number} scale */
-function store(scale) {
-  try {
-    if (scale === 1) localStorage.removeItem(ZOOM_KEY);
-    else localStorage.setItem(ZOOM_KEY, String(scale));
-  } catch {
-    // Not kept: it stays as chosen until the page reloads.
-  }
-}
+const stored = () => parseZoom(readPref(ZOOM_KEY));
 
 /** @type {Set<() => void>} */
 const listeners = new Set();
@@ -76,7 +60,7 @@ export function createZoomControl() {
   function set(next) {
     scale = next;
     apply(scale);
-    store(scale);
+    writePref(ZOOM_KEY, scale === 1 ? null : String(scale));
     draw();
     for (const fn of listeners) fn();
   }
