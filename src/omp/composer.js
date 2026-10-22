@@ -1,11 +1,10 @@
 /**
  * The omp pane's message box: a draft that starts one line high and grows with its text up
  * to half the pane, cards for what goes with the next message (comments on quoted transcript
- * text, pasted text, files), and the Send button.
+ * text, files), and the Send button.
  *
- * A paste past omp's size limit becomes a text card (click to edit) instead of filling the
- * draft. Files pasted into it or dropped anywhere on the pane are stored by the daemon as they
- * arrive, and go with the message as omp file mentions. A draft starting with `!` is a shell
+ * Pasted text goes into the draft as typed. Files pasted into it or dropped anywhere on the
+ * pane are stored by the daemon as they arrive, and go with the message as omp file mentions. A draft starting with `!` is a shell
  * command: the box switches to shell mode (accent-coloured, marked with the directory it runs
  * in, Run for Send) and shows the cards as waiting, since a command goes without them. Tab
  * indents, as in a code editor (Esc then Tab leaves the box).
@@ -14,15 +13,15 @@ import { button, carriesFiles, el } from '../ui/dom.js';
 import { errorMessage } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
 import { tabIndent } from '../ui/indent.js';
-import { composeMessage, isLargePaste, shellCommand } from './message.js';
-/** @import { Attachment, QuoteComment } from './message.js' */
+import { composeMessage, shellCommand } from './message.js';
+/** @import { QuoteComment } from './message.js' */
 
 /**
  * A file card. `path` stays null until the daemon has stored the file; `stored` settles then
  * (a failed upload removes the card).
  * @typedef {{ kind: 'file', name: string, size: number, preview: string | null, path: string | null, stored: Promise<void> }} FileCard
  */
-/** One card above the draft. @typedef {({ kind: 'comment' } & QuoteComment) | { kind: 'text', number: number, text: string } | FileCard} Card */
+/** One card above the draft. @typedef {({ kind: 'comment' } & QuoteComment) | FileCard} Card */
 
 /** The draft never grows past this share of the pane, nor shrinks its cap below MIN_MAX_PX. */
 const MAX_SHARE = 0.5;
@@ -38,12 +37,6 @@ const excerpt = (text) => {
 /** @param {number} bytes */
 const size = (bytes) =>
   bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
-/** @param {string} text */
-const extent = (text) => {
-  const lines = text.replace(/\n+$/, '').split('\n').length;
-  return lines > 1 ? `+${lines} lines` : `${text.length} chars`;
-};
 
 /**
  * @param {{
@@ -79,7 +72,6 @@ export function createComposer({ pane, upload, onError, shellDir }) {
 
   /** @type {Card[]} */
   let items = [];
-  let pastes = 0;
   /** Whether the draft is a `!` shell command. */
   let shell = false;
   /** @type {Set<string>} */
@@ -98,18 +90,10 @@ export function createComposer({ pane, upload, onError, shellDir }) {
   resizes.observe(pane);
 
   draft.addEventListener('paste', (e) => {
-    const data = e.clipboardData;
-    if (!data) return;
-    if (data.files.length) {
-      e.preventDefault();
-      attachFiles([...data.files]);
-      return;
-    }
-    const text = data.getData('text/plain');
-    if (!isLargePaste(text)) return;
+    const files = e.clipboardData?.files;
+    if (!files?.length) return;
     e.preventDefault();
-    items = [...items, { kind: 'text', number: ++pastes, text }];
-    drawCards();
+    attachFiles([...files]);
   });
 
   /** @param {DragEvent} e */
@@ -193,17 +177,6 @@ export function createComposer({ pane, upload, onError, shellDir }) {
         }),
       );
       removeBtn.setAttribute('aria-label', 'Remove comment');
-    } else if (card.kind === 'text') {
-      main.title = 'Edit this text';
-      main.append(el('span', 'omp-card-quote', `Paste #${card.number} · ${extent(card.text)}`), el('span', 'omp-card-text', excerpt(card.text)));
-      main.addEventListener('click', () =>
-        openEditor({
-          label: `Edit paste #${card.number}`,
-          value: card.text,
-          onSave: (value) => (value.trim() ? replace(card, { ...card, text: value }) : remove(card)),
-        }),
-      );
-      removeBtn.setAttribute('aria-label', `Remove paste #${card.number}`);
     } else {
       view.classList.toggle('is-uploading', card.path === null);
       main.title = card.path ?? 'Uploading…';
@@ -254,8 +227,8 @@ export function createComposer({ pane, upload, onError, shellDir }) {
   }
 
   /**
-   * Opens the editor above the draft for one card's text.
-   * @param {{ label: string, quote?: string, value: string, onSave: (value: string) => void }} options
+   * Opens the editor above the draft for a comment.
+   * @param {{ label: string, quote: string, value: string, onSave: (value: string) => void }} options
    */
   function openEditor({ label, quote, value, onSave }) {
     const box = el('textarea', 'omp-card-input');
@@ -265,7 +238,7 @@ export function createComposer({ pane, upload, onError, shellDir }) {
     const cancel = button('btn', 'Cancel');
     const actions = el('div', 'omp-row');
     actions.append(save, cancel);
-    editor.replaceChildren(...(quote ? [el('blockquote', 'omp-quote-preview', quote)] : []), box, actions);
+    editor.replaceChildren(el('blockquote', 'omp-quote-preview', quote), box, actions);
     editor.hidden = false;
     const done = () => {
       closeEditor();
@@ -325,15 +298,14 @@ export function createComposer({ pane, upload, onError, shellDir }) {
       const taken = withCards ? items.filter((c) => c.kind !== 'file' || c.path !== null) : [];
       /** @type {QuoteComment[]} */
       const comments = [];
-      /** @type {Attachment[]} */
-      const attachments = [];
+      /** @type {string[]} */
+      const files = [];
       for (const card of taken) {
         if (card.kind === 'comment') comments.push({ quote: card.quote, comment: card.comment });
-        else if (card.kind === 'text') attachments.push({ kind: 'text', text: card.text });
-        else if (card.path) attachments.push({ kind: 'file', path: card.path });
+        else if (card.path) files.push(card.path);
       }
       return {
-        message: withCards ? composeMessage(text, comments, attachments) : text.trim(),
+        message: withCards ? composeMessage(text, comments, files) : text.trim(),
         take() {
           if (draft.value === text) draft.value = '';
           items = items.filter((c) => !taken.includes(c));
