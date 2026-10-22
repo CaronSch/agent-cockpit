@@ -268,7 +268,7 @@ test('another tab showing the same pad follows it as it is saved', async ({ page
   expect(await editorText(there)).toBe('typed in the first tab, and more');
 });
 
-test('Tab indents scratchpad text and saves it, Shift+Tab outdents, Cmd/Ctrl+Z undoes it; Esc then Tab leaves', async ({ page }) => {
+test('Tab indents scratchpad text and saves it, Backspace and Shift+Tab outdent, Cmd/Ctrl+Z undoes it; Esc then Tab leaves', async ({ page }) => {
   await openWorkbench(page);
   const window = await addScratchpad(page);
   const area = window.locator('.pad-text').first();
@@ -287,6 +287,12 @@ test('Tab indents scratchpad text and saves it, Shift+Tab outdents, Cmd/Ctrl+Z u
   await expect(window.locator('.scratchpad-status')).toHaveText('Saved');
   const file = await padFile(window);
   expect(readFileSync(file, 'utf8')).toBe('todo\n  first\nsecond');
+
+  // Backspace right after it takes the whole indent back, and Cmd/Ctrl+Z puts it back.
+  await area.press('Backspace');
+  await expect(area).toHaveValue('todo\nfirst\nsecond');
+  await area.press('ControlOrMeta+z');
+  await expect(area).toHaveValue('todo\n  first\nsecond');
 
   // A selection over lines: each one moves by one indent, at most, and stays selected.
   await area.evaluate((node) => /** @type {HTMLTextAreaElement} */ (node).setSelectionRange(7, 'todo\n  first\nsecond'.length));

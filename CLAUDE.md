@@ -131,7 +131,7 @@ What runs today:
   scratchpad text, and grows with the prompt; a plain click anywhere else in the pane
   (not on a control, in a dialog omp asked for, or ending a text selection) puts the caret
   at its end without scrolling, as in a terminal (`src/ui/click-focus.js`); Tab indents by two spaces as in a code
-  editor (every selected line; Shift+Tab outdents; Cmd/Ctrl+Z undoes it) unless a
+  editor (every selected line; Shift+Tab, or Backspace in the leading spaces, outdents; Cmd/Ctrl+Z undoes it) unless a
   suggestion list is open, and Esc then Tab leaves the box (`src/ui/indent.js`); Up
   in an empty box steps back through the conversation's prompts and `!` commands
   (Down forward), as omp's own editor does; a line starting with `!` runs
@@ -397,7 +397,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/ui/context-menu.js` — A small menu of actions on one thing, as a right-click, the ContextMenu key, Shift+F10 or a ⋯ button opens it: a native popover at the pointer or beside the control, whose items the arrow keys move between; Enter or a click runs one, and Esc or a click elsewhere closes it.
 - `src/ui/dom.js` — Element construction helpers: elements, buttons that never submit a form, and file-drag checks.
 - `src/ui/format.js` — Text formatters shared across the UI: error messages, home-relative paths and JSON dumps, with no DOM.
-- `src/ui/indent.js` — Tab and Shift+Tab indent and outdent text in a textarea, as in a code editor; Esc then Tab leaves the field instead, so keyboard users are never trapped in it.
+- `src/ui/indent.js` — Tab and Shift+Tab indent and outdent text in a textarea, as in a code editor, and Backspace in a line's leading spaces takes a whole indent back; Esc then Tab leaves the field instead, so keyboard users are never trapped in it.
 - `src/ui/palette.js` — "Add widget" palette.
 - `src/ui/screen-switcher.js` — The screen switcher in the top bar: which screen of its workspace this window shows, and a menu of every screen, with what it holds and where it is open, to open one here or delete it.
 - `src/ui/update-notice.js` — The "updated, reload" notice in the top bar: shown while the daemon serves other UI files than this page loaded (see daemon/ui-files.js), so a tab left open never runs stale code unknowingly.

@@ -1,8 +1,9 @@
 /**
- * Tab and Shift+Tab indent and outdent text in a textarea, as in a code editor; Esc then Tab
- * leaves the field instead, so keyboard users are never trapped in it.
+ * Tab and Shift+Tab indent and outdent text in a textarea, as in a code editor, and Backspace
+ * in a line's leading spaces takes a whole indent back; Esc then Tab leaves the field instead,
+ * so keyboard users are never trapped in it.
  *
- * The edit itself (`indent`, `outdent`) is plain text in, text out, so it can be tested
+ * The edit itself (`indent`, `outdent`, `unindent`) is plain text in, text out, so it can be tested
  * without a DOM. `tabIndent` applies it through `document.execCommand('insertText')`: that
  * command is deprecated, but it is the only way a script's edit lands on the textarea's own
  * undo stack (Cmd/Ctrl+Z undoes it) and fires `input` as typing does; `setRangeText` and
@@ -76,11 +77,26 @@ export function outdent(text, start, end) {
   return editLines(text, start, end, (line) => ({ add: '', remove: line.startsWith('\t') ? 1 : leadingSpaces(line.slice(0, INDENT.length)) }));
 }
 
+/**
+ * Backspace: with the caret in a line's leading spaces, back to the indent level before it
+ * (so an indent goes in one press, as it came in with one Tab).
+ * @param {string} text @param {number} start @param {number} end
+ * @returns {IndentEdit | null} null when Backspace should delete as usual
+ */
+export function unindent(text, start, end) {
+  if (start !== end) return null;
+  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+  const before = text.slice(lineStart, start);
+  if (before === '' || /[^ ]/.test(before)) return null;
+  const from = lineStart + (Math.ceil(before.length / INDENT.length) - 1) * INDENT.length;
+  return { from, to: start, text: '', start: from, end: from };
+}
+
 /** Keys pressed on their own on the way to a shortcut (Shift for Shift+Tab). */
 const MODIFIERS = new Set(['Shift', 'Control', 'Alt', 'Meta']);
 
 /**
- * Makes Tab and Shift+Tab indent in every textarea inside `container`. It listens on the
+ * Makes Tab and Shift+Tab indent in every textarea inside `container`, and Backspace unindent. It listens on the
  * container, so a textarea's own keydown handlers run first: one that takes Tab (a suggestion
  * list completing) cancels the event, and the Tab is left to it. Esc arms the next Tab (or
  * Shift+Tab) to move focus as usual; any other key, or leaving the field, disarms it. Esc keeps
@@ -96,7 +112,16 @@ export function tabIndent(container) {
     if (!(area instanceof HTMLTextAreaElement) || MODIFIERS.has(e.key)) return;
     const leave = leaving === area;
     leaving = e.key === 'Escape' ? area : null;
-    if (e.key !== 'Tab' || leave || e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || area.readOnly) return;
+    if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || area.readOnly) return;
+    if (e.key === 'Backspace' && !e.shiftKey) {
+      const edit = unindent(area.value, area.selectionStart, area.selectionEnd);
+      if (!edit) return;
+      e.preventDefault();
+      area.setSelectionRange(edit.from, edit.to);
+      document.execCommand('delete');
+      return;
+    }
+    if (e.key !== 'Tab' || leave) return;
     e.preventDefault();
     const edit = (e.shiftKey ? outdent : indent)(area.value, area.selectionStart, area.selectionEnd);
     if (!edit) return;
