@@ -16,8 +16,19 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Playwright's own image has Chromium and its system libraries installed, so a run skips
+    # the apt install that made CI take anywhere from 2 to 15 minutes. Its version must match
+    # @playwright/test in package.json.
+    container: mcr.microsoft.com/playwright:v1.64.1-noble
     steps:
       - uses: actions/checkout@v7
+
+      # The container runs as root on a checkout it does not own, which git refuses to touch
+      # (the prepare script sets the hooks path); setup-bun needs unzip, which the image lacks.
+      - name: Prepare the container
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends unzip
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -33,9 +44,6 @@ jobs:
 
       - name: CLAUDE.md is up to date
         run: bun run claude-md:check
-
-      - name: Install Playwright Chromium
-        run: bunx playwright install --with-deps chromium
 
       - name: Browser tests
         run: bun run test:e2e
