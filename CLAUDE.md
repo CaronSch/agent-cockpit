@@ -113,7 +113,8 @@ What runs today:
   own folders, arrows move, Enter picks the folder the arrows moved to, else starts omp
   in the folder typed, Esc closes;
   a relative directory is found from home), chat with it from its
-  structured event stream (streamed replies with Markdown and tables, thinking,
+  structured event stream (streamed replies with Markdown, tables and TeX math as
+  MathML, thinking,
   tool calls with output), pick model and thinking level, log in to
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
   a running turn, and carry on a conversation whatever became of its omp (asleep,
@@ -273,7 +274,11 @@ telemetry views, cmux-parity features beyond the above.
   `@types/bun`. Runtime dependencies are allowed only to avoid rebuilding a
   mature subsystem (terminal emulation, PTY handling), and each one is named in
   this file. Adding any other runtime dependency, dev tool, or bundler is a
-  decision for the owner, not a side effect of a feature.
+  decision for the owner, not a side effect of a feature. The runtime
+  dependencies, with the owner's say-so:
+  - `temml` (TeX to MathML, so the browser typesets agents' math itself): its ES
+    module is served at `/vendor/temml.mjs` (`VENDOR_FILES` in
+    `daemon/ui-files.js`, the import map in `index.html`), loaded with the page.
 - omp is not a dependency: the user installs it on its own (https://omp.sh) and
   the daemon runs the `omp` on PATH. The version the fake omp in `tests/` was
   recorded from is in `RISKS.md`; a newer installed omp means re-recording frames.

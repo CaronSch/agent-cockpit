@@ -20,6 +20,10 @@
     <link rel="stylesheet" href="styles/omp.css" />
     <link rel="stylesheet" href="styles/sessions.css" />
     <link rel="stylesheet" href="styles/scratchpad.css" />
+    <!-- Bare imports of dependencies resolve to the files the daemon serves for them. -->
+    <script type="importmap">
+      { "imports": { "temml": "/vendor/temml.mjs" } }
+    </script>
     <script type="module" src="src/main.js"></script>
   </head>
   <body>

@@ -1185,6 +1185,27 @@ test('unread follows the daemon’s clock, whatever time the browser thinks it i
   await expect(pane).toHaveClass(/is-unread/);
 });
 
+test('TeX math renders as MathML: display math on its own line, inline math in the text, unreadable TeX as its source', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const formula = String.raw`\text{P&L} = \underbrace{x(1-f),M}_{\text{user's input at market}} - \text{minOut} - \text{fees on our own swaps} - \text{gas}`;
+  await send(pane, `So $$${formula}$$ and inline $x^2$ costs $5 and $10, but ${String.raw`$\frac{1$`} is broken.`);
+  const prompt = pane.locator('.omp-user').last();
+  const display = prompt.locator('.md-math.is-display math');
+  await expect(display).toHaveCount(1);
+  await expect(display).toHaveAttribute('display', 'block');
+  await expect(display).toContainText('P&L'); // the bare & read as text
+  const inline = prompt.locator('.md-math:not(.is-display) math');
+  await expect(inline).toHaveCount(1);
+  expect(await inline.evaluate((node) => getComputedStyle(/** @type {Element} */ (node.parentElement)).display)).toBe('inline');
+  await expect(prompt).toContainText('costs $5 and $10');
+  const broken = prompt.locator('.md-math-error');
+  await expect(broken).toHaveText(String.raw`$\frac{1$`);
+  expect(await broken.getAttribute('title')).toBeTruthy();
+  await page.setViewportSize({ width: 1000, height: 420 });
+  if (process.env.SHOT) await pane.screenshot({ path: process.env.SHOT });
+});
+
 test('a tool call is one card whose output appears when expanded', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);

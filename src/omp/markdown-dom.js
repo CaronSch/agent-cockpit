@@ -1,6 +1,11 @@
 /**
  * Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
+ *
+ * TeX math becomes MathML, which the browser typesets itself, through Temml's `render`: it
+ * builds the elements with `createElementNS` and text nodes, never markup. TeX it cannot
+ * read stays as its source, in the code style, with Temml's reason as the tooltip.
  */
+import temml from 'temml';
 import { el } from '../ui/dom.js';
 import { parseMarkdown } from './markdown.js';
 import { tableCopy } from './table-copy.js';
@@ -99,5 +104,34 @@ function renderInline(node) {
       a.rel = 'noopener noreferrer';
       return a;
     }
+    case 'math':
+      return renderMath(node.tex, node.display);
   }
+}
+
+/**
+ * Display math is a block of its own, scrolling sideways when wide, as a table does.
+ * @param {string} tex @param {boolean} display @returns {HTMLElement}
+ */
+function renderMath(tex, display) {
+  const box = el('span', display ? 'md-math is-display' : 'md-math');
+  /** @param {string} source */
+  const render = (source) => temml.render(source, box, { displayMode: display, throwOnError: true });
+  try {
+    try {
+      render(tex);
+    } catch (err) {
+      // Models often write a bare `&` in text (`\text{P&L}`), which TeX reads as a column
+      // separator and rejects; escaped, it reads as meant. Only tried once that has failed, so
+      // the `&`s of an aligned environment that rendered are left alone.
+      const escaped = tex.replace(/(?<!\\)&/g, '\\&');
+      if (escaped === tex) throw err;
+      render(escaped);
+    }
+  } catch (err) {
+    const source = el('code', 'md-inline-code md-math-error', display ? `$$${tex}$$` : `$${tex}$`);
+    source.title = err instanceof Error ? err.message : String(err);
+    box.replaceChildren(source);
+  }
+  return box;
 }

@@ -9,7 +9,12 @@
  */
 export function inlineText(inlines) {
   return inlines
-    .map((node) => (node.type === 'text' || node.type === 'code' ? node.text : node.type === 'break' ? '\n' : inlineText(node.children)))
+    .map((node) => {
+      if (node.type === 'text' || node.type === 'code') return node.text;
+      if (node.type === 'break') return '\n';
+      if (node.type === 'math') return node.tex; // its TeX, the closest plain text there is
+      return inlineText(node.children);
+    })
     .join('');
 }
 

@@ -10,10 +10,18 @@ import { extname, join } from 'node:path';
 /** Directories served under their own name, besides `index.html`. */
 export const STATIC_DIRS = ['src', 'styles'];
 export const INDEX_FILE = 'index.html';
+/**
+ * Files from dependencies, each served at a stable path of its own (index.html's import map
+ * names them), so the page loads what it needs and nothing else of `node_modules`.
+ */
+export const VENDOR_FILES = /** @type {Record<string, string>} */ ({
+  'vendor/temml.mjs': 'node_modules/temml/dist/temml.mjs',
+});
 /** The file types served, and so the only ones a version counts. */
 export const CONTENT_TYPES = /** @type {Record<string, string>} */ ({
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
@@ -25,7 +33,7 @@ const ALL_FILES = new Bun.Glob('**');
 
 /** @param {string} root @returns {Promise<string[]>} every served file, relative to `root` */
 async function servedFiles(root) {
-  const files = [INDEX_FILE];
+  const files = [INDEX_FILE, ...Object.values(VENDOR_FILES)];
   for (const dir of STATIC_DIRS) {
     try {
       for await (const path of ALL_FILES.scan({ cwd: join(root, dir), dot: true })) {

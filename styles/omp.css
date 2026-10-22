@@ -607,6 +607,18 @@
   font: inherit;
 }
 
+/* TeX math, as MathML the browser typesets: display math on its own line, centred, scrolling
+   sideways when wider than the transcript, as a table does. */
+.md-math math {
+  font-family: math;
+}
+
+.md-math.is-display {
+  display: block;
+  overflow-x: auto;
+  padding-block: 2px;
+}
+
 /* Sized to its table, so the Copy control lands on the table's own top-right corner. */
 .md-table-block {
   position: relative;

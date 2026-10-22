@@ -12,7 +12,7 @@ import { listDirectory, resolvePath } from './files.js';
 import { PAD_ID } from '../src/scratchpad/blocks.js';
 import { SCREEN_ID, WORKSPACE_NAME } from '../src/workspace/model.js';
 import { isValidTree } from '../src/layout/grid-model.js';
-import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, createUiVersion } from './ui-files.js';
+import { CONTENT_TYPES, INDEX_FILE, STATIC_DIRS, VENDOR_FILES, createUiVersion } from './ui-files.js';
 /** @import { BunRequest, Server } from 'bun' */
 /** @import { DaemonConfig, Scratchpad, SessionEvent } from './wire.js' */
 /** @import { Hub } from './hub.js' */
@@ -229,8 +229,9 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
     }
     // Check the allowlist on the resolved file, never the raw path: `/src/..%2f…` passes a
     // prefix test and decodes to a file outside `src/`.
-    const path = resolve(rootDir, `.${decoded}`);
-    const allowed = path === indexFile || staticDirs.some((dir) => path.startsWith(dir + sep));
+    const vendor = VENDOR_FILES[decoded.slice(1)];
+    const path = resolve(rootDir, vendor ?? `.${decoded}`);
+    const allowed = vendor !== undefined || path === indexFile || staticDirs.some((dir) => path.startsWith(dir + sep));
     const type = CONTENT_TYPES[extname(path)];
     const file = Bun.file(path);
     if (!allowed || !type || !(await file.exists())) return text('not found', 404);
