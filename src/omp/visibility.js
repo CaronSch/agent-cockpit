@@ -9,7 +9,7 @@
  *   prompt, attached files as the `files` note omp's `fileMention` message becomes
  * - the user's `!` shell runs (`bash` items: omp records bash and python executions only
  *   for commands the user runs; the agent's shell runs are tool calls)
- * - each turn's final response (below), without its thinking
+ * - every response (below), without its thinking
  * - errors (every `error` note: a failed prompt, command, attachment, exhausted retries)
  *   and how a prompt ended (`prompt` notes: failed or aborted)
  * - slash-command output (`command` notes): the answer to what the user typed
@@ -17,18 +17,16 @@
  *   and never hides it (CLAUDE.md, Invariants)
  * Dialogs waiting for an answer are not transcript items: the pane always shows them.
  *
- * Hidden: thinking, tool calls and their output, intermediate assistant messages, messages
- * the agent injects (`byAgent` user items), and every other note.
+ * Hidden: thinking, tool calls and their output, the agent's narration between tool calls,
+ * messages injected into the conversation (`byAgent` user items: another agent's prompts,
+ * omp's own nudges), and every other note.
  *
- * The final response. The user's prompts and the messages the agent injects cut the
- * transcript into turns. A turn's final response is its last assistant message, if that
- * message ended (`message_end`) without asking for tools: its `stopReason` is `stop`,
- * `length`, `error` or `aborted`, not `toolUse`. Any assistant message followed by another
- * in the same turn is intermediate, whatever its `stopReason`: omp may carry on after a
- * `stop` (an `agent_end` with `yielded: false`). So the newest turn's last message is only
- * known to be final once the agent hands the turn back (`agent_end`, transcript.js
- * `handsTurnBack`), which is when the transcript stops streaming; until then the newest
- * turn is work in progress, summarised as `working`.
+ * A response is an assistant message that ended (`message_end`) without asking for tools:
+ * its `stopReason` is `stop`, `length`, `error` or `aborted`, not `toolUse`; the agent
+ * spoke and was done. Every one is shown, not only a turn's last: omp may carry on after
+ * one (a todo nudge, an injected message), and the answer the user asked for is then not
+ * the last thing the agent said. Narration (a message that goes on to call tools) is work.
+ * While a turn runs, the work since the user's prompt is summarised as `working`.
  */
 /** @import { AssistantItem, Item } from './transcript.js' */
 
@@ -46,29 +44,18 @@
 export function promptsAndResponses(items, streaming) {
   /** @type {Item[]} */
   const shown = [];
-  /** Where the current turn's last assistant message is (or would go) in `shown`. */
-  let slot = -1;
-  /** @type {AssistantItem | null} */
-  let last = null;
+  /** Assistant messages since the user's last prompt. */
   let steps = 0;
-
-  const closeTurn = () => {
-    if (last && isFinal(last)) shown.splice(slot, 0, withoutWork(last));
-    last = null;
-    slot = -1;
-    steps = 0;
-  };
-
   for (const item of items) {
     switch (item.kind) {
       case 'user':
-        closeTurn();
-        if (!item.byAgent) shown.push(item);
+        if (item.byAgent) break;
+        shown.push(item);
+        steps = 0;
         break;
       case 'assistant':
-        last = item;
-        slot = shown.length;
         steps++;
+        if (isResponse(item)) shown.push(withoutWork(item));
         break;
       case 'bash':
       case 'unrecognised':
@@ -81,16 +68,14 @@ export function promptsAndResponses(items, streaming) {
         break;
     }
   }
-  if (streaming) return { items: shown, working: { steps } };
-  closeTurn();
-  return { items: shown, working: null };
+  return { items: shown, working: streaming ? { steps } : null };
 }
 
 /** Notes that belong to the conversation, not to the work: see the module comment. */
 const NOTE_SOURCES = new Set(['files', 'prompt', 'command']);
 
 /** @param {AssistantItem} item */
-const isFinal = (item) => item.ended && item.stopReason !== 'toolUse';
+const isResponse = (item) => item.ended && item.stopReason !== 'toolUse';
 
 /**
  * The response as the user reads it: its text (and images or blocks the pane does not

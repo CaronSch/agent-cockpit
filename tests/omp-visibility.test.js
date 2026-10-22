@@ -89,7 +89,7 @@ describe('only prompts and responses', () => {
     assert.deepEqual(view(state).shown, ['user: hi', 'assistant: Hello.']);
   });
 
-  test('a reply the agent carried on from is intermediate, whatever its stopReason', () => {
+  test('a reply the agent carried on from still shows: what it said before a nudge or more work is an answer too', () => {
     const state = run([
       agentStart,
       ...prompt('fix it'),
@@ -100,7 +100,7 @@ describe('only prompts and responses', () => {
       ...assistant([text('Fixed.')], 'stop'),
       agentEnd,
     ]);
-    assert.deepEqual(view(state).shown, ['user: fix it', 'assistant: Fixed.']);
+    assert.deepEqual(view(state).shown, ['user: fix it', 'assistant: I will start with the tests.', 'assistant: Fixed.']);
   });
 
   test('a tool run no message has named (yet) is work too', () => {
@@ -115,7 +115,7 @@ describe('only prompts and responses', () => {
     assert.deepEqual(view(state).shown, ['user: go', 'assistant: Done.']);
   });
 
-  test('while a turn runs, its work and even its newest text stay hidden behind one indicator', () => {
+  test('while a turn runs, its work stays hidden behind one indicator, and a finished reply shows at once', () => {
     const running = [
       ...prompt('first'),
       ...assistant([text('Answer one.')], 'stop'),
@@ -124,10 +124,10 @@ describe('only prompts and responses', () => {
       ...prompt('second'),
       ...assistant([text('Checking.'), toolCall('t1')], 'toolUse'),
       ...toolRun('t1'),
-      ...assistant([text('Looks like')], 'stop'), // may yet turn out to be intermediate
+      ...assistant([text('Looks like')], 'stop'),
     ];
     assert.deepEqual(view(run(running)), {
-      shown: ['user: first', 'assistant: Answer one.', 'user: second'],
+      shown: ['user: first', 'assistant: Answer one.', 'user: second', 'assistant: Looks like'],
       working: { steps: 2 },
     });
     assert.deepEqual(view(run([...running, agentEnd])), {

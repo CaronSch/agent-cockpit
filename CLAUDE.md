@@ -184,8 +184,9 @@ What runs today:
   once the session is read; a click shows it in the omp window used last. The top
   bar's Config menu (open while pointed at, or pinned by a click) holds the app's
   switches, kept per browser (`src/ui/settings.js`): *Only prompts and responses*
-  shows only prompts and final responses in every omp window, hiding thinking, tool
-  calls and the messages in between, with one "Working…" line while a turn runs;
+  shows only prompts and responses (every reply the agent finished, not only a turn's
+  last) in every omp window, hiding thinking, tool calls and the narration between
+  them, with one "Working…" line while a turn runs;
   *Animated selection* (on) draws a drag's selection in the transcript as Google
   Docs does, whole words gliding into place (`src/omp/drag-highlight.js`), with the
   browser's own highlight hidden under it. Snapping (`src/ui/word-snap.js`) leaves a
