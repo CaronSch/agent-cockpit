@@ -24,9 +24,20 @@ import scratchpad from './scratchpad.js';
  * `ctx.setUnread(true)` lights the window's border: it has news its user has not seen.
  * `ctx.setLabel(text)` names what the window shows (e.g. the omp window's conversation) in
  * its top bar, beside its type's title; null removes the name.
+ * `ctx.screen` tells which windows this screen has (with their settings), which one of each
+ * type `showWidget` would use, and which one the pointer is over (else the focused one);
+ * `ctx.outline(ids)` outlines those windows, until it is called again (with `[]` to stop);
+ * `ctx.focusWindow(ids)` focuses the one of those windows used last, as a click on it would.
  */
-/** @import { LeafParams } from '../layout/grid-model.js' */
+/** @import { Leaf, LeafParams } from '../layout/grid-model.js' */
 /** @import { DragEndResult } from '../interaction/drag-controller.js' */
+/** @import { Atom } from '../state/atom.js' */
+/**
+ * This screen's windows as a widget may follow them: `windows` in screen order, `used` the id
+ * of the window `showWidget` would use for each widget type there is (the one used last),
+ * `pointed` the window under the pointer, or else the focused one, or null.
+ * @typedef {{ windows: Leaf[], used: Readonly<Record<string, string>>, pointed: string | null }} ScreenWindows
+ */
 /**
  * @typedef {{
  *   readonly params: LeafParams,
@@ -36,6 +47,9 @@ import scratchpad from './scratchpad.js';
  *   dragWidget(type: string, params: LeafParams, event: PointerEvent, options?: { label?: string, into?: boolean, onEnd?: (result: DragEndResult) => void }): void,
  *   setUnread(unread: boolean): void,
  *   setLabel(text: string | null): void,
+ *   readonly screen: Pick<Atom<ScreenWindows>, 'get' | 'subscribe'>,
+ *   outline(ids: readonly string[]): void,
+ *   focusWindow(ids: readonly string[]): void,
  * }} WidgetContext
  */
 /**

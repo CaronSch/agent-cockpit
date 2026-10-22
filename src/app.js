@@ -18,12 +18,13 @@ import { createUpdateNotice } from './ui/update-notice.js';
 import { createNotifier } from './sessions/notify.js';
 import { createZoomControl } from './ui/zoom.js';
 import { button, el } from './ui/dom.js';
+import { focusMainField } from './ui/click-focus.js';
 import { getDaemon } from './daemon/client.js';
 import { openScreen } from './workspace/screen.js';
 import { describeWindows } from './workspace/model.js';
 import { WIDGETS, newWidgetLeaf } from './widgets/registry.js';
 /** @import { Leaf, LeafParams, Tree } from './layout/grid-model.js' */
-/** @import { WidgetContext } from './widgets/registry.js' */
+/** @import { ScreenWindows, WidgetContext } from './widgets/registry.js' */
 /** @import { Rect } from './layout/compute-layout.js' */
 /** @import { Palette } from './ui/palette.js' */
 /** @import { GridApi } from './interaction/drag-controller.js' */
@@ -73,6 +74,37 @@ export async function createApp(root) {
   const daemon = getDaemon();
   const opened = await openScreen({ daemon });
   const layoutAtom = createAtom(opened.ok ? opened.screen.tree() : null);
+
+  // ── which windows there are, which was used last, which is pointed at (ctx.screen) ──
+  /** When each window was last used (pressed or focused), in order of use. @type {Map<string, number>} */
+  const usedAt = new Map();
+  let uses = 0;
+  /** The window under the pointer, and the one holding focus. @type {{ hovered: string | null, focused: string | null }} */
+  const pointer = { hovered: null, focused: null };
+  /** @returns {ScreenWindows} */
+  function screenWindows() {
+    const windows = listLeaves(layoutAtom.get());
+    /** @type {Record<string, string>} */
+    const used = {};
+    // Per type, the window used last; the first one in the screen until one has been.
+    for (const w of windows) {
+      const best = used[w.widget];
+      if (best === undefined || (usedAt.get(w.id) ?? 0) > (usedAt.get(best) ?? 0)) used[w.widget] = w.id;
+    }
+    return { windows, used, pointed: pointer.hovered ?? pointer.focused };
+  }
+  const screenAtom = createAtom(screenWindows());
+  function refreshScreen() {
+    const next = screenWindows();
+    const now = screenAtom.get();
+    const same =
+      next.pointed === now.pointed &&
+      JSON.stringify(next.used) === JSON.stringify(now.used) &&
+      next.windows.length === now.windows.length &&
+      next.windows.every((w, i) => w === now.windows[i]);
+    if (!same) screenAtom.set(next);
+  }
+  layoutAtom.subscribe(refreshScreen);
   const indicator = createDropIndicator(gridEl);
 
   let bounds = { x: 0, y: 0, w: 0, h: 0 };
@@ -134,6 +166,16 @@ export async function createApp(root) {
         label.hidden = !text;
         heading.title = text ?? '';
       },
+      screen: screenAtom,
+      outline(/** @type {readonly string[]} */ ids) {
+        outlines.set(leaf.id, ids);
+        drawOutlines();
+      },
+      focusWindow(/** @type {readonly string[]} */ ids) {
+        const id = ids.reduce((best, w) => ((usedAt.get(w) ?? 0) > (usedAt.get(best) ?? 0) ? w : best), ids[0]);
+        const frameEl = id ? renderer.frameElement(id) : null;
+        if (frameEl) focusMainField(frameEl);
+      },
     };
 
     /** @type {{ destroy(): void, paramsChanged?(): void }} */
@@ -161,11 +203,24 @@ export async function createApp(root) {
       destroy() {
         offParams();
         instance.destroy?.();
+        outlines.delete(leaf.id);
+        drawOutlines();
       },
     };
   }
 
+  /** The windows each window has asked to outline (`ctx.outline`), by the asking window's id. @type {Map<string, readonly string[]>} */
+  const outlines = new Map();
+  function drawOutlines() {
+    const ids = new Set([...outlines.values()].flat());
+    for (const frameEl of gridEl.querySelectorAll('.widget')) {
+      frameEl.classList.toggle('is-outlined', ids.has(/** @type {HTMLElement} */ (frameEl).dataset.id ?? ''));
+    }
+  }
+
   const renderer = createGridRenderer(gridEl, { mountWidget, prefersReducedMotion: () => reducedMotion.matches });
+  // A window mounted after an outline was asked for (the layout redrawn) gets it too.
+  layoutAtom.subscribe(() => requestAnimationFrame(drawOutlines));
 
   const isStacked = () => bounds.w > 0 && bounds.w < STACK_BREAKPOINT;
 
@@ -233,32 +288,45 @@ export async function createApp(root) {
     api.commitTree(next, { animate: true });
   }
 
-  /** When each window was last used (pressed or focused), in order of use. @type {Map<string, number>} */
-  const usedAt = new Map();
-  let uses = 0;
+  /**
+   * Shows `params` in the window of `type` used last in this screen (`screenAtom`'s `used`);
+   * opens a new window when there is none.
+   * @param {string} type @param {LeafParams} params
+   */
+  function showWidget(type, params) {
+    const target = screenAtom.get().used[type];
+    if (!target) return addWidget(type, params);
+    api.commitTree(setLeafParams(layoutAtom.get(), target, params));
+  }
+
+  /** @param {Event} event */
+  const windowAt = (event) => /** @type {HTMLElement | null} */ (/** @type {Element} */ (event.target).closest?.('.widget'))?.dataset.id ?? null;
   for (const type of ['pointerdown', 'focusin']) {
     gridEl.addEventListener(
       type,
       (event) => {
-        const id = /** @type {HTMLElement | null} */ (/** @type {Element} */ (event.target).closest?.('.widget'))?.dataset.id;
-        if (id) usedAt.set(id, ++uses);
+        const id = windowAt(event);
+        if (!id) return;
+        usedAt.set(id, ++uses);
+        if (type === 'focusin') pointer.focused = id;
+        refreshScreen();
       },
       { capture: true },
     );
   }
-
-  /**
-   * Shows `params` in the window of `type` used last in this screen, else the first one; opens
-   * a new window when there is none.
-   * @param {string} type @param {LeafParams} params
-   */
-  function showWidget(type, params) {
-    const tree = layoutAtom.get();
-    const windows = listLeaves(tree).filter((l) => l.widget === type);
-    const target = windows.reduce((best, l) => ((usedAt.get(l.id) ?? 0) > (usedAt.get(best.id) ?? 0) ? l : best), windows[0]);
-    if (!target) return addWidget(type, params);
-    api.commitTree(setLeafParams(tree, target.id, params));
-  }
+  gridEl.addEventListener('focusout', (event) => {
+    if (event.relatedTarget instanceof Element && event.relatedTarget.closest('.widget')) return; // focusin follows
+    pointer.focused = null;
+    refreshScreen();
+  });
+  gridEl.addEventListener('pointerover', (event) => {
+    pointer.hovered = windowAt(event);
+    refreshScreen();
+  });
+  gridEl.addEventListener('pointerleave', () => {
+    pointer.hovered = null;
+    refreshScreen();
+  });
 
   attachSashController(api);
   const drag = createDragController(api);
