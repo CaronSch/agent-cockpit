@@ -118,9 +118,9 @@ What runs today:
   show different sessions side by side, or the same one; the window's top
   bar names its conversation (omp's session title, or the first prompt while it
   has none, saved with the window, so it still shows once the session has ended).
-  Sessions the daemon runs get a title after their first turn: if omp has none by
-  then, the daemon sends `/rename` once and omp generates one; untitled ones show their
-  first prompt. A slash command's one-line output (such as that rename's) is a quiet
+  Sessions the daemon runs get a title during their first turn: once the first
+  prompt is in a session omp has not named, the daemon sends `/rename` once and omp
+  generates one while the agent works; untitled ones show their first prompt. A slash command's one-line output (such as that rename's) is a quiet
   note; output of several lines shows open. **Fork** continues
   a copy of a pane's conversation in a new pane, as a session of its own (omp's
   `--fork`: a new journal, the original runs on untouched); it stays off until
