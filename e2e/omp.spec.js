@@ -700,6 +700,60 @@ test('a login under way is shown from the stream, so a reload still shows it', a
   await expect(page.locator('.widget[data-widget="omp"]').getByText('Logging in to fake…')).toBeVisible();
 });
 
+test('a rough drag over reply text snaps out to whole words, punctuation included, before Comment', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('li')).toHaveText(['one', 'two']);
+  await expect(pane.locator('.widget-label')).toHaveText('About hello'); // settled and titled: nothing redraws it
+  // From inside "said" to inside "one" on the next line, as a hurried drag would.
+  const [from, to] = await reply.evaluate((node) => {
+    /** @param {Node} text @param {number} offset */
+    const at = (text, offset) => {
+      const range = document.createRange();
+      range.setStart(text, offset);
+      range.setEnd(text, offset + 1);
+      const r = range.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    };
+    /** @param {string} selector */
+    const textIn = (selector) => /** @type {Node} */ (document.createTreeWalker(/** @type {Node} */ (node.querySelector(selector)), NodeFilter.SHOW_TEXT).nextNode());
+    const [first, one] = [textIn('.omp-md > p'), textIn('li')];
+    return [at(first, 'You sa'.length), at(one, 'o'.length)];
+  });
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => document.getSelection()?.toString().replace(/\s+/g, ' '))).toBe('said: hello one');
+  await pane.getByRole('button', { name: 'Comment', exact: true }).click();
+  const box = pane.getByRole('textbox', { name: 'Comment on the selected text' });
+  await box.fill('why bold?');
+  await box.press('Enter');
+  await expect(pane.locator('.omp-card.is-comment')).toContainText('“said: hello one”');
+
+  // A word split by code or bold within a line is still one word; the next line is not part of it.
+  const snapped = await page.evaluate(async () => {
+    const url = '/src/ui/word-snap.js'; // the module the app runs
+    const { snapToWords } = /** @type {typeof import('../src/ui/word-snap.js')} */ (await import(url));
+    const host = document.createElement('div');
+    host.innerHTML = '<p>call <code>foo</code>.bar(), then</p><p>next</p>';
+    document.body.append(host);
+    const [, code, rest] = /** @type {Node[]} */ ([...host.querySelector('p')?.childNodes ?? []].map((n) => n.firstChild ?? n));
+    const sel = /** @type {Selection} */ (document.getSelection());
+    sel.setBaseAndExtent(code, 1, rest, 3);
+    snapToWords(sel);
+    const inner = sel.toString();
+    sel.setBaseAndExtent(rest, '.bar(), t'.length, rest, '.bar(), th'.length);
+    snapToWords(sel);
+    const last = sel.toString();
+    host.remove();
+    return [inner, last];
+  });
+  expect(snapped).toEqual(['foo.bar(),', 'then']);
+});
+
 test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
   const workspace = await openWorkbench(page);
   const pane = await startedPane(page);
