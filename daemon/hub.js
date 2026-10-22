@@ -13,6 +13,7 @@
  * window was open on it.
  */
 import { randomBytes } from 'node:crypto';
+import { daemonNow } from './clock.js';
 import { launchOmp } from './omp-session.js';
 import { OMP_ID } from './unread.js';
 import { awaitsUser } from '../src/omp/activity.js';
@@ -38,7 +39,7 @@ import { awaitsUser } from '../src/omp/activity.js';
  * @param {{ ompPath: string, unread: Pick<UnreadStore, 'awaited'>, now?: () => number, launch?: typeof launchOmp }} options
  * @returns {Hub}
  */
-export function createHub({ ompPath, unread, now = Date.now, launch = launchOmp }) {
+export function createHub({ ompPath, unread, now = daemonNow, launch = launchOmp }) {
   const bootId = randomBytes(6).toString('hex');
   /** @type {SessionEvent[]} */
   const log = [];

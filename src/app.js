@@ -16,9 +16,9 @@ import { createPalette } from './ui/palette.js';
 import { createScreenSwitcher } from './ui/screen-switcher.js';
 import { createUpdateNotice } from './ui/update-notice.js';
 import { createNotifier } from './sessions/notify.js';
+import { sessionLinks } from './sessions/links.js';
 import { createZoomControl } from './ui/zoom.js';
 import { button, el } from './ui/dom.js';
-import { focusMainField } from './ui/click-focus.js';
 import { getDaemon } from './daemon/client.js';
 import { openScreen } from './workspace/screen.js';
 import { describeWindows } from './workspace/model.js';
@@ -170,11 +170,6 @@ export async function createApp(root) {
       outline(/** @type {readonly string[]} */ ids) {
         outlines.set(leaf.id, ids);
         drawOutlines();
-      },
-      focusWindow(/** @type {readonly string[]} */ ids) {
-        const id = ids.reduce((best, w) => ((usedAt.get(w) ?? 0) > (usedAt.get(best) ?? 0) ? w : best), ids[0]);
-        const frameEl = id ? renderer.frameElement(id) : null;
-        if (frameEl) focusMainField(frameEl);
       },
     };
 
@@ -383,8 +378,7 @@ export async function createApp(root) {
   query(root, '.topbar-actions').prepend(
     createNotifier({
       daemon,
-      shown: () =>
-        new Set(listLeaves(layoutAtom.get()).flatMap((l) => (l.widget === 'omp' && typeof l.params?.session === 'string' ? [l.params.session] : []))),
+      shown: () => new Set(sessionLinks(screenAtom.get()).windows.keys()),
       show: (params) => showWidget('omp', params),
     }).root,
   );
