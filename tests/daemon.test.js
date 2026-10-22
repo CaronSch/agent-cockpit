@@ -496,15 +496,15 @@ describe('sessions', () => {
   const sentAfterPrompt = (log) =>
     log.slice(log.findIndex((e) => e.kind === 'sent' && e.command.type === 'prompt')).flatMap((e) => (e.kind === 'sent' ? [String(e.command.message ?? e.command.type)] : []));
 
-  test('after the first turn of a session with no name the daemon asks omp for a title, once', async () => {
+  test('once the first prompt of a session with no name is in, the daemon asks omp for a title, once', async () => {
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
     const id = json.session.id;
     await waitForStatus(id, 'ready');
     const from = hub.since(0).length;
     assert.deepEqual(
       sentAfterPrompt(await turn(id, 'hi')),
-      ['hi', 'get_state', '/rename', 'get_state'],
-      'the state refresh after the turn, the title request, then the test’s own get_state',
+      ['hi', '/rename', 'get_state', 'get_state'],
+      'the title request while the turn runs, the state refresh after it, then the test’s own get_state',
     );
     await logged((e) => e.seq > from && e.session === id && e.kind === 'frame' && e.frame.type === 'command_output');
     assert.equal(hub.since(from).filter((e) => e.session === id && e.kind === 'frame' && e.frame.type === 'session_info_update').length, 0, '"hi" is too little to name');

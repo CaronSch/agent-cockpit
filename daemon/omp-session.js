@@ -2,9 +2,10 @@
  * One omp process in RPC mode: launch, protocol setup, command/response correlation and
  * lifecycle, with everything it does reported as session events.
  *
- * It also asks once for a title. omp names sessions by itself only in its TUI, so when the
- * first turn has settled in a session with no name, the daemon sends `/rename` with no
- * title, as a user would: omp's title model names the conversation in the background.
+ * It also asks once for a title. omp names sessions by itself only in its TUI, so once the
+ * first prompt of a session with no name is in its conversation, the daemon sends `/rename`
+ * with no title, as a user would: omp's title model names the conversation in the
+ * background while the agent works on the turn. (Sent any earlier, omp has nothing to name.)
  */
 import { createFrameDecoder } from './frame-decoder.js';
 /** @import { RpcResponse, SessionEvent, SessionMeta } from './wire.js' */
@@ -86,7 +87,7 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
   /** @type {PromiseWithResolvers<void>} */
   const closed = Promise.withResolvers();
   let named = false;
-  let settledOnce = false;
+  let titleAsked = false;
 
   /** @param {Partial<SessionMeta>} patch */
   const update = (patch) => {
@@ -149,9 +150,8 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
       if (frame.data?.sessionName) named = true;
     }
     if (frame.type === 'session_info_update' && frame.title) named = true;
-    // omp settles once per stretch of agent activity, so the first settle ends the first turn.
-    if (frame.type === 'session_settled' && !settledOnce) {
-      settledOnce = true;
+    if (frame.type === 'message_end' && frame.message?.role === 'user' && !titleAsked) {
+      titleAsked = true;
       if (!named) send(RENAME).response.catch(() => {});
     }
     if (frame.type === 'response' && typeof frame.id === 'string') {

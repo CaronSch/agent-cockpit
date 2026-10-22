@@ -1226,7 +1226,7 @@ test('the window’s top bar names its conversation, and the name is saved with 
   await expect.poll(async () => (await savedParams(page, workspace, pane))?.name).toBe('Login fix');
 });
 
-test('after the first turn the daemon titles the session, and one line of command output is a quiet note', async ({ page }) => {
+test('during the first turn the daemon titles the session, and one line of command output is a quiet note', async ({ page }) => {
   const workspace = await openWorkbench(page);
   const pane = await startedPane(page);
   const label = pane.locator('.widget-label');
