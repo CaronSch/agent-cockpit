@@ -16,6 +16,7 @@
  */
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { daemonNow } from './clock.js';
 
 const VERSION = 1;
 
@@ -55,7 +56,7 @@ const isUnreadFile = (data) =>
  * Loads the marks kept in `file` (none if it does not exist yet).
  * @param {{ file: string, now?: () => number }} options
  */
-export async function loadUnread({ file, now = Date.now }) {
+export async function loadUnread({ file, now = daemonNow }) {
   /** @type {Unread} */
   let unread = {};
   const stored = Bun.file(file);
