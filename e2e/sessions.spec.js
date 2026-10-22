@@ -150,6 +150,7 @@ async function settle(page) {
 
 /** Real pointer drag from a row to a point, holding the button there. @param {Page} page @param {Locator} from @param {{ x: number, y: number }} to */
 async function dragTo(page, from, to) {
+  await from.scrollIntoViewIfNeeded();
   const box = await from.boundingBox();
   if (!box) throw new Error('nothing to drag');
   await page.mouse.move(box.x + 40, box.y + box.height / 2);
@@ -223,7 +224,7 @@ test('dragging a session onto the grid resumes it in a new omp window; dragged a
   expect(await live()).toHaveLength(1);
   expect((await live())[0].cwd).toBe(BRAVO);
   const session = await shownSession(page, pane);
-  await expect(deploy, 'listed once: under Running, not under Past').toHaveCount(0);
+  await expect(deploy, 'listed once: as running, not as past').toHaveCount(0);
   await expect(runningRow(window, session)).toBeVisible();
 
   // Running, it is shown again rather than resumed a second time: one omp, two windows.
@@ -329,7 +330,7 @@ test('Archive does not drag the session out: pressed and moved onto the grid, it
   await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(0);
 });
 
-test('a running session is listed once, under Running, even with its window closed, and only Stop puts it back under Past to archive', async ({ page }) => {
+test('a running session is listed once, as running, even with its window closed, and only Stop lists it as past again to archive', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
   const pane = page.locator('.widget[data-widget="omp"]');
@@ -338,8 +339,15 @@ test('a running session is listed once, under Running, even with its window clos
   await expect(pane).toHaveCount(0);
 
   await expect(runningRow(window, session)).toBeVisible();
-  await expect(titles(window), 'not under Past, where it could be archived').toHaveText(['Zebra cleanup', 'Fix the login flow']);
-  await expect(window.locator('.sessions-status')).toHaveText('2 sessions');
+  await expect(titles(window), 'not as past, where it could be archived').toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  const search = window.getByRole('searchbox', { name: 'Search sessions' });
+  await search.fill('deploy');
+  await expect(titles(window), 'searched, through its journal').toHaveText([]);
+  await expect(runningRow(window, session)).toBeVisible();
+  await search.fill('login');
+  await expect(titles(window)).toHaveText(['Fix the login flow'], { timeout: 3000 });
+  await expect(runningRow(window, session)).toHaveCount(0);
+  await search.fill('');
 
   await runningRow(window, session).getByRole('button', { name: 'Stop' }).click();
   await expect(runningRow(window, session)).toHaveCount(0);
@@ -406,7 +414,6 @@ test('the directory menu narrows the list to one directory, with search, sort an
 
   await menu.selectOption(ALPHA);
   await expect(titles(window)).toHaveText(['Zebra cleanup', 'Fix the login flow']);
-  await expect(window.locator('.sessions-status')).toHaveText('2 sessions');
   await window.getByRole('combobox', { name: 'Sort by' }).selectOption('title');
   await expect(titles(window)).toHaveText(['Fix the login flow', 'Zebra cleanup']);
   await window.getByRole('searchbox', { name: 'Search sessions' }).fill('tests');
@@ -490,7 +497,7 @@ test('a turn that ends while nobody looks stays unread, across reloads and after
 
   // Showing it from Sessions reads it.
   await past.getByRole('button', { name: 'Resume' }).click();
-  await expect(past).toHaveCount(0); // listed under Running again
+  await expect(past).toHaveCount(0); // listed as running again
   await expect.poll(() => shownSession(page, pane)).not.toBe(session);
   const again = runningRow(window, await shownSession(page, pane));
   await expect(again).toBeVisible();

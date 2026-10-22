@@ -167,7 +167,7 @@ What runs today:
   working, idle, *done*: it finished and nobody has read it, or *needs you*: it asks
   a question or an approval) and **Stop** (asking first while a turn runs); then every past omp
   conversation (read from omp's session files) but those a running session
-  writes, which are listed under Running only, searchable across titles,
+  writes, which are listed as running only, searchable across titles,
   directories and prompts, and sortable. A click on a session (or Resume, or
   Enter) shows it in the omp window this screen used last (pressed or focused
   last), or a new one if there is none; dragging it onto the middle of an omp
@@ -393,7 +393,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
 - `src/widgets/scratchpad.js` — Notes beside the agents: text with screenshots and files in it.
-- `src/widgets/sessions.js` — omp sessions: the daemon's running ones on top, with how each is doing and Stop, then past ones, searchable and sortable.
+- `src/widgets/sessions.js` — omp sessions in one list: the daemon's running ones on top, with how each is doing and Stop, then past ones, searchable and sortable.
 - `src/workspace/model.js` — Workspaces and their screens, kept free of the DOM and shared with the daemon: valid names and ids, which screen a new window claims, and how a screen is described.
 - `src/workspace/screen.js` — This window's screen of its workspace: claimed for as long as the window is open, loaded from the daemon, and saved back as its layout changes.
 - `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
