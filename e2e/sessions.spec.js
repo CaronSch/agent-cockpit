@@ -240,6 +240,7 @@ test('dragging a session onto the grid resumes it in a new omp window; dragged a
 test('the Resume button drags out too, resuming the session where it is dropped', async ({ page }) => {
   const window = await addSessionsWindow(page);
   const resume = row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' });
+  await row(window, 'Fix the login flow').scrollIntoViewIfNeeded();
   const from = await resume.boundingBox();
   const grid = await page.locator('#grid').boundingBox();
   if (!from || !grid) throw new Error('nothing to drag');
@@ -318,6 +319,7 @@ test('Archive hides a session from the list (and from omp), Archived lists it, a
 
 test('Archive does not drag the session out: pressed and moved onto the grid, it opens nothing', async ({ page }) => {
   const window = await addSessionsWindow(page);
+  await row(window, 'Zebra cleanup').scrollIntoViewIfNeeded();
   const from = await row(window, 'Zebra cleanup').getByRole('button', { name: 'Archive' }).boundingBox();
   const grid = await page.locator('#grid').boundingBox();
   if (!from || !grid) throw new Error('nothing to drag');
