@@ -114,24 +114,15 @@
   color: var(--color-danger);
 }
 
-/* Running sessions on top, then past ones, scrolling together. */
-.sessions-lists {
+.sessions-list {
   flex: 1;
   min-height: 0;
   overflow: auto;
-}
-
-.sessions-running,
-.sessions-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-}
-
-.sessions-running[hidden] {
-  display: none;
 }
 
 .sessions-item {

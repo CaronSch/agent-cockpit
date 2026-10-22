@@ -26,23 +26,26 @@
  *   containing "fail" fails as a provider error would.
  * - `get_branch_messages` lists the user messages of the conversation, oldest first, each with
  *   an entry id (not the `msg-N` ids frames carry, as in omp); `branch` rewinds to just before
- *   one and answers with its text, emitting no frames. omp keeps the old path in the journal
- *   as a branch; the fake drops it. A prompt containing "drift" is listed reworded, as if
- *   another client had rewound and resent it without the windows hearing of it.
+ *   one and answers with its text, emitting no frames. As omp does, the session goes on in a
+ *   new journal beside the old one, with a new id, holding the conversation up to there
+ *   (`get_state` reports both); the old journal keeps the path before the rewind. A prompt
+ *   containing "drift" is listed reworded, as if another client had rewound and resent it
+ *   without the windows hearing of it.
  * - logins: the default model's provider, `fake`, is not logged in (a `login` to it stays
  *   under way); `keyed` is, and its `keyed-model` can be picked from the models
- * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
- * session already has a name and keeps the journal's id (its `session` header's, as omp's
- * `SessionManager` does); the fake never writes to a resumed file.
- * Other sessions keep a journal in `$TMPDIR/fake-omp-sessions/`, written as omp does: a new
- * session's only once the model has replied, then after every message. `--fork <file>`
- * copies that file's title and messages into a new journal at once (omp's
- * `SessionManager.forkFrom`), leaving the source alone; a missing source exits with omp's error.
+ * With `--resume <file>`, the session continues the journal's conversation: its messages (what
+ * `get_messages` returns), title and id (its `session` header's, as omp's `SessionManager`
+ * does), and it writes the journal from then on, after every message.
+ * New sessions keep a journal in `$TMPDIR/fake-omp-sessions/`, written as omp does: only once
+ * the model has replied, then after every message. `--fork <file>` copies that file's title
+ * and messages into a new journal at once (omp's `SessionManager.forkFrom`), leaving the
+ * source alone; a missing source exits with omp's error. The fake writes a journal flat (no
+ * entry ids), which the daemon reads as one path.
  */
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 /** Shaped like a real omp reply: a heading, a table too wide for a narrow pane, then long list lines. */
@@ -70,66 +73,53 @@ const option = (flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : n
 const resumed = option('--resume');
 const forkedFrom = option('--fork');
 
-/** The forked journal's lines (a missing file ends the process, as omp's `--fork` does). @type {Record<string, any>[]} */
-let source = [];
-if (forkedFrom) {
+/** A journal's lines; a missing one ends the process, as omp's `--resume` and `--fork` do. @param {string} file */
+function readJournal(file) {
   try {
-    source = readFileSync(forkedFrom, 'utf8')
+    return readFileSync(file, 'utf8')
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line));
   } catch {
-    process.stderr.write(`Error: Session "${forkedFrom}" not found.\n`);
+    process.stderr.write(`Error: Session "${file}" not found.\n`);
     process.exit(1);
   }
 }
+/** The journal resumed or forked from. @type {Record<string, any>[]} */
+const source = resumed ? readJournal(resumed) : forkedFrom ? readJournal(forkedFrom) : [];
+const sourceHeader = source.find((entry) => entry.type === 'session');
 
-/** omp keeps a resumed journal's id (its `session` header's), as `get_state` reports it. */
-const resumedId = () => {
-  try {
-    return readFileSync(/** @type {string} */ (resumed), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
-      .find((entry) => entry.type === 'session')?.id;
-  } catch {
-    return undefined;
-  }
-};
-const sessionId = (resumed && resumedId()) || randomUUID();
-const startedAt = new Date().toISOString();
-const sessionsDir = join(tmpdir(), 'fake-omp-sessions');
-const sessionFile = resumed ?? join(sessionsDir, `${sessionId}.jsonl`);
+let sessionId = (resumed && sourceHeader?.id) || randomUUID();
+let startedAt = (resumed && sourceHeader?.timestamp) || new Date().toISOString();
+let sessionFile = resumed ?? join(tmpdir(), 'fake-omp-sessions', `${sessionId}.jsonl`);
+const cwd = (resumed && sourceHeader?.cwd) || process.cwd();
+/** The journal this session continues from another (a fork's source, or the one before a rewind). */
+let parentSession = forkedFrom ? (sourceHeader?.id ?? null) : null;
 
 /** @type {Record<string, any>[]} */
-const messages = resumed
-  ? [
-      { role: 'user', content: [{ type: 'text', text: 'earlier question' }], timestamp: 1 },
-      { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }], stopReason: 'stop', timestamp: 2 },
-    ]
-  : source.filter((entry) => entry.type === 'message').map((entry) => entry.message);
+const messages = source.filter((entry) => entry.type === 'message').map((entry) => entry.message);
 let model = { provider: 'fake', id: 'fake-model', name: 'Fake Model' };
 let thinkingLevel = 'off';
 let msgCounter = 0;
 /** @type {string | null} */
-let sessionName = resumed ? 'Earlier work' : source.find((entry) => entry.type === 'title')?.title || null;
+let sessionName = source.find((entry) => entry.type === 'title')?.title || null;
 /** @type {Map<string, (answer: Record<string, any>) => void>} */
 const dialogs = new Map();
 
 /** Rewrites this session's journal: a title line, the header, then one line per message. */
 function persist() {
-  if (resumed || (!forkedFrom && !messages.some((m) => m.role === 'assistant'))) return;
-  const header = { type: 'session', version: 3, id: sessionId, timestamp: startedAt, cwd: process.cwd() };
-  const parent = source.find((entry) => entry.type === 'session')?.id;
+  if (!resumed && !parentSession && !messages.some((m) => m.role === 'assistant')) return;
+  const header = { type: 'session', version: 3, id: sessionId, timestamp: startedAt, cwd };
   const lines = [
     { type: 'title', v: 1, title: sessionName ?? '' },
-    parent ? { ...header, parentSession: parent } : header,
+    parentSession ? { ...header, parentSession } : header,
     ...messages.map((message) => ({ type: 'message', message })),
   ];
-  mkdirSync(sessionsDir, { recursive: true });
+  mkdirSync(dirname(sessionFile), { recursive: true });
   writeFileSync(sessionFile, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
 }
-persist();
+// A fork is written at once; a resumed journal is written as it changes.
+if (!resumed) persist();
 
 /** @param {Record<string, any>} frame */
 const out = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
@@ -407,6 +397,11 @@ lines.on('line', (line) => {
       if (at === -1) return out({ id, type: 'response', command: type, success: false, error: `Entry ${cmd.entryId} not found` });
       const text = String(messages[at].content?.[0]?.text ?? '');
       messages.splice(at);
+      // A new journal beside the old one, which keeps the path before the rewind.
+      parentSession = sessionId;
+      sessionId = randomUUID();
+      startedAt = new Date().toISOString();
+      sessionFile = join(dirname(sessionFile), `${startedAt.replace(/[:.]/g, '-')}_${sessionId}.jsonl`);
       persist();
       return ok(id, type, { text, cancelled: false });
     }

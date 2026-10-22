@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { STATE_LABELS, follow, followedName, isRunning, noteEvent, runningSessions, runningState, showPast, showRunning } from '../src/sessions/running.js';
+import { STATE_LABELS, conversationKey, follow, followedName, isRunning, listConversations, noteEvent, runningState, showConversation } from '../src/sessions/running.js';
 /** @import { SessionEvent, SessionMeta } from '../daemon/wire.js' */
 
 /** @param {Partial<SessionMeta> & { id: string }} m @returns {SessionMeta} */
@@ -10,20 +10,43 @@ let seq = 0;
 /** @param {Record<string, unknown>} frame @param {number} at @returns {SessionEvent} */
 const frame = (frame, at) => ({ kind: 'frame', frame, seq: ++seq, at, session: 's' });
 
-describe('running sessions', () => {
-  test('are the starting and ready ones, newest first, narrowed to a directory when asked', () => {
+/** @param {string} file @param {string} cwd @returns {import('../daemon/wire.js').PastSession} */
+const journal = (file, cwd = '/p') => ({ file, id: file, title: null, cwd, createdAt: null, modifiedAt: 5, prompts: 1, firstPrompt: 'hi' });
+
+describe('conversations', () => {
+  test('are every journal, each with the awake session holding it, and the awake ones not written yet', () => {
     const metas = [
-      meta({ id: 'old', startedAt: 1 }),
-      meta({ id: 'gone', status: 'exited', startedAt: 9 }),
-      meta({ id: 'new', startedAt: 5, status: 'starting', cwd: '/q' }),
-      meta({ id: 'failed', status: 'failed', startedAt: 7 }),
+      meta({ id: 'holds', sessionFile: '/a.jsonl' }),
+      meta({ id: 'asleep', status: 'exited', sessionFile: '/b.jsonl' }),
+      meta({ id: 'new', status: 'starting', sessionFile: '/new.jsonl', cwd: '/q', startedAt: 9 }),
+      meta({ id: 'failed', status: 'failed' }),
     ];
-    assert.deepEqual(runningSessions(metas, null).map((m) => m.id), ['new', 'old']);
-    assert.deepEqual(runningSessions(metas, '/p').map((m) => m.id), ['old']);
+    const listed = listConversations([journal('/a.jsonl'), journal('/b.jsonl')], metas, { searching: false, directory: null });
+    assert.deepEqual(
+      listed.map((c) => [c.key, c.meta?.id ?? null]),
+      [
+        ['/a.jsonl', 'holds'],
+        ['/b.jsonl', null],
+        ['/new.jsonl', 'new'],
+      ],
+    );
+    assert.equal(listed[2].modifiedAt, 9, 'a new one is as recent as its start');
     assert.equal(isRunning(meta({ id: 'x', status: 'exited' })), false);
   });
 
-  test('are working during a turn, done once it ends unread, and idle once read', () => {
+  test('searching lists only the journals that matched; a directory narrows them all', () => {
+    const metas = [meta({ id: 'new', sessionFile: null, cwd: '/q' })];
+    const past = [journal('/a.jsonl', '/p'), journal('/c.jsonl', '/q')];
+    assert.deepEqual(listConversations(past, metas, { searching: true, directory: null }).map((c) => c.key), ['/a.jsonl', '/c.jsonl']);
+    assert.deepEqual(listConversations(past, metas, { searching: false, directory: '/q' }).map((c) => c.key), ['/c.jsonl', 'new']);
+  });
+
+  test('are named by their journal, else a new one by its session', () => {
+    assert.equal(conversationKey({ sessionFile: '/a.jsonl', session: 's' }), '/a.jsonl');
+    assert.equal(conversationKey({ sessionFile: null, session: 's' }), 's');
+  });
+
+  test('awake, are working during a turn, done once it ends unread, and idle once read', () => {
     const followed = follow();
     assert.equal(runningState(followed, meta({ id: 's', status: 'starting' }), false), 'starting');
     noteEvent(followed, frame({ type: 'agent_start' }, 10));
@@ -53,14 +76,12 @@ describe('running sessions', () => {
     assert.equal(followedName(followed), 'fix the login bug');
   });
 
-  test('are shown in an omp window by session, dropping whatever it was starting from', () => {
-    assert.deepEqual(showRunning(meta({ id: 's1', sessionFile: '/j.jsonl' }), 'Login'), {
-      session: 's1', cwd: '/p', sessionFile: '/j.jsonl', name: 'Login', resume: null, fork: null, prompt: null,
+  test('are shown in an omp window by journal, with the session holding it, dropping whatever it was starting from', () => {
+    assert.deepEqual(showConversation({ file: '/j.jsonl', meta: meta({ id: 's1', sessionFile: '/j.jsonl' }), cwd: '/p', name: 'Login' }), {
+      session: 's1', cwd: '/p', sessionFile: '/j.jsonl', name: 'Login', fork: null, prompt: null,
+    });
+    assert.deepEqual(showConversation({ file: '/j.jsonl', meta: null, cwd: '/p', name: null }), {
+      session: null, cwd: '/p', sessionFile: '/j.jsonl', name: null, fork: null, prompt: null,
     });
   });
-});
-
-test('a past session is shown by resuming its journal', () => {
-  const past = { file: '/j.jsonl', id: 'j', title: 'Login', cwd: '/p', createdAt: null, modifiedAt: 0, prompts: 1, firstPrompt: null };
-  assert.deepEqual(showPast(past), { session: null, cwd: '/p', sessionFile: null, name: 'Login', resume: '/j.jsonl', fork: null, prompt: null });
 });

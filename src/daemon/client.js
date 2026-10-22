@@ -17,7 +17,7 @@
  * reports is the code this page loaded, and `onUiChange` hears when the files served stop
  * being, or become again, those.
  */
-/** @import { DaemonConfig, DirListing, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, Screen, SessionEvent, SessionMeta, StreamEvent, Workspace } from '../../daemon/wire.js' */
+/** @import { Conversation, DaemonConfig, DirListing, HelloEvent, PastSession, RpcResponse, Scratchpad, ScratchpadSummary, Screen, SessionEvent, SessionMeta, StreamEvent, Workspace } from '../../daemon/wire.js' */
 /** @import { Tree } from '../layout/grid-model.js' */
 /** @import { Unread } from '../../daemon/unread.js' */
 /** @typedef {{ ok: true, rev: string } | { ok: false, current: Scratchpad }} ScratchpadSave */
@@ -52,6 +52,7 @@ export class DaemonError extends Error {
  *   markRead(ompId: string, at: number): Promise<void>,
  *   markUnread(ompId: string): Promise<void>,
  *   history(query?: string, options?: { archived?: boolean }): Promise<PastSession[]>,
+ *   conversation(file: string): Promise<Conversation>,
  *   archivePastSession(file: string): Promise<string>,
  *   restorePastSession(file: string): Promise<string>,
  *   scratchpads(): Promise<ScratchpadSummary[]>,
@@ -65,10 +66,10 @@ export class DaemonError extends Error {
  *   saveScreen(workspace: string, id: string, tree: Tree, base: number | null, options?: { keepalive?: boolean }): Promise<ScreenSave>,
  *   config(): Promise<DaemonConfig>,
  *   createSession(options: { cwd: string, resume?: string, fork?: string }): Promise<SessionMeta>,
- *   closeSession(session: string): Promise<void>,
+ *   seen(session: string): Promise<void>,
  *   rpc(session: string, command: Record<string, unknown>): Promise<RpcResponse>,
  *   respondUi(session: string, response: Record<string, unknown>): Promise<void>,
- *   listFiles(session: string | null, dir: string): Promise<DirListing>,
+ *   listFiles(dir: string): Promise<DirListing>,
  *   onUiChange(fn: (outdated: boolean) => void): () => void,
  *   checkUi(): Promise<void>,
  * }} DaemonClient
@@ -341,6 +342,7 @@ export function createDaemonClient(env = {}) {
       const body = await request(`/api/history${params.size ? `?${params}` : ''}`);
       return body.sessions;
     },
+    conversation: (file) => request(`/api/conversation?file=${encodeURIComponent(file)}`),
     async archivePastSession(file) {
       return (await request('/api/history/archive', { method: 'POST', body: JSON.stringify({ file }) })).file;
     },
@@ -392,11 +394,15 @@ export function createDaemonClient(env = {}) {
     },
     async createSession({ cwd, resume, fork }) {
       const body = await request('/api/sessions', { method: 'POST', body: JSON.stringify({ cwd, resume, fork }) });
-      metas.set(body.session.id, body.session);
-      return body.session;
+      // The stream may have told of the session already, and newer: its answer is the oldest news.
+      if (!metas.has(body.session.id)) {
+        metas.set(body.session.id, body.session);
+        sessionsChanged();
+      }
+      return metas.get(body.session.id) ?? body.session;
     },
-    async closeSession(session) {
-      await request(sessionPath(session), { method: 'DELETE' });
+    async seen(session) {
+      await request(`${sessionPath(session)}/seen`, { method: 'POST' });
     },
     async rpc(session, command) {
       const { id } = await request(`${sessionPath(session)}/rpc`, { method: 'POST', body: JSON.stringify(command) });
@@ -405,8 +411,8 @@ export function createDaemonClient(env = {}) {
     async respondUi(session, response) {
       await request(`${sessionPath(session)}/ui`, { method: 'POST', body: JSON.stringify(response) });
     },
-    // Without a session, a folder is found relative to home, as a new session's directory is.
-    listFiles: (session, dir) => request(`${session ? sessionPath(session) : '/api'}/files?dir=${encodeURIComponent(dir)}`),
+    // A folder is found relative to home, as a new session's directory is.
+    listFiles: (dir) => request(`/api/files?dir=${encodeURIComponent(dir)}`),
   };
 }
 

@@ -21,14 +21,16 @@ const MAX_ROWS = 50;
  *   draft: HTMLTextAreaElement | HTMLInputElement,
  *   syntax: PathSyntax,
  *   foldersOnly?: boolean,
+ *   enter?: true | 'moved',
  *   list: Suggestions,
  *   listDir: (dir: string) => Promise<DirListing>,
  *   replace: (start: number, end: number, text: string) => void,
  * }} options `syntax` says how paths are written in `draft`; `foldersOnly` leaves files out;
+ * `enter` is when Enter takes the selected row (`SuggestOptions`), always unless told;
  * `listDir` lists a folder as typed in a path; `replace` puts `text` in the draft in place of
  * `start`…`end`, leaving the caret after it.
  */
-export function createFileSuggest({ draft, syntax, foldersOnly = false, list, listDir, replace }) {
+export function createFileSuggest({ draft, syntax, foldersOnly = false, enter = true, list, listDir, replace }) {
   /** @type {Map<string, Promise<DirListing>>} */
   const listings = new Map();
   /** The path the list is for (where it starts, its folder and segment), while one is being typed. */
@@ -83,7 +85,7 @@ export function createFileSuggest({ draft, syntax, foldersOnly = false, list, li
         pick: pick(entry),
       })),
       {
-        enter: true,
+        enter,
         note,
         tab(moved, selected) {
           const prefix = moved ? null : commonPrefix(matches, q.segment);

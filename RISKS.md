@@ -88,6 +88,20 @@ is newer. The daemon prints its version at start.
   no directory, or missing from the list. *Response:* compare a fresh journal
   with `tests/history.test.js`'s fixtures and update both.
 
+- **An asleep conversation is read from its journal as omp would resume it.**
+  `daemon/conversation.js` follows the entry tree (`id`/`parentId`) from the newest
+  entry and turns the path into messages as omp 18.12.3's session context does
+  (`message`, `custom_message`, `branch_summary`, `compaction`; tool results marked
+  `useless` dropped). A change shows up as a window whose conversation looks
+  different asleep than awake, or a rewind that misses its prompt after waking (the
+  pending rewind is found again by its place and text). omp's own `get_messages`
+  left out an empty aborted reply the journal holds ("Previous OMP process exited
+  before completing the turn"); asleep, the window shows it. *Response:* resume a
+  journal with `omp --mode rpc-ui --resume` on a copy, compare `get_messages` with
+  `conversationOf`, and update `tests/conversation.test.js`. A rewind (`branch`)
+  moving the session onto a new journal is omp 18.12.3's behaviour too; if it
+  rewinds in place again, `onRewound` never fires and nothing is archived.
+
 - **Archiving leans on omp's session layout, and `omp gc` cannot see the archive.**
   Archive moves `<project>/<name>.jsonl` and the `<project>/<name>/` folder beside it
   (subagent sessions, artifacts), the same pair omp's own `omp gc` archive moves; the
@@ -130,7 +144,7 @@ is newer. The daemon prints its version at start.
   `sessionName` and `session_info_update`'s `title`. The toolbar's progress relies
   on every `todo` tool result carrying the agent's whole list in `details.phases`
   (`details.op` is `view` for a read), on `get_state`'s `todoPhases`, and on
-  `todo_auto_clear` meaning the list changed. The toolbar's Login relies on
+  `todo_auto_clear` meaning the list changed. The toolbar's Sign in relies on
   `get_login_providers` listing the providers omp logs in to with `authenticated`,
   and on omp starting with, or switching to, only a model whose provider has
   credentials (with none, `omp --mode rpc-ui` exits: "No default model selected"). A
@@ -142,7 +156,7 @@ is newer. The daemon prints its version at start.
   daemon refuses the fork: `fork is not an existing file`), `!` runs that wait for
   the turn to end or show twice, a responses-only pane that shows tool work,
   drops a final reply or never stops "Working…", windows that stay unnamed, a
-  progress bar that never shows or lags the agent's list, or a Login button shown
+  progress bar that never shows or lags the agent's list, or a Sign in button shown
   while logged in (or missing while a login is needed). *Response:* re-read
   omp's `utils/file-mentions.ts`,
   `modes/rpc/rpc-btw.ts`, `session/btw-turn.ts`, `session/btw-history.ts`,

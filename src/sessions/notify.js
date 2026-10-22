@@ -3,16 +3,16 @@
  * running while the user is elsewhere: the moments that mark a conversation unread
  * (omp/activity.js), as they happen.
  *
- * Every running session the daemon runs is followed, as the Sessions window follows them. A
- * notification waits a moment after the event, and is shown only if the conversation is
- * still unread then and the user is not looking at it: an omp window the user is reading
- * reads it at once (wherever that window is, in this tab or another), which clears the mark.
- * Events the daemon replays on (re)connecting happened before this page heard of them, so
- * they never notify. A notification closes once its conversation is read; clicking it shows
- * the session as a click in Sessions does, which reads it.
+ * Every awake session is followed, as the Sessions window follows them. A notification waits
+ * a moment after the event, and is shown only if the conversation is still unread then and
+ * the user is not looking at it: an omp window the user is reading reads it at once (wherever
+ * that window is, in this tab or another), which clears the mark. Events the daemon replays
+ * on (re)connecting happened before this page heard of them, so they never notify. A
+ * notification closes once its conversation is read, asleep by then or not; clicking it shows
+ * the conversation as a click in Sessions does, which reads it.
  *
- * Every open tab notifies, each under the session's id as its tag: the system keeps one
- * notification per tag, so tabs replace each other's (silently) rather than stack them.
+ * Every open tab notifies, each under the conversation's omp id as its tag: the system keeps
+ * one notification per tag, so tabs replace each other's (silently) rather than stack them.
  *
  * It is off until the user turns it on with the top bar's Notify button, which asks for the
  * browser's permission then (only from a click: never on load); the choice is kept per
@@ -22,7 +22,7 @@ import { button } from '../ui/dom.js';
 import { readPref, writePref } from '../ui/prefs.js';
 import { tildeHome } from '../ui/format.js';
 import { awaitsUser } from '../omp/activity.js';
-import { follow, followedName, isRunning, noteEvent, showRunning } from './running.js';
+import { conversationKey, follow, followedName, isRunning, noteEvent, showConversation } from './running.js';
 /** @import { SessionEvent } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
 /** @import { LeafParams } from '../layout/grid-model.js' */
@@ -52,19 +52,19 @@ export function alertFor(event, replayed) {
 export const alertText = (alert) => (alert.kind === 'done' ? 'Finished' : alert.question ? `Needs your input: ${alert.question}` : 'Needs your input');
 
 /**
- * Whether the user is looking at session `session` here: this tab is in front and focused,
- * and one of its omp windows shows it.
- * @param {{ visible: boolean, focused: boolean, shown: ReadonlySet<string> }} page @param {string} session
+ * Whether the user is looking at a conversation here: this tab is in front and focused, and
+ * one of its omp windows shows it (`key`, as `conversationKey` names it).
+ * @param {{ visible: boolean, focused: boolean, shown: ReadonlySet<string> }} page @param {string} key
  */
-export const watching = (page, session) => page.visible && page.focused && page.shown.has(session);
+export const watching = (page, key) => page.visible && page.focused && page.shown.has(key);
 
 /**
  * @param {{
  *   daemon: DaemonClient,
  *   shown: () => ReadonlySet<string>,
  *   show: (params: LeafParams) => void,
- * }} options `shown` lists the sessions this tab's omp windows show; `show` shows one in the
- * omp window used last.
+ * }} options `shown` lists the conversations this tab's omp windows show (sessions/links.js);
+ * `show` shows one in the omp window used last.
  */
 export function createNotifier({ daemon, shown, show }) {
   const supported = typeof Notification === 'function';
@@ -76,8 +76,10 @@ export function createNotifier({ daemon, shown, show }) {
     .then((c) => (home = c.home))
     .catch(() => {});
 
-  /** Each running session followed, with its notification while one is up. @type {Map<string, { followed: Followed, off: () => void, note: Notification | null, timer: ReturnType<typeof setTimeout> | null }>} */
+  /** Each awake session followed, with the notification it is about to show. @type {Map<string, { followed: Followed, off: () => void, timer: ReturnType<typeof setTimeout> | null }>} */
   const sessions = new Map();
+  /** The notifications up, by conversation (omp id): they outlive the session, until read. @type {Map<string, Notification>} */
+  const notes = new Map();
 
   const root = button('topbar-btn notify-toggle', 'Notify', () => void toggle());
   /** The button says whether notifications are on, and why they cannot be. */
@@ -109,18 +111,17 @@ export function createNotifier({ daemon, shown, show }) {
     if (!entry) return;
     entry.off();
     if (entry.timer) clearTimeout(entry.timer);
-    entry.note?.close();
     sessions.delete(id);
   }
 
-  /** Follows every running session and lets go of stopped ones. */
+  /** Follows every awake session and lets go of the others. */
   function sync() {
-    const running = new Set(daemon.sessions().filter(isRunning).map((m) => m.id));
-    for (const id of sessions.keys()) if (!running.has(id)) forget(id);
-    for (const id of running) {
+    const awake = new Set(daemon.sessions().filter(isRunning).map((m) => m.id));
+    for (const id of sessions.keys()) if (!awake.has(id)) forget(id);
+    for (const id of awake) {
       if (sessions.has(id)) continue;
-      /** @type {{ followed: Followed, off: () => void, note: Notification | null, timer: ReturnType<typeof setTimeout> | null }} */
-      const entry = { followed: follow(), off: () => {}, note: null, timer: null };
+      /** @type {{ followed: Followed, off: () => void, timer: ReturnType<typeof setTimeout> | null }} */
+      const entry = { followed: follow(), off: () => {}, timer: null };
       sessions.set(id, entry);
       entry.off = daemon.subscribe(id, (event) => {
         noteEvent(entry.followed, event);
@@ -139,29 +140,30 @@ export function createNotifier({ daemon, shown, show }) {
   function notify(id, alert) {
     const entry = sessions.get(id);
     const meta = daemon.meta(id);
-    if (!entry || !meta || !on || Notification.permission !== 'granted') return;
-    if (daemon.unreadSince(meta.ompId) === null) return; // read already
-    if (watching({ visible: document.visibilityState === 'visible', focused: document.hasFocus(), shown: shown() }, id)) return;
+    const ompId = meta?.ompId;
+    if (!entry || !meta || !ompId || !on || Notification.permission !== 'granted') return;
+    if (daemon.unreadSince(ompId) === null) return; // read already
+    const key = /** @type {string} */ (conversationKey({ sessionFile: meta.sessionFile, session: meta.id }));
+    if (watching({ visible: document.visibilityState === 'visible', focused: document.hasFocus(), shown: shown() }, key)) return;
     const name = followedName(entry.followed);
-    const note = new Notification(name ?? tildeHome(meta.cwd, home), { body: alertText(alert), tag: id });
+    const note = new Notification(name ?? tildeHome(meta.cwd, home), { body: alertText(alert), tag: ompId });
     note.onclick = () => {
       window.focus();
-      show(showRunning(meta, name));
-      const since = daemon.unreadSince(meta.ompId);
-      if (meta.ompId && since !== null) daemon.markRead(meta.ompId, since).catch(() => {});
+      show(showConversation({ file: meta.sessionFile, meta, cwd: meta.cwd, name }));
+      const since = daemon.unreadSince(ompId);
+      if (since !== null) daemon.markRead(ompId, since).catch(() => {});
       note.close();
     };
     note.onclose = () => {
-      if (entry.note === note) entry.note = null;
+      if (notes.get(ompId) === note) notes.delete(ompId);
     };
-    entry.note = note;
+    notes.get(ompId)?.close();
+    notes.set(ompId, note);
   }
 
   /** Closes the notifications of conversations read since. */
   function closeRead() {
-    for (const [id, entry] of sessions) {
-      if (entry.note && daemon.unreadSince(daemon.meta(id)?.ompId ?? null) === null) entry.note.close();
-    }
+    for (const [ompId, note] of notes) if (daemon.unreadSince(ompId) === null) note.close();
   }
 
   const offSessions = daemon.onSessions(sync);
@@ -180,6 +182,7 @@ export function createNotifier({ daemon, shown, show }) {
       offUnread();
       offReset();
       for (const id of [...sessions.keys()]) forget(id);
+      for (const note of notes.values()) note.close();
       root.remove();
     },
   };

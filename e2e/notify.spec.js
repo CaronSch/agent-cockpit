@@ -46,11 +46,20 @@ async function stubNotifications(page) {
 }
 
 /**
- * What the page has shown for session `session`: other specs' sessions run on the same
- * daemon, and their turns end while this page is away too.
- * @param {Page} page @param {string} session @returns {Promise<ShownNote[]>}
+ * What the page has shown for conversation `ompId` (each is tagged with it): other specs'
+ * sessions run on the same daemon, and their turns end while this page is away too.
+ * @param {Page} page @param {string} ompId @returns {Promise<ShownNote[]>}
  */
-const notes = async (page, session) => (await shown(page)).filter((n) => n.tag === session);
+const notes = async (page, ompId) => (await shown(page)).filter((n) => n.tag === ompId);
+
+/** omp's id for the conversation session `session` holds. @param {Page} page @param {string} session @returns {Promise<string>} */
+async function ompIdOf(page, session) {
+  let ompId = null;
+  await expect
+    .poll(async () => (ompId = (await (await page.request.get('/api/sessions')).json()).sessions.find((/** @type {any} */ s) => s.id === session)?.ompId ?? null))
+    .toBeTruthy();
+  return /** @type {string} */ (/** @type {unknown} */ (ompId));
+}
 
 /** Everything the page has shown. @param {Page} page @returns {Promise<ShownNote[]>} */
 const shown = (page) => page.evaluate(() => /** @type {any} */ (window).__notes.map((/** @type {ShownNote} */ { title, body, tag, closed }) => ({ title, body, tag, closed })));
@@ -87,7 +96,8 @@ test('a turn that ends while the user is away notifies once; a click shows the s
   await page.keyboard.press('Escape');
   const pane = page.locator('.widget[data-widget="omp"]');
   await startOmp(pane);
-  const first = await shownSession(page, workspace);
+  const session = await shownSession(page, workspace);
+  const first = await ompIdOf(page, session);
 
   // Off until turned on, from a click.
   const toggle = page.getByRole('button', { name: 'Notify' });
@@ -107,9 +117,9 @@ test('a turn that ends while the user is away notifies once; a click shows the s
   // The window moves on to another session; clicking the notification brings this one back, read.
   await pane.getByRole('button', { name: 'New', exact: true }).click();
   await startOmp(pane);
-  await expect.poll(() => shownSession(page, workspace)).not.toBe(first);
+  await expect.poll(() => shownSession(page, workspace)).not.toBe(session);
   await page.evaluate((tag) => /** @type {any} */ (window).__notes.find((/** @type {ShownNote} */ n) => n.tag === tag).onclick(), first);
-  await expect.poll(() => shownSession(page, workspace)).toBe(first);
+  await expect.poll(() => shownSession(page, workspace)).toBe(session);
   await expect(pane.locator('.omp-assistant').last()).toContainText('You said: fix the login bug');
   expect((await notes(page, first))[0].closed).toBe(true);
 

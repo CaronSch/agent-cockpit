@@ -9,10 +9,14 @@
  *   GET    /api/history?q=words&archived=1 → { sessions: PastSession[] } (unordered; every word must
  *                                      match; `archived=1` lists the archived sessions instead)
  *   POST   /api/history/archive        { file } → { file }: the journal (with its folder) moved from omp's
- *                                      sessions into the archive, 409 while a running session writes it
+ *                                      sessions into the archive; a session writing it goes to sleep
+ *                                      first, 409 while its agent works
  *   POST   /api/history/restore        { file } → { file }: an archived journal moved back where it was,
  *                                      409 if something is there now; both are 400 for a path that is
  *                                      not a journal they list, 404 for one that is gone
+ *   GET    /api/conversation?file=path → Conversation: the journal's conversation (one `history` lists,
+ *                                      archived or not, or one this daemon's sessions wrote), 400/404
+ *                                      for any other path
  *   PUT    /api/unread/:ompId          → 204: the user marked the conversation unread (see `unread.js`)
  *   POST   /api/unread/:ompId/read     { at } → 204: the user read it as it was at `at` (daemon
  *                                      time: the `since` they were shown); a mark made after
@@ -24,17 +28,16 @@
  *                                      copy of one; either must be an existing file). Resuming
  *                                      a journal a running session writes answers 200 with that
  *                                      session instead: two omps never write one journal
- *   DELETE /api/sessions/:id           → 204: the user stopped the session (closes omp's stdin,
- *                                      kills it if it lingers); nothing else ends one but the
- *                                      daemon exiting
+ *   DELETE /api/sessions/:id           → 204: the session goes to sleep now (closes omp's stdin,
+ *                                      kills it if it lingers), as it does by itself once idle
+ *                                      and unused (see `sleep.js`), or when the daemon exits
+ *   POST   /api/sessions/:id/seen      → 204: a window is being used on the session: it stays awake
  *   POST   /api/sessions/:id/rpc       omp command without `id` → 202 { id }: the id the daemon gave
  *                                      the command; omp's response frame, carrying it, arrives on
  *                                      the stream
  *   POST   /api/sessions/:id/ui        omp `extension_ui_response` → 204
  *   GET    /api/files?dir=path         → DirListing: the folder `dir` names (relative to home,
  *                                      `~/…` or absolute, as `cwd` above), or 404
- *   GET    /api/sessions/:id/files?dir=path → DirListing: the folder `dir` names (relative to
- *                                      the session's directory, `~/…` or absolute), or 404
  *   GET    /api/scratchpads            → { pads: ScratchpadSummary[] } (most recently changed first)
  *   GET    /api/scratchpads/:id        → Scratchpad (empty text for a pad never written)
  *   PUT    /api/scratchpads/:id        { text, base } → { rev }, or 409 { error, current: Scratchpad }
@@ -98,6 +101,21 @@
  *   prompts: number,
  *   firstPrompt: string | null,
  * }} PastSession
+ */
+
+/**
+ * A conversation as its journal has it, for a window to show while no omp holds it (see
+ * `conversation.js`): `messages` as omp's `get_messages` answers once it is resumed, `model`
+ * (`provider/id`) and `thinkingLevel` as the journal last recorded them, `id` as PastSession's.
+ * @typedef {{
+ *   file: string,
+ *   id: string,
+ *   cwd: string | null,
+ *   title: string | null,
+ *   model: string | null,
+ *   thinkingLevel: string | null,
+ *   messages: Record<string, any>[],
+ * }} Conversation
  */
 
 /**

@@ -31,6 +31,18 @@ export function rewindPoint(items, key) {
 }
 
 /**
+ * The key of the prompt `point` was taken from, in `items` as they are now: the transcript can
+ * be replaced under a pending rewind (the conversation woke, or was rewound elsewhere), and the
+ * prompt is found again by its place and text, or not at all.
+ * @param {readonly Item[]} items @param {RewindPoint} point @returns {string | null}
+ */
+export function pointKey(items, point) {
+  const users = items.filter((i) => i.kind === 'user');
+  const item = users[users.length - 1 - point.fromEnd];
+  return item?.kind === 'user' && !item.byAgent && item.text.trim() === point.text.trim() ? item.key : null;
+}
+
+/**
  * omp's entry id for `point` among the user messages omp lists, or null when its
  * conversation does not end the way the transcript's does.
  * @param {ReadonlyArray<{ entryId: string, text: string }>} listed @param {RewindPoint} point

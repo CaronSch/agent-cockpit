@@ -36,7 +36,7 @@ const hello = (bootId, sessions = [], ui = 'v1', unread = {}, seq = 0) => ({ kin
 /** The daemon's answer to POST /rpc: the id omp's response will carry on the stream. */
 const accepted = () => new Response(JSON.stringify({ id: 'ac_7' }), { status: 202 });
 
-/** @param {number} [status] @param {(url: string) => Response | null} [route] */
+/** @param {number} [status] @param {(url: string) => Response | Promise<Response> | null} [route] */
 async function connectedClient(status = 200, route = () => null) {
   FakeSource.opened = [];
   const client = createDaemonClient({
@@ -49,6 +49,22 @@ async function connectedClient(status = 200, route = () => null) {
 }
 
 describe('daemon client', () => {
+  test('a session the stream told of first keeps the stream’s newer state over the create answer', async () => {
+    /** @type {(res: Response) => void} */
+    let answer = () => {};
+    // The create answer is held while omp starts and the stream says it is ready.
+    /** @type {Promise<Response>} */
+    const held = new Promise((resolve) => (answer = resolve));
+    const { client, source } = await connectedClient(200, (url) => (url === '/api/sessions' ? held : null));
+    source.deliver(hello('b1'));
+    const created = client.createSession({ cwd: '/p' });
+    source.deliver({ kind: 'session', meta: meta('s1', 'starting'), seq: 1, at: 0, session: 's1' });
+    source.deliver({ kind: 'session', meta: meta('s1', 'ready'), seq: 2, at: 0, session: 's1' });
+    answer(new Response(JSON.stringify({ session: meta('s1', 'starting') }), { status: 201 }));
+    assert.equal((await created).status, 'ready');
+    assert.equal(client.meta('s1')?.status, 'ready', 'not set back to starting by the late answer');
+  });
+
   test('a window that subscribes late first receives everything already seen for its session', async () => {
     const { client, source } = await connectedClient();
     source.deliver(hello('b1', [meta('s1')]));

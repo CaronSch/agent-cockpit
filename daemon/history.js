@@ -22,7 +22,8 @@ import { createReadStream, mkdirSync, watch } from 'node:fs';
 import { link, lstat, mkdir, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
-/** @import { PastSession } from './wire.js' */
+import { conversationOf } from './conversation.js';
+/** @import { Conversation, PastSession } from './wire.js' */
 
 const SEARCH_CHARS = 17 * 1024; // per session; enough for every prompt of a long session
 const PREVIEW_CHARS = 280;
@@ -100,8 +101,8 @@ async function summarise(file, info) {
   };
 }
 
-/** Why a journal could not be archived or restored, as an HTTP status. */
-export class MoveRefused extends Error {
+/** Why a journal could not be read, archived or restored, as an HTTP status. */
+export class JournalRefused extends Error {
   /** @param {400 | 404 | 409} status @param {string} message */
   constructor(status, message) {
     super(message);
@@ -165,13 +166,42 @@ function createShelf(root) {
  * @param {string} root @param {unknown} file @returns {string}
  */
 function journalUnder(root, file) {
-  if (typeof file !== 'string' || !file) throw new MoveRefused(400, 'file is required');
+  if (typeof file !== 'string' || !file) throw new JournalRefused(400, 'file is required');
   const rel = relative(root, resolve(file));
   const parts = rel.split(sep);
   if (isAbsolute(rel) || parts.length !== 2 || parts[0] === '..' || !parts[1].endsWith('.jsonl') || parts[1].startsWith('.')) {
-    throw new MoveRefused(400, `not a session journal under ${root}: ${file}`);
+    throw new JournalRefused(400, `not a session journal under ${root}: ${file}`);
   }
   return rel;
+}
+
+/**
+ * The first of `roots` that `file` is a journal under, and where under it: refused as
+ * `journalUnder` refuses when it is under none.
+ * @param {string[]} roots @param {unknown} file @returns {[string, string]}
+ */
+function journalIn(roots, file) {
+  for (const base of roots) {
+    try {
+      return [base, journalUnder(base, file)];
+    } catch {}
+  }
+  return [roots[0], journalUnder(roots[0], file)];
+}
+
+/**
+ * The conversation in the journal at `path`, wherever it is: the caller decides it may be read.
+ * @param {string} path @returns {Promise<Conversation>}
+ */
+export async function readConversation(path) {
+  const text = await Bun.file(path)
+    .text()
+    .catch(() => {
+      throw new JournalRefused(404, `no such session journal: ${path}`);
+    });
+  const found = conversationOf(path, text);
+  if (!found) throw new JournalRefused(404, `not a session journal: ${path}`);
+  return found;
 }
 
 /** @param {string} path */
@@ -196,14 +226,14 @@ async function moveSession(fromRoot, toRoot, rel) {
   const to = join(toRoot, rel);
   const folder = { from: from.slice(0, -'.jsonl'.length), to: to.slice(0, -'.jsonl'.length) };
   const info = await lstat(from).catch(() => null);
-  if (!info?.isFile()) throw new MoveRefused(404, `no such session journal: ${from}`);
+  if (!info?.isFile()) throw new JournalRefused(404, `no such session journal: ${from}`);
   const hasFolder = (await lstat(folder.from).catch(() => null))?.isDirectory() ?? false;
-  if ((await exists(to)) || (hasFolder && (await exists(folder.to)))) throw new MoveRefused(409, `already there, not replaced: ${to}`);
+  if ((await exists(to)) || (hasFolder && (await exists(folder.to)))) throw new JournalRefused(409, `already there, not replaced: ${to}`);
 
   await mkdir(dirname(to), { recursive: true });
   await moveFile(from, to).catch((/** @type {NodeJS.ErrnoException} */ err) => {
-    if (err.code === 'EEXIST') throw new MoveRefused(409, `already there, not replaced: ${to}`);
-    if (err.code === 'EXDEV') throw new MoveRefused(409, `the archive must be on the same volume as omp's sessions: ${toRoot}`);
+    if (err.code === 'EEXIST') throw new JournalRefused(409, `already there, not replaced: ${to}`);
+    if (err.code === 'EXDEV') throw new JournalRefused(409, `the archive must be on the same volume as omp's sessions: ${toRoot}`);
     throw err;
   });
   if (hasFolder) {
@@ -292,6 +322,12 @@ export function createHistory({ root, archive }) {
      * @returns {Promise<PastSession[]>}
      */
     list: (query = '', options = {}) => (options.archived ? archived : sessions).list(query),
+    /**
+     * The conversation in a journal `list()` lists, archived or not (`conversation.js`).
+     * @param {unknown} file untrusted: refused unless it is a journal in either directory
+     * @returns {Promise<Conversation>}
+     */
+    conversation: async (file) => readConversation(join(...journalIn([root, archive], file))),
     /**
      * Moves a journal listed by `list()` into the archive; returns where it is now.
      * @param {unknown} file untrusted: refused unless it is a journal in omp's sessions directory
