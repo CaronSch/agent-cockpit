@@ -23,7 +23,9 @@ import scratchpad from './scratchpad.js';
  * dropped onto the middle of a window of `type`, which then shows it.
  * `ctx.setUnread(true)` lights the window's border: it has news its user has not seen.
  * `ctx.setLabel(text)` names what the window shows (e.g. the omp window's conversation) in
- * its top bar, beside its type's title; null removes the name.
+ * its top bar, beside its type's title; null removes the name. `ctx.headActions` is where the
+ * window puts controls of its own in that bar, before its close button (pressing them never
+ * drags the window).
  * `ctx.screen` tells which windows this screen has (with their settings), which one of each
  * type `showWidget` would use, and which one the pointer is over (else the focused one);
  * `ctx.outline(ids)` outlines those windows, until it is called again (with `[]` to stop).
@@ -46,6 +48,7 @@ import scratchpad from './scratchpad.js';
  *   dragWidget(type: string, params: LeafParams, event: PointerEvent, options?: { label?: string, into?: boolean, onEnd?: (result: DragEndResult) => void }): void,
  *   setUnread(unread: boolean): void,
  *   setLabel(text: string | null): void,
+ *   readonly headActions: HTMLElement,
  *   readonly screen: Pick<Atom<ScreenWindows>, 'get' | 'subscribe'>,
  *   outline(ids: readonly string[]): void,
  * }} WidgetContext

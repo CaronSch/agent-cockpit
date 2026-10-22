@@ -99,7 +99,7 @@ button {
 }
 
 /* The top bar's controls sit a little tighter than buttons elsewhere, to fit its height. */
-.topbar-actions :is(.btn, .screen-switch, .notify-toggle) {
+.topbar-actions :is(.btn, .screen-switch, .notify-toggle, .config-toggle) {
   padding-block: 3px;
 }
 
@@ -389,6 +389,67 @@ button {
   cursor: default;
 }
 
+/* ── Config ──────────────────────────────────────────── */
+/* App-wide switches: a quiet button whose menu drops under it, looking like the omp menus. */
+.config-toggle {
+  padding: 5px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-dim);
+  font: 600 var(--text-sm) / 1.4 var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.config-toggle:hover,
+.config-toggle[aria-expanded='true'] {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.config-menu:popover-open {
+  position-area: bottom span-left;
+  position-try-fallbacks: flip-inline;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: min(22rem, calc(100vw - 16px));
+  padding: var(--space-2);
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-m);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-lift);
+  font: var(--text-sm) / 1.4 var(--font-mono);
+}
+
+.config-setting {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 2px var(--space-2);
+  padding: 4px 6px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.config-setting:hover {
+  background: var(--color-surface);
+}
+
+.config-setting input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.config-detail {
+  grid-column: 2;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
 /* ── Screen switcher ─────────────────────────────────── */
 .screen-switch {
   display: flex;
@@ -594,6 +655,19 @@ button {
   cursor: grab;
   touch-action: none;
   user-select: none;
+}
+
+.widget-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: var(--text-xs) / 1.4 var(--font-mono);
+  cursor: default;
+}
+
+.widget-actions:empty {
+  display: none;
 }
 
 .widget-grip,

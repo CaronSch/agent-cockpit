@@ -18,6 +18,7 @@ import { createUpdateNotice } from './ui/update-notice.js';
 import { createNotifier } from './sessions/notify.js';
 import { sessionLinks } from './sessions/links.js';
 import { createZoomControl } from './ui/zoom.js';
+import { createConfigMenu } from './ui/settings.js';
 import { button, el } from './ui/dom.js';
 import { getDaemon } from './daemon/client.js';
 import { openScreen } from './workspace/screen.js';
@@ -134,9 +135,11 @@ export async function createApp(root) {
     const label = el('span', 'widget-label');
     label.hidden = true;
     heading.append(' ', label); // a space, so the heading reads "omp <name>", not "omp<name>"
+    // The widget's own controls for the window, before its close button.
+    const actions = el('div', 'widget-actions');
     const close = button('widget-close', '×');
     close.setAttribute('aria-label', `Close ${title}`);
-    head.append(grip, glyph, heading, close);
+    head.append(grip, glyph, heading, actions, close);
 
     const body = el('div', 'widget-body');
     frameEl.append(head, body);
@@ -166,6 +169,7 @@ export async function createApp(root) {
         label.hidden = !text;
         heading.title = text ?? '';
       },
+      headActions: actions,
       screen: screenAtom,
       outline(/** @type {readonly string[]} */ ids) {
         outlines.set(leaf.id, ids);
@@ -329,7 +333,7 @@ export async function createApp(root) {
   gridEl.addEventListener('pointerdown', (event) => {
     const target = /** @type {Element} */ (event.target);
     const head = target.closest('.widget-head');
-    if (!head || isStacked() || target.closest('.widget-close')) return;
+    if (!head || isStacked() || target.closest('.widget-close, .widget-actions')) return;
     const frameEl = /** @type {HTMLElement} */ (head.closest('.widget'));
     drag.start({ kind: 'move', id: /** @type {string} */ (frameEl.dataset.id) }, event, {
       label: /** @type {Element} */ (head.querySelector('.widget-title')).textContent,
@@ -375,6 +379,7 @@ export async function createApp(root) {
     createScreenSwitcher({ opened, describe: (tree) => describeWindows(tree, titleOf) }).root,
   );
   query(root, '.topbar-actions').prepend(createZoomControl().root);
+  query(root, '.topbar-actions').prepend(createConfigMenu().root);
   query(root, '.topbar-actions').prepend(
     createNotifier({
       daemon,

@@ -4,8 +4,9 @@
  * spaces, punctuation included: `fox.`, `foo.bar()`, `(see`.
  *
  * The boundaries (`wordStart`, `wordEnd`) are plain text in, offset out, so they can be tested
- * without a DOM. `snapToWords` applies them to a selection's two ends where they sit in text,
- * across bold, code and links within a line, keeping which end the user dragged from.
+ * without a DOM. `snappedRange` applies them to a range's two ends where they sit in text,
+ * across bold, code and links within a line; `snapToWords` sets a selection to that, keeping
+ * which end the user dragged from.
  */
 
 const WORD = /\S/;
@@ -67,15 +68,24 @@ function snapEnd(node, offset) {
   }
 }
 
+/** `range` grown out to whole words, as a new range; `range` itself is left alone. @param {Range} range */
+export function snappedRange(range) {
+  const { startContainer, startOffset, endContainer, endOffset } = range;
+  const [startNode, start] = startContainer instanceof Text ? snapStart(startContainer, startOffset) : [startContainer, startOffset];
+  const [endNode, end] = endContainer instanceof Text ? snapEnd(endContainer, endOffset) : [endContainer, endOffset];
+  const snapped = document.createRange();
+  snapped.setStart(startNode, start);
+  snapped.setEnd(endNode, end);
+  return snapped;
+}
+
 /** Snaps `sel`'s ends out to whole words; leaves it alone when they already sit on word edges. @param {Selection} sel */
 export function snapToWords(sel) {
   if (sel.rangeCount === 0 || sel.isCollapsed) return;
   const range = sel.getRangeAt(0);
-  const { startContainer, startOffset, endContainer, endOffset } = range;
-  const [startNode, start] = startContainer instanceof Text ? snapStart(startContainer, startOffset) : [startContainer, startOffset];
-  const [endNode, end] = endContainer instanceof Text ? snapEnd(endContainer, endOffset) : [endContainer, endOffset];
-  if (startNode === startContainer && start === startOffset && endNode === endContainer && end === endOffset) return;
-  const backward = sel.anchorNode !== startContainer || sel.anchorOffset !== startOffset;
-  if (backward) sel.setBaseAndExtent(endNode, end, startNode, start);
-  else sel.setBaseAndExtent(startNode, start, endNode, end);
+  const snapped = snappedRange(range);
+  if (snapped.compareBoundaryPoints(Range.START_TO_START, range) === 0 && snapped.compareBoundaryPoints(Range.END_TO_END, range) === 0) return;
+  const backward = sel.anchorNode !== range.startContainer || sel.anchorOffset !== range.startOffset;
+  if (backward) sel.setBaseAndExtent(snapped.endContainer, snapped.endOffset, snapped.startContainer, snapped.startOffset);
+  else sel.setBaseAndExtent(snapped.startContainer, snapped.startOffset, snapped.endContainer, snapped.endOffset);
 }

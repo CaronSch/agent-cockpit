@@ -10,9 +10,11 @@
  * Params (persisted with the layout): `session` (daemon session id), `cwd`,
  * `sessionFile` (omp's transcript file, for resuming after the process is gone), `name` (the
  * conversation's title, shown in the window's top bar), `resume` or `fork` while the window is
- * starting from another journal, `prompt` while a fork waits to send the message it was
- * dragged off another pane's Send with, and the pane's settings from its Config panel
- * (`SETTINGS`).
+ * starting from another journal, and `prompt` while a fork waits to send the message it was
+ * dragged off another pane's Send with. What the pane shows follows the app's settings
+ * (ui/settings.js), the same in every omp window.
+ *
+ * New, Stop and the More menu sit in the window's top bar, beside its close button.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -23,6 +25,7 @@ import { renderDialog } from '../omp/dialogs-view.js';
 import { createComposer } from '../omp/composer.js';
 import { composeAsk, composeFollowUp, isCommand, shellCommand } from '../omp/message.js';
 import { attachSelectionPopup } from '../omp/selection-popup.js';
+import { attachDragHighlight } from '../omp/drag-highlight.js';
 import { createSuggestions } from '../omp/suggestions.js';
 import { createFileSuggest } from '../omp/file-suggest.js';
 import { MENTIONS, PLAIN_PATH } from '../omp/file-mention.js';
@@ -33,6 +36,7 @@ import { createPromptHistory, sentPrompts } from '../omp/prompt-history.js';
 import { branchEntry, rewindPoint } from '../omp/rewind.js';
 import { confirmBeside } from '../ui/confirm.js';
 import { focusOnClick } from '../ui/click-focus.js';
+import { settings } from '../ui/settings.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { RpcResponse, SessionEvent, SessionMeta } from '../../daemon/wire.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -43,23 +47,9 @@ import { focusOnClick } from '../ui/click-focus.js';
  * window is placed (set by whoever created it: the Sessions window, another pane's Fork);
  * either is cleared once the session is running, so a fork is never taken twice. `prompt` is
  * cleared as it is sent.
- * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, name: string | null, resume: string | null, fork: string | null, prompt: string | null, onlyResponses: boolean }} OmpParams
+ * @typedef {{ session: string | null, cwd: string | null, sessionFile: string | null, name: string | null, resume: string | null, fork: string | null, prompt: string | null }} OmpParams
  */
 /** @typedef {{ label: string, detail?: string, current?: boolean, pick: () => void }} MenuEntry */
-/**
- * A switch in the pane's Config panel, saved with the window under `key`; off unless set.
- * @typedef {{ key: 'onlyResponses', label: string, detail: string }} PaneSetting
- */
-
-/** The pane's settings, in the order the Config panel lists them. @type {readonly PaneSetting[]} */
-const SETTINGS = [
-  {
-    key: 'onlyResponses',
-    label: 'Only prompts and responses',
-    detail: 'Hide thinking, tool calls and the messages in between',
-  },
-];
-
 const MAX_SUGGESTIONS = 8;
 const BOTTOM_SLACK_PX = 24;
 const REFUSED = 'The daemon refused this page.';
@@ -98,7 +88,6 @@ function createPane(body, ctx, daemon) {
     resume: str(ctx.params.resume),
     fork: str(ctx.params.fork),
     prompt: str(ctx.params.prompt),
-    onlyResponses: ctx.params.onlyResponses === true,
   });
 
   /** @type {string | null} */
@@ -121,6 +110,7 @@ function createPane(body, ctx, daemon) {
   // or refused for want of the token) when this window mounts, and then never changes.
   schedule();
   const offStatus = daemon.onStatus(() => schedule());
+  const offSettings = settings.subscribe(() => schedule());
   const offReset = daemon.onReset(() => {
     // The daemon restarted: its sessions, and our view of them, are gone.
     view?.destroy();
@@ -429,7 +419,7 @@ function createPane(body, ctx, daemon) {
     // Shown only while the session has to log in to talk to its model; More always has Login.
     const loginBtn = toolButton('Login', 'Log in to a model provider: this session’s model needs it');
     // The rest sits in one menu, so the toolbar keeps to one line at usual pane widths.
-    const moreBtn = toolButton('⋯', 'More: Fork, Config, Login, End');
+    const moreBtn = toolButton('⋯', 'More: Fork, Login, End');
     moreBtn.setAttribute('aria-label', 'More actions');
     const moreMenu = el('div', 'omp-menu omp-more');
     moreMenu.popover = 'auto';
@@ -440,11 +430,12 @@ function createPane(body, ctx, daemon) {
       return b;
     };
     const forkBtn = menuItem('Fork', FORK_TITLE);
-    const configBtn = menuItem('Config', 'Settings for this pane');
     const loginItem = menuItem('Login', 'Log in to a model provider');
     const endBtn = menuItem('End', 'End this omp session (closing the window leaves it running)');
-    moreMenu.append(forkBtn, configBtn, loginItem, endBtn);
-    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, progressEl, contextEl, costEl, errorBadge, spacer, loginBtn, newBtn, stopBtn, moreBtn, moreMenu);
+    moreMenu.append(forkBtn, loginItem, endBtn);
+    toolbar.append(cwdEl, modelBtn, thinkingBtn, activity, progressEl, contextEl, costEl, errorBadge, spacer, loginBtn);
+    // The session's own controls go in the window's top bar, for as long as it is shown.
+    ctx.headActions.replaceChildren(newBtn, stopBtn, moreBtn, moreMenu);
 
     const strip = el('div', 'omp-strip');
     const loginStrip = el('div', 'omp-login');
@@ -504,6 +495,8 @@ function createPane(body, ctx, daemon) {
       },
     });
     node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, queue, suggestions.root, composer.root);
+    const highlight = attachDragHighlight({ host: node, transcript, enabled: () => settings.get().animatedSelection });
+    const offHighlight = settings.subscribe(() => highlight.refresh());
     // A click on the pane that is not on a control, in a dialog omp asked for or in the
     // selection popup puts the caret in the message box, as in a terminal.
     focusOnClick(node, draft, '.omp-dialogs, .omp-quote-pop');
@@ -760,30 +753,6 @@ function createPane(body, ctx, daemon) {
         }));
     for (const anchor of [loginBtn, loginItem]) attachMenu(anchor, loginProviders, { filter: true });
 
-    // ── Config: this window's own settings (`SETTINGS`), saved with it ──
-    const settingsPanel = el('div', 'omp-menu omp-settings');
-    settingsPanel.popover = 'auto';
-    configBtn.popoverTargetElement = settingsPanel;
-    settingsPanel.addEventListener('toggle', (event) => {
-      if (/** @type {ToggleEvent} */ (event).newState !== 'open') return;
-      settingsPanel.replaceChildren(
-        el('p', 'omp-label', 'This pane'),
-        ...SETTINGS.map((setting) => {
-          const row = el('label', 'omp-setting');
-          const box = el('input');
-          box.type = 'checkbox';
-          box.checked = params()[setting.key];
-          box.addEventListener('change', () => {
-            ctx.setParams({ [setting.key]: box.checked });
-            schedule();
-          });
-          row.append(box, el('span', '', setting.label), el('span', 'omp-muted', setting.detail));
-          return row;
-        }),
-      );
-    });
-    configBtn.after(settingsPanel);
-
     stopBtn.addEventListener('click', () => void stop());
     // The copy is omp's own (`--fork`): a new session in a new window; this one carries on.
     forkBtn.addEventListener('click', () => {
@@ -921,7 +890,7 @@ function createPane(body, ctx, daemon) {
 
     function drawTranscript() {
       rewindBar.remove(); // items are placed by index; drawRewind puts it back
-      const { onlyResponses } = params();
+      const { onlyResponses } = settings.get();
       if (onlyResponses !== drawnOnlyResponses) {
         drawnOnlyResponses = onlyResponses;
         for (const entry of drawn.values()) {
@@ -1161,9 +1130,12 @@ function createPane(body, ctx, daemon) {
       markRead,
       destroy() {
         subscription();
+        ctx.headActions.replaceChildren();
         resizes.disconnect();
         composer.destroy();
         selectionPopup.destroy();
+        offHighlight();
+        highlight.destroy();
       },
     };
   }
@@ -1182,6 +1154,7 @@ function createPane(body, ctx, daemon) {
       destroyed = true;
       if (frame) cancelAnimationFrame(frame);
       offStatus();
+      offSettings();
       offReset();
       offUnread();
       // The session runs on: the daemon's, not this window's.

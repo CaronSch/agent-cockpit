@@ -735,6 +735,107 @@ test('the top bar sizes all text up and down, resets it, and keeps it across a r
   await level.click();
 });
 
+test('New, Stop and More sit in the window’s top bar; pressing them never drags the window, its title still does', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const head = pane.locator('.widget-head');
+  const toolbar = pane.locator('.omp-toolbar');
+  for (const name of ['New', 'Stop', 'More actions']) {
+    await expect(head.getByRole('button', { name, exact: true })).toBeVisible();
+    await expect(toolbar.getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
+
+  // Stop is live while a turn runs.
+  const stopBtn = head.getByRole('button', { name: 'Stop', exact: true });
+  await expect(stopBtn).toBeDisabled();
+  await send(pane, 'slow');
+  await expect(stopBtn).toBeEnabled();
+  await stopBtn.click();
+  await expect(stopBtn).toBeDisabled();
+
+  // More opens under its button, with Fork, Login and End (Config is in the app's top bar now).
+  await head.getByRole('button', { name: 'More actions' }).click();
+  const more = pane.locator('.omp-more');
+  await expect(more.getByRole('button')).toHaveText(['Fork', 'Login', 'End']);
+  await page.keyboard.press('Escape');
+
+  // Pressing a button and moving onto another window does not pick this one up; pressing its title does.
+  const target = await addOmpPane(page);
+  const indicator = page.locator('.drop-indicator');
+  const at = /** @param {import('@playwright/test').Locator} l */ async (l) => {
+    const box = await l.boundingBox();
+    if (!box) throw new Error('not laid out');
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+  for (const [from, picks] of /** @type {const} */ ([[head.getByRole('button', { name: 'New', exact: true }), false], [pane.locator('.widget-title'), true]])) {
+    const [start, end] = [await at(from), await at(target)];
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 10 });
+    await (picks ? expect(indicator).toHaveClass(/is-visible/) : expect(indicator).not.toHaveClass(/is-visible/));
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+  }
+
+  // New starts over in this window: the setup screen, and the bar loses the session's controls.
+  await head.getByRole('button', { name: 'New', exact: true }).click();
+  await expect(pane.getByRole('button', { name: 'Start omp' })).toBeVisible();
+  await expect(head.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+});
+
+test('with Animated selection on, a drag shows whole words in its own highlight; off, the browser’s', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const reply = pane.locator('.omp-assistant').last();
+  await expect(reply.locator('li')).toHaveText(['one', 'two']);
+  await expect(pane.locator('.widget-label')).toHaveText('About hello'); // settled and titled: nothing redraws it
+  const paragraph = reply.locator('.omp-md > p').first();
+  // The middle of "said" and of "one", and where "said" starts.
+  const points = await reply.evaluate((node) => {
+    /** @param {string} selector */
+    const textIn = (selector) => /** @type {Node} */ (document.createTreeWalker(/** @type {Node} */ (node.querySelector(selector)), NodeFilter.SHOW_TEXT).nextNode());
+    /** @param {Node} text @param {number} offset */
+    const box = (text, offset) => {
+      const range = document.createRange();
+      range.setStart(text, offset);
+      range.setEnd(text, offset + 1);
+      return range.getBoundingClientRect();
+    };
+    const [first, one] = [textIn('.omp-md > p'), textIn('li')];
+    const from = box(first, 'You sa'.length);
+    const to = box(one, 'o'.length);
+    return { from: { x: from.x + from.width / 2, y: from.y + from.height / 2 }, to: { x: to.x + to.width / 2, y: to.y + to.height / 2 }, wordLeft: box(first, 'You '.length).left };
+  });
+  const lines = pane.locator('.omp-highlight-line:visible');
+  const selectionBackground = () => paragraph.evaluate((p) => getComputedStyle(p, '::selection').backgroundColor);
+
+  // Mid-drag: the selection is still where the pointer is, but the highlight covers "said" whole.
+  await page.mouse.move(points.from.x, points.from.y);
+  await page.mouse.down();
+  await page.mouse.move(points.to.x, points.to.y, { steps: 8 });
+  await expect(lines.first()).toBeVisible();
+  expect(await page.evaluate(() => document.getSelection()?.toString().startsWith('id'))).toBe(true);
+  const first = await lines.first().boundingBox();
+  expect(Math.abs((first?.x ?? 0) - points.wordLeft)).toBeLessThan(2);
+  expect(await selectionBackground()).toBe('rgba(0, 0, 0, 0)');
+  await page.mouse.up();
+  await expect(lines).toHaveCount(2); // a line each for "said: hello" and "one"
+
+  // Off: no highlight of its own, the browser's selection colour back.
+  await page.evaluate(() => getSelection()?.removeAllRanges());
+  await page.getByRole('button', { name: 'Config' }).click();
+  await page.locator('.config-menu').getByRole('checkbox', { name: 'Animated selection' }).uncheck();
+  await page.keyboard.press('Escape');
+  await page.mouse.move(points.from.x, points.from.y);
+  await page.mouse.down();
+  await page.mouse.move(points.to.x, points.to.y, { steps: 8 });
+  await expect(lines).toHaveCount(0);
+  await expect(pane.locator('.omp-transcript')).not.toHaveClass(/has-highlight/);
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => document.getSelection()?.toString().replace(/\s+/g, ' '))).toBe('said: hello one');
+});
+
 test('a rough drag over reply text snaps out to whole words, punctuation included, before Comment', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
@@ -1060,7 +1161,7 @@ test('a tool call is one card whose output appears when expanded', async ({ page
   await expect(card.locator('pre').last()).toHaveText('hi');
 });
 
-test('Config can show only prompts and final replies, per pane, across a reload, and back', async ({ page }) => {
+test('the top bar’s Config opens on hover or a click and shows only prompts and final replies in every omp window, across a reload', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
   const reply = pane.locator('.omp-assistant', { hasText: 'You said: run a tool and think' });
@@ -1068,18 +1169,33 @@ test('Config can show only prompts and final replies, per pane, across a reload,
   await expect(reply).toBeVisible();
   await expect(pane.locator('.omp-tool')).toHaveCount(1);
   await expect(pane.locator('.omp-thinking')).toHaveCount(1);
+  const other = await startedPane(page);
+  await send(other, 'run a tool');
+  await expect(other.locator('.omp-tool')).toHaveCount(1);
 
-  const only = pane.locator('.omp-settings:popover-open').getByRole('checkbox', { name: 'Only prompts and responses' });
-  await pane.getByRole('button', { name: 'More actions' }).click();
-  await pane.getByRole('button', { name: 'Config' }).click();
+  // Resting the pointer on Config opens its menu; leaving closes it again.
+  const config = page.getByRole('button', { name: 'Config' });
+  const menu = page.locator('.config-menu');
+  const only = menu.getByRole('checkbox', { name: 'Only prompts and responses' });
+  await config.hover();
+  await expect(menu).toBeVisible();
+  const [button, opened] = [await config.boundingBox(), await menu.boundingBox()];
+  expect(Math.abs((opened?.y ?? 0) - ((button?.y ?? 0) + (button?.height ?? 0))), 'right under its button').toBeLessThan(12);
   await expect(only).not.toBeChecked();
+  await page.mouse.move(5, 300);
+  await expect(menu).toBeHidden();
+
+  // A click opens it to stay; the switch applies to every omp window.
+  await config.click();
+  await page.mouse.move(5, 300);
+  await expect(menu).toBeVisible();
   await only.check();
-  await expect(pane.locator('.omp-tool')).toHaveCount(0);
+  for (const p of [pane, other]) await expect(p.locator('.omp-tool')).toHaveCount(0);
   await expect(pane.locator('.omp-thinking')).toHaveCount(0);
   await expect(pane.locator('.omp-user')).toHaveText(/run a tool and think/);
-  await expect(pane.locator('.omp-assistant')).toHaveCount(1);
   await expect(reply).toBeVisible();
   await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
 
   // A running turn is one indicator: its intermediate reply and tool run stay hidden.
   await send(pane, 'slow');
@@ -1088,29 +1204,21 @@ test('Config can show only prompts and final replies, per pane, across a reload,
   await expect(pane.getByText('Let me check first.')).toHaveCount(0);
   await expect(pane.locator('.omp-assistant').last()).toContainText('You said: slow');
   await expect(pane.locator('.omp-working')).toHaveCount(0);
-  await expect(pane.getByText('Let me check first.')).toHaveCount(0);
 
-  // The setting is this window's: another pane shows everything.
-  const other = await startedPane(page);
-  await send(other, 'run a tool');
-  await expect(other.locator('.omp-tool')).toHaveCount(1);
-  await expect(pane.locator('.omp-tool')).toHaveCount(0);
-
-  // The window keeps the setting (and its id) across a reload.
+  // The browser keeps the setting across a reload.
   await page.reload();
   await expect(pane.locator('.omp-assistant').last()).toContainText('You said: slow');
   await expect(pane.locator('.omp-tool')).toHaveCount(0);
   await expect(pane.locator('.omp-thinking')).toHaveCount(0);
 
   // Switching it off brings back everything it hid.
-  await pane.getByRole('button', { name: 'More actions' }).click();
-  await pane.getByRole('button', { name: 'Config' }).click();
+  await config.click();
   await expect(only).toBeChecked();
   await only.uncheck();
   await expect(pane.locator('.omp-tool')).toHaveCount(2);
   await expect(pane.locator('.omp-thinking')).toHaveCount(1);
   await expect(pane.getByText('Let me check first.')).toBeVisible();
-  await expect(reply).toBeVisible();
+  await expect(other.locator('.omp-tool')).toHaveCount(1);
 });
 
 test('an ask dialog is answered from the pane and omp continues with the answer', async ({ page }) => {
