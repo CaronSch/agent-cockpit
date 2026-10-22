@@ -1,15 +1,15 @@
 /**
- * omp sessions: the daemon's running ones on top, with how each is doing and Stop, then past
- * ones, searchable and sortable. A click shows a session in the omp window this screen used
+ * omp sessions in one list: the daemon's running ones on top, with how each is doing and
+ * Stop, then past ones, searchable and sortable. A click shows a session in the omp window this screen used
  * last (or a new one); dragging it shows it in the omp window it is dropped on, or in a new
  * window where it is dropped.
  *
  * Running sessions are every one the daemon runs, whichever screen shows them, or none
  * (sessions/running.js). A past session is resumed when shown. One whose journal a running
- * session writes is listed only under Running, so it is never resumed a second time.
+ * session writes is listed only as running, so it is never resumed a second time.
  *
- * Search runs in the daemon (every word must match the title, directory or a prompt); sorting
- * runs here, and so does narrowing to one directory (running sessions too). The query,
+ * Search runs in the daemon (every word must match the title, directory or a prompt), running
+ * sessions included through their journals; sorting runs here, and so does narrowing to one directory (running sessions too). The query,
  * directory and sort order are this window's own settings, so two Sessions windows can show
  * different slices.
  *
@@ -91,15 +91,14 @@ function createSessionsWindow(body, ctx, daemon) {
   bar.append(search, directories, sort, direction, archivedToggle, refresh);
   const status = el('p', 'sessions-status');
   status.setAttribute('aria-live', 'polite');
-  const runningHead = el('h3', 'sessions-heading', 'Running');
   const runningList = el('ul', 'sessions-running');
   runningList.setAttribute('aria-label', 'Running sessions');
-  const pastHeading = el('h3', 'sessions-heading');
-  const pastHead = el('div', 'sessions-head');
-  pastHead.append(pastHeading, status);
   const list = el('ul', 'sessions-list');
   list.setAttribute('aria-label', 'Past sessions');
-  root.append(bar, runningHead, runningList, pastHead, list);
+  // Both lists scroll as one, so running sessions get all the room they need.
+  const lists = el('div', 'sessions-lists');
+  lists.append(runningList, list);
+  root.append(bar, status, lists);
 
   /** @type {PastSession[]} */
   let sessions = [];
@@ -372,12 +371,22 @@ function createSessionsWindow(body, ctx, daemon) {
 
   /**
    * The past sessions this window lists: the daemon's answer, narrowed to the chosen directory,
-   * without those a running session writes (they are listed under Running).
+   * without those a running session writes (they are listed as running).
    */
   const shownSessions = () => {
     const dir = directory();
     const open = openFiles();
     return sessions.filter((s) => (!dir || s.cwd === dir) && !open.has(s.file));
+  };
+
+  /**
+   * The running sessions this window lists: none while it shows the archived ones, and while
+   * searching, those whose journal the daemon's search matched.
+   */
+  const shownRunning = () => {
+    if (showArchived()) return [];
+    const running = runningSessions(daemon.sessions(), directory());
+    return query() ? running.filter((m) => m.sessionFile !== null && byFile.has(m.sessionFile)) : running;
   };
 
   function drawDirectories() {
@@ -400,14 +409,13 @@ function createSessionsWindow(body, ctx, daemon) {
   }
 
   function drawStatus() {
-    const shown = shownSessions().length;
+    const shown = shownRunning().length + shownSessions().length;
     const kind = showArchived() ? 'archived session' : 'session';
-    pastHeading.textContent = showArchived() ? 'Archived' : 'Past';
     status.classList.toggle('is-error', error !== null || moveError !== null);
     if (error) status.textContent = `Could not list sessions: ${error}`;
     else if (moveError) status.textContent = moveError;
     else if (!loaded) status.textContent = 'Loading sessions…';
-    else if (shown === 0) status.textContent = query() || directory() ? 'No session matches.' : showArchived() ? 'No archived sessions.' : 'No past sessions yet.';
+    else if (shown === 0) status.textContent = query() || directory() ? 'No session matches.' : showArchived() ? 'No archived sessions.' : 'No sessions yet.';
     else status.textContent = `${shown} ${kind}${shown === 1 ? '' : 's'}${loading ? ' · refreshing…' : ''}`;
   }
 
@@ -456,8 +464,8 @@ function createSessionsWindow(body, ctx, daemon) {
     drawDirectories();
     drawStatus();
 
-    const running = showArchived() ? [] : runningSessions(daemon.sessions(), directory());
-    runningHead.hidden = runningList.hidden = running.length === 0;
+    const running = shownRunning();
+    runningList.hidden = running.length === 0;
     syncRows(
       runningList,
       runningRows,

@@ -103,29 +103,9 @@
   outline-offset: -1px;
 }
 
-/* "Running", "Past": small and dim, with the past list's count beside its heading. */
-.sessions-head {
-  display: flex;
-  gap: var(--space-2);
-  align-items: baseline;
-}
-
-.sessions-heading {
-  margin: var(--space-1) 0 0;
-  padding: 0 var(--space-2);
-  color: var(--color-text-faint);
-  font-size: var(--text-2xs);
-  font-weight: 400;
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-}
-
-.sessions-heading[hidden] {
-  display: none;
-}
-
 .sessions-status {
   margin: 0;
+  padding: 0 var(--space-2);
   color: var(--color-text-faint);
   font-size: var(--text-2xs);
 }
@@ -134,29 +114,24 @@
   color: var(--color-danger);
 }
 
+/* Running sessions on top, then past ones, scrolling together. */
+.sessions-lists {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .sessions-running,
 .sessions-list {
   margin: 0;
   padding: 0;
-  overflow: auto;
   list-style: none;
   display: flex;
   flex-direction: column;
 }
 
-/* Running sessions take what they need, up to a third of the window; the past list the rest. */
-.sessions-running {
-  flex: none;
-  max-height: 34%;
-}
-
 .sessions-running[hidden] {
   display: none;
-}
-
-.sessions-list {
-  flex: 1;
-  min-height: 0;
 }
 
 .sessions-item {
