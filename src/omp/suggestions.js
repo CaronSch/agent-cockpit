@@ -1,5 +1,5 @@
 /**
- * The suggestion list above the omp pane's message box (slash commands, `@` file entries),
+ * The suggestion list above the agent pane's message box (slash commands, `@` file entries),
  * driven from the draft's keys so focus never leaves it.
  *
  * Arrows move the selection, Tab completes (the selected row, unless the rows say otherwise),

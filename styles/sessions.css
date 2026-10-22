@@ -140,8 +140,8 @@
   background: var(--color-surface-raised);
 }
 
-/* A session shown in an omp window: a quiet bar at the row's left edge, brighter for the one
-   in the omp window used last (where a click shows sessions). */
+/* A session shown in an agent window: a quiet bar at the row's left edge, brighter for the one
+   in the agent window used last (where a click shows sessions). */
 .sessions-item.is-shown {
   box-shadow: inset 2px 0 var(--color-line-strong);
 }

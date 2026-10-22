@@ -1,5 +1,5 @@
 /**
- * Which transcript items an omp pane shows when it is set to only prompts and responses:
+ * Which transcript items an agent pane shows when it is set to only prompts and responses:
  * what the user said and ran, and what the agent finally answered, without the work in
  * between. A view over `transcript.js` items, computed at render time: switching back
  * shows everything again, because nothing is ever removed from the transcript.

@@ -185,7 +185,7 @@ describe('daemon client', () => {
     const answer = client.rpc('s1', { type: 'login', providerId: 'x' });
     await new Promise((r) => setImmediate(r));
     source.deliver({ kind: 'session', meta: meta('s1', 'exited'), seq: 1, at: 0, session: 's1' });
-    await assert.rejects(answer, /omp exited before answering/);
+    await assert.rejects(answer, /the agent exited before answering/);
   });
 });
 

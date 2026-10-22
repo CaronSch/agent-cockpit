@@ -1034,7 +1034,7 @@ describe('file listings for @ mentions', () => {
     files = '/api/files';
   });
 
-  /** A folder named as an omp window names it: from the conversation's directory. @param {string} dir */
+  /** A folder named as an agent window names it: from the conversation's directory. @param {string} dir */
   const list = (dir) => call({ path: `${files}?dir=${encodeURIComponent(`${project}/${dir}`)}` });
 
   test('like every API route, listings need the token and refuse a foreign page', async () => {

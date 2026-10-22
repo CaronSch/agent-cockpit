@@ -27,10 +27,10 @@ describe('workspace model', () => {
   });
 
   test('a screen is described by how many windows of each kind it holds', () => {
-    const titles = /** @type {Record<string, string>} */ ({ omp: 'omp', scratchpad: 'Scratchpad' });
+    const titles = /** @type {Record<string, string>} */ ({ omp: 'Agent', scratchpad: 'Notes' });
     const titleOf = (/** @type {string} */ w) => titles[w] ?? w;
     const tree = branch('row', [leaf('a', 'omp'), branch('col', [leaf('b', 'scratchpad'), leaf('c', 'omp')])]);
-    assert.equal(describeWindows(tree, titleOf), '2 omp, 1 Scratchpad');
+    assert.equal(describeWindows(tree, titleOf), '2 Agent, 1 Notes');
     assert.equal(describeWindows(null, titleOf), 'no windows');
   });
 });

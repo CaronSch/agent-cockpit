@@ -2,7 +2,7 @@ import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
 import { ANSWER_BRIEFLY, asQuote, composeAsk, composeFollowUp, composeMessage, isCommand } from '../src/omp/message.js';
 
-describe('the message the omp pane sends', () => {
+describe('the message the agent pane sends', () => {
   test('each comment quotes its text, then says its piece, before the prompt', () => {
     const message = composeMessage('  and then deploy?  ', [
       { quote: 'Run the migration first.', comment: 'Which one?' },

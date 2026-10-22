@@ -1,5 +1,5 @@
 /**
- * Path suggestions in the omp pane's text boxes (`@` file mentions in its draft, its Directory
+ * Path suggestions in the agent pane's text boxes (`@` file mentions in its draft, its Directory
  * field): while the caret ends a path, the suggestion list shows the matching entries of the
  * folder it names, and Tab, Enter or a click completes the path (see `file-mention.js`).
  *

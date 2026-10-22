@@ -1,6 +1,6 @@
 // Behaviour tests for the Sessions window: one list of conversations, how awake ones are
-// doing, search, sort, showing one in an omp window (asleep or awake), unread marks, links to
-// the omp windows, and archiving, against the real daemon reading journals from
+// doing, search, sort, showing one in an agent window (asleep or awake), unread marks, links to
+// the agent windows, and archiving, against the real daemon reading journals from
 // E2E_OMP_SESSIONS.
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
@@ -126,7 +126,7 @@ const daemonSessions = async (page) => (await (await page.request.get('/api/sess
 /** The awake sessions holding journal `file`. @param {Page} page @param {string} file */
 const awake = async (page, file) => (await daemonSessions(page)).filter((/** @type {any} */ s) => s.sessionFile === file && (s.status === 'ready' || s.status === 'starting'));
 
-/** The settings omp window `pane` is saved with, once the layout saved has it. @param {Page} page @param {Locator} pane */
+/** The settings agent window `pane` is saved with, once the layout saved has it. @param {Page} page @param {Locator} pane */
 async function savedPane(page, pane) {
   const id = await pane.getAttribute('data-id');
   /** @param {any} node @returns {any} */
@@ -135,7 +135,7 @@ async function savedPane(page, pane) {
 }
 
 /**
- * The conversation omp window `pane` shows (its journal, else a new one's session), once the
+ * The conversation agent window `pane` shows (its journal, else a new one's session), once the
  * layout saved with it says.
  * @param {Page} page @param {Locator} pane @returns {Promise<string>}
  */
@@ -145,7 +145,7 @@ async function shownConversation(page, pane) {
   return /** @type {string} */ (/** @type {unknown} */ (key));
 }
 
-/** Starts omp in a new omp window (added through the palette), in `dir`. @param {Page} page @param {string} dir */
+/** Starts omp in a new agent window (added through the palette), in `dir`. @param {Page} page @param {string} dir */
 async function startedPane(page, dir) {
   const before = new Set(await page.locator('.widget[data-widget="omp"]').evaluateAll((nodes) => nodes.map((n) => /** @type {HTMLElement} */ (n).dataset.id)));
   await page.locator('#palette-toggle').click();
@@ -198,7 +198,7 @@ async function middleOf(window) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-/** Sends `text` in omp window `pane` and waits for the reply. @param {Locator} pane @param {string} text */
+/** Sends `text` in agent window `pane` and waits for the reply. @param {Locator} pane @param {string} text */
 async function turn(pane, text) {
   await pane.locator('textarea').fill(text);
   await pane.locator('textarea').press('Enter');
@@ -240,7 +240,7 @@ test('a session omp writes while the window is open shows up by itself', async (
   await expect(titles(window)).toHaveText(['Fresh work', 'Zebra cleanup', 'deploy staging', 'Fix the login flow']);
 });
 
-test('a conversation dragged onto the grid shows in a new omp window without starting omp; dragged again, a second window shows it too', async ({ page }) => {
+test('a conversation dragged onto the grid shows in a new agent window without starting omp; dragged again, a second window shows it too', async ({ page }) => {
   const window = await addSessionsWindow(page);
   const deploy = row(window, 'deploy staging');
   await dragToGridRight(page, deploy);
@@ -268,7 +268,7 @@ test('a conversation dragged onto the grid shows in a new omp window without sta
   await expect(deploy, 'listed once, awake or not').toHaveCount(1);
 });
 
-test('a click shows a conversation in a new omp window when there is none, then in the last one used; Enter does the same', async ({ page }) => {
+test('a click shows a conversation in a new agent window when there is none, then in the last one used; Enter does the same', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'Fix the login flow').click();
   const pane = page.locator('.widget[data-widget="omp"]');
@@ -296,7 +296,7 @@ test('a conversation whose directory is gone shows, and says so once something i
   await expect(pane.locator('.omp-user')).toContainText('old work');
   await pane.locator('textarea').fill('carry on');
   await pane.locator('textarea').press('Enter');
-  await expect(pane.locator('.omp-note', { hasText: 'omp did not start' })).toContainText('cwd is not an existing directory');
+  await expect(pane.locator('.omp-note', { hasText: 'The agent did not start' })).toContainText('cwd is not an existing directory');
   await expect(pane.locator('textarea'), 'the message stays to send again').toHaveValue('carry on');
   // A failed request logs a console error in the browser; that is the expected outcome here.
   problems = problems.filter((p) => !p.includes('400'));
@@ -367,7 +367,7 @@ test('a conversation is listed once, awake or not, even with its window closed; 
   expect(await awake(page, fileOf('deploy')), 'asleep before its journal moved').toHaveLength(0);
 });
 
-test('awake conversations are listed with how each is doing; a click shows one in the omp window used last', async ({ page }) => {
+test('awake conversations are listed with how each is doing; a click shows one in the agent window used last', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA); // only this test's sessions
   await row(window, 'Fix the login flow').click();
@@ -402,7 +402,7 @@ test('awake conversations are listed with how each is doing; a click shows one i
   await expect(freshRow).toBeVisible();
 });
 
-test('a session dragged onto the middle of an omp window is shown there', async ({ page }) => {
+test('a session dragged onto the middle of an agent window is shown there', async ({ page }) => {
   const window = await addSessionsWindow(page);
   const target = await startedPane(page, ALPHA);
   const before = await shownConversation(page, target);
@@ -524,7 +524,7 @@ test('a turn that ends while nobody looks stays unread, across reloads and aslee
   await expect(window.locator('.widget-label')).toBeHidden();
 });
 
-test('reading a session in its omp window clears its mark in Sessions', async ({ page }) => {
+test('reading a session in its agent window clears its mark in Sessions', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'deploy staging').click();
   const pane = page.locator('.widget[data-widget="omp"]');
@@ -606,7 +606,7 @@ test('from the keyboard, Shift+F10 opens a row’s menu; Mark as unread lights i
   await expect(zebra).not.toHaveClass(/is-unread/);
 });
 
-test('rows mark the sessions shown in omp windows, the last-used one brighter; pointing links rows and windows both ways', async ({ page }) => {
+test('rows mark the sessions shown in agent windows, the last-used one brighter; pointing links rows and windows both ways', async ({ page }) => {
   const window = await addSessionsWindow(page);
   // Only this test's directory: Sessions lists every conversation, newest first, and those
   // other test files start meanwhile would push these rows out from under the pointer.
@@ -617,7 +617,7 @@ test('rows mark the sessions shown in omp windows, the last-used one brighter; p
   await expect(a).toHaveClass(/is-shown/);
   await expect(b).toHaveClass(/is-shown/);
 
-  // The brighter mark follows the omp window used last: where a click in Sessions shows a session.
+  // The brighter mark follows the agent window used last: where a click in Sessions shows a session.
   await first.locator('.omp-transcript').click();
   await expect(a).toHaveClass(/is-current/);
   await expect(b).not.toHaveClass(/is-current/);
@@ -657,7 +657,7 @@ test('rows mark the sessions shown in omp windows, the last-used one brighter; p
   await page.mouse.move(5, 5);
   await expect(first).not.toHaveClass(/is-outlined/);
 
-  // Pointing at an omp window lights its conversation's row.
+  // Pointing at an agent window lights its conversation's row.
   await first.locator('.omp-transcript').hover();
   await expect(a).toHaveClass(/is-pointed/);
   await expect(b).not.toHaveClass(/is-pointed/);

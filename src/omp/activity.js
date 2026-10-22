@@ -5,7 +5,7 @@
  * Nothing in between counts (thinking, intermediate replies, tool runs, notices, command
  * output): the user only needs to come back when the agent is done or waiting on them. The
  * daemon marks the conversation unread at each such event (daemon/unread.js), for every
- * window; an omp window reads at once what lands while its user is looking at it.
+ * window; an agent window reads at once what lands while its user is looking at it.
  */
 import { handsTurnBack } from './transcript.js';
 /** @import { SessionEvent } from '../../daemon/wire.js' */

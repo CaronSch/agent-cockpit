@@ -17,7 +17,7 @@ let uid = 0;
 export function renderDialog(dialog, respond) {
   const node = el('section', `omp-dialog is-${dialog.method}`);
   node.setAttribute('role', 'group');
-  const title = typeof dialog.title === 'string' && dialog.title ? dialog.title : dialog.method === 'ask' ? 'Questions' : 'omp asks';
+  const title = typeof dialog.title === 'string' && dialog.title ? dialog.title : dialog.method === 'ask' ? 'Questions' : 'The agent asks';
   node.setAttribute('aria-label', title);
   node.append(el('div', 'omp-dialog-title', title));
 

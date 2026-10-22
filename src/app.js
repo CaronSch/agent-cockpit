@@ -134,7 +134,7 @@ export async function createApp(root) {
     // What the window shows, beside its type: part of the heading, so it names the window too.
     const label = el('span', 'widget-label');
     label.hidden = true;
-    heading.append(' ', label); // a space, so the heading reads "omp <name>", not "omp<name>"
+    heading.append(' ', label); // a space, so the heading reads "Agent <name>", not "Agent<name>"
     // The widget's own controls for the window, before its close button.
     const actions = el('div', 'widget-actions');
     const close = button('widget-close', '×');

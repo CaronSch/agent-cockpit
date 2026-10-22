@@ -5,7 +5,7 @@
  *
  * Every awake session is followed, as the Sessions window follows them. A notification waits
  * a moment after the event, and is shown only if the conversation is still unread then and
- * the user is not looking at it: an omp window the user is reading reads it at once (wherever
+ * the user is not looking at it: an agent window the user is reading reads it at once (wherever
  * that window is, in this tab or another), which clears the mark. Events the daemon replays
  * on (re)connecting happened before this page heard of them, so they never notify. A
  * notification closes once its conversation is read, asleep by then or not; clicking it shows
@@ -53,7 +53,7 @@ export const alertText = (alert) => (alert.kind === 'done' ? 'Finished' : alert.
 
 /**
  * Whether the user is looking at a conversation here: this tab is in front and focused, and
- * one of its omp windows shows it (`key`, as `conversationKey` names it).
+ * one of its agent windows shows it (`key`, as `conversationKey` names it).
  * @param {{ visible: boolean, focused: boolean, shown: ReadonlySet<string> }} page @param {string} key
  */
 export const watching = (page, key) => page.visible && page.focused && page.shown.has(key);
@@ -63,8 +63,8 @@ export const watching = (page, key) => page.visible && page.focused && page.show
  *   daemon: DaemonClient,
  *   shown: () => ReadonlySet<string>,
  *   show: (params: LeafParams) => void,
- * }} options `shown` lists the conversations this tab's omp windows show (sessions/links.js);
- * `show` shows one in the omp window used last.
+ * }} options `shown` lists the conversations this tab's agent windows show (sessions/links.js);
+ * `show` shows one in the agent window used last.
  */
 export function createNotifier({ daemon, shown, show }) {
   const supported = typeof Notification === 'function';

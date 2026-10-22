@@ -6,7 +6,7 @@ import { awaitedAfter, awaitsUser } from '../src/omp/activity.js';
 /** @param {Record<string, unknown>} frame @returns {SessionEvent} */
 const frame = (frame) => ({ kind: 'frame', frame, seq: 1, at: 1, session: 's' });
 
-describe('what makes an omp window unread', () => {
+describe('what makes an agent window unread', () => {
   test('the agent handing the turn back, or stopping to ask something', () => {
     for (const f of [
       { type: 'agent_end', messages: [], isTerminal: true, yielded: true },

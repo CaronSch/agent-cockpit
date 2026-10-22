@@ -1,10 +1,10 @@
 /**
  * Conversations as the Sessions window lists them, kept free of the DOM so they can be
  * tested: every journal with the session holding it while one is awake, how each is doing,
- * and what an omp window is given to show one.
+ * and what an agent window is given to show one.
  *
  * Asleep or awake is the daemon's business (daemon/sleep.js): the list shows conversations.
- * How an awake one is doing is read from its session's events, as an omp window reads them:
+ * How an awake one is doing is read from its session's events, as an agent window reads them:
  * its name, whether a turn runs and whether it asks its user something; and from whether the
  * user has read what it did (daemon/unread.js).
  *
@@ -83,11 +83,11 @@ export function runningState(followed, meta, unread) {
 /** How each state reads in the list: a short word. @type {Readonly<Record<RunningState, string>>} */
 export const STATE_LABELS = Object.freeze({ starting: 'starting', asking: 'needs you', working: 'working', done: 'done', idle: 'idle' });
 
-/** What the session is called: its title, else its first prompt (as an omp window names it). @param {Followed} followed */
+/** What the session is called: its title, else its first prompt (as an agent window names it). @param {Followed} followed */
 export const followedName = (followed) => conversationName(followed.transcript);
 
 /**
- * The settings that make an omp window show a conversation (whatever it showed before): its
+ * The settings that make an agent window show a conversation (whatever it showed before): its
  * journal, and the session holding it if one is awake.
  * @param {{ file: string | null, meta: SessionMeta | null, cwd: string | null, name: string | null }} conversation
  * @returns {LeafParams}

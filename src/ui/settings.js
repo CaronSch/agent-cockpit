@@ -20,7 +20,7 @@ export const SETTINGS = [
   {
     key: 'onlyResponses',
     label: 'Only prompts and responses',
-    detail: 'Hide thinking, tool calls and the messages in between, in every omp window',
+    detail: 'Hide thinking, tool calls and the messages in between, in every agent window',
     initial: false,
   },
   {

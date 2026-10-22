@@ -67,7 +67,7 @@ const shown = (page) => page.evaluate(() => /** @type {any} */ (window).__notes.
 /** @param {Page} page @param {boolean} away */
 const setAway = (page, away) => page.evaluate((a) => (/** @type {any} */ (window).__away = a), away);
 
-/** The session the only omp window shows, as the daemon saved it. @param {Page} page @param {string} workspace */
+/** The session the only agent window shows, as the daemon saved it. @param {Page} page @param {string} workspace */
 async function shownSession(page, workspace) {
   /** @param {any} node @returns {any} */
   const find = (node) => (node?.widget === 'omp' ? node : (node?.children ?? []).map(find).find(Boolean));
@@ -79,7 +79,7 @@ async function shownSession(page, workspace) {
 /** @param {import('@playwright/test').Locator} pane */
 async function startOmp(pane) {
   await pane.locator('input').fill(PROJECT);
-  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await pane.getByRole('button', { name: 'Start agent' }).click();
   await expect(pane.getByText('Fake Model')).toBeVisible();
 }
 
