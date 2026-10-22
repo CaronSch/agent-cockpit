@@ -99,8 +99,36 @@ button {
 }
 
 /* The top bar's controls sit a little tighter than buttons elsewhere, to fit its height. */
-.topbar-actions :is(.btn, .screen-switch, .notify-toggle, .config-toggle) {
+.topbar-actions .btn {
   padding-block: 3px;
+}
+
+/* Its own buttons (Notify, Config, the screen switcher) share one look; only what is
+   disabled reads faint. */
+.topbar-btn {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text);
+  font: 600 var(--text-sm) / 1.4 var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.topbar-btn:hover:enabled,
+.topbar-btn[aria-expanded='true'],
+.topbar-btn:has(+ :popover-open) {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+}
+
+.topbar-btn:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
 }
 
 /* Text size: − 100% +, joined into one quiet control; the percentage resets it. */
@@ -114,14 +142,13 @@ button {
   padding: 3px 8px;
   border: 0;
   background: transparent;
-  color: var(--color-text-dim);
+  color: var(--color-text);
   font: 600 var(--text-sm) / 1.4 var(--font-mono);
   cursor: pointer;
 }
 
 .zoom-btn:hover:enabled {
   background: var(--color-surface-raised);
-  color: var(--color-text);
 }
 
 .zoom-btn:disabled {
@@ -355,60 +382,14 @@ button {
 }
 
 /* ── Notify ──────────────────────────────────────────── */
-/* Off, it reads quietly; on, an accent dot leads it. Blocked or unsupported, it is faint. */
-.notify-toggle {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  padding: 5px 10px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--color-text-dim);
-  font: 600 var(--text-sm) / 1.4 var(--font-mono);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.notify-toggle:hover:enabled {
-  border-color: var(--color-line-strong);
-  background: var(--color-surface-raised);
-}
-
-.notify-toggle[aria-pressed='true'] {
-  color: var(--color-text);
-}
-
+/* On, an accent dot leads it. */
 .notify-toggle[aria-pressed='true']::before {
   content: '●';
   color: var(--color-accent);
 }
 
-.notify-toggle:disabled {
-  color: var(--color-text-faint);
-  cursor: default;
-}
-
 /* ── Config ──────────────────────────────────────────── */
-/* App-wide switches: a quiet button whose menu drops under it, looking like the omp menus. */
-.config-toggle {
-  padding: 5px 10px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--color-text-dim);
-  font: 600 var(--text-sm) / 1.4 var(--font-mono);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.config-toggle:hover,
-.config-toggle[aria-expanded='true'] {
-  border-color: var(--color-line-strong);
-  background: var(--color-surface-raised);
-  color: var(--color-text);
-}
-
+/* App-wide switches: the menu drops under its button, looking like the omp menus. */
 .config-menu:popover-open {
   position-area: bottom span-left;
   position-try-fallbacks: flip-inline;
@@ -451,28 +432,9 @@ button {
 }
 
 /* ── Screen switcher ─────────────────────────────────── */
-.screen-switch {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  padding: 5px 10px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-s);
-  background: transparent;
-  color: var(--color-text);
-  font: 600 var(--text-sm) / 1.4 var(--font-mono);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.screen-switch:hover,
-.screen-switch:has(+ :popover-open) {
-  border-color: var(--color-line-strong);
-  background: var(--color-surface-raised);
-}
-
 /* The layout is not being saved: shown, never hidden. */
-.screen-switch.is-unsaved {
+.screen-switch.is-unsaved,
+.screen-switch.is-unsaved:hover {
   border-color: var(--color-danger);
 }
 

@@ -16,7 +16,7 @@ import { errorMessage } from './format.js';
  */
 export function createScreenSwitcher({ opened, describe }) {
   const root = el('div', 'screen-switcher');
-  const toggle = button('screen-switch');
+  const toggle = button('topbar-btn screen-switch');
   toggle.setAttribute('aria-haspopup', 'true');
   const label = el('span', 'screen-label');
   const caret = el('span', 'screen-caret', '▾');
