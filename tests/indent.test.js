@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { indent, outdent } from '../src/ui/indent.js';
+import { indent, outdent, unindent } from '../src/ui/indent.js';
 /** @import { IndentEdit } from '../src/ui/indent.js' */
 
 /**
@@ -79,5 +79,20 @@ describe('outdent', () => {
     const indented = once.text;
     const back = outdent(indented, 0, indented.length);
     assert.equal(back?.text, before);
+  });
+});
+
+describe('unindent', () => {
+  test('Backspace in a line’s leading spaces takes back one indent level', () => {
+    assert.equal(run(unindent, 'one\n    |two'), 'one\n  |two');
+    assert.equal(run(unindent, '  |'), '|');
+    assert.equal(run(unindent, 'one\n   |two'), 'one\n  |two', 'an odd run of spaces goes back to the level below');
+    assert.equal(run(unindent, ' |x'), '|x');
+  });
+
+  test('anywhere else, Backspace deletes as usual', () => {
+    assert.equal(unindent('ab  cd', 4, 4), null, 'spaces after text');
+    assert.equal(unindent('one\ntwo', 4, 4), null, 'a line’s start');
+    assert.equal(unindent('    x', 1, 3), null, 'a selection');
   });
 });
