@@ -10,12 +10,13 @@
  * Environment: COCKPIT_PORT, COCKPIT_OMP, COCKPIT_CWD, COCKPIT_STATE_DIR (default ~/.cockpit; holds the
  * access token, unread.json (which conversations have news not read yet), scratchpads/,
  * attachments/, workspaces/ and archive/sessions/, the archived omp sessions), COCKPIT_OMP_SESSIONS (omp's session journals; default
- * `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions).
+ * `$PI_CODING_AGENT_DIR/sessions`, i.e. ~/.omp/agent/sessions), COCKPIT_SLEEP_AFTER_MS (how long
+ * an idle, unused session stays awake; default 30 minutes, shorter for tests).
  */
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createHistory } from './history.js';
+import { JournalRefused, createHistory } from './history.js';
 import { createHub } from './hub.js';
 import { createAttachments } from './attachments.js';
 import { createScratchpads } from './scratchpad.js';
@@ -52,14 +53,26 @@ const unread = await loadUnread({ file: join(stateDir, 'unread.json') }).catch((
   console.error(`[daemon] ${err instanceof Error ? err.message : err}`);
   process.exit(1);
 });
-const hub = createHub({ ompPath, unread });
+const history = createHistory({ root: ompSessions, archive: join(stateDir, 'archive', 'sessions') });
+const sleepAfter = Number(process.env.COCKPIT_SLEEP_AFTER_MS);
+const hub = createHub({
+  ompPath,
+  unread,
+  ...(sleepAfter > 0 ? { sleepAfterMs: sleepAfter } : {}),
+  // The journal a rewind left keeps what was set aside: archived, out of the list, restorable.
+  // One outside omp's sessions (400) is not listed, so there is nothing to put away.
+  onRewound: (file) =>
+    void history.archive(file).catch((err) => {
+      if (!(err instanceof JournalRefused && err.status === 400)) console.error(`[daemon] could not archive the journal a rewind left (${file}):`, err);
+    }),
+});
 const scratchpadDir = join(stateDir, 'scratchpads');
 /** @type {ReturnType<typeof createDaemonServer>} */
 let server;
 try {
   server = createDaemonServer({
     hub,
-    history: createHistory({ root: ompSessions, archive: join(stateDir, 'archive', 'sessions') }),
+    history,
     scratchpads: createScratchpads({ dir: scratchpadDir }),
     attachments: createAttachments({ dir: join(stateDir, 'attachments') }),
     workspaces: createWorkspaces({ dir: join(stateDir, 'workspaces') }),

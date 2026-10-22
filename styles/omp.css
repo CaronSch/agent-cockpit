@@ -292,8 +292,8 @@
   box-shadow: var(--shadow-lift);
 }
 
-/* The toolbar's More menu: a short list under its button, at the toolbar's right end. */
-.omp-more:popover-open {
+/* A menu from the window's top bar (Accounts): under its button, at the window's right end. */
+.omp-head-menu:popover-open {
   position-area: bottom span-left;
   width: auto;
   min-width: 9rem;
@@ -1029,6 +1029,11 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2);
+}
+
+/* Sent while the conversation wakes: the message waits in the box, dimmed, until omp is up. */
+.omp-composer.is-waking .omp-draft {
+  opacity: 0.6;
 }
 
 .omp-compose-row {

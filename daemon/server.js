@@ -5,7 +5,7 @@
 import { homedir } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { TOKEN_COOKIE, checkApiRequest, isAllowedHost, tokensMatch } from './guard.js';
-import { MoveRefused } from './history.js';
+import { JournalRefused, readConversation } from './history.js';
 import { SessionNotRunning } from './omp-session.js';
 import { OMP_ID } from './unread.js';
 import { listDirectory, resolvePath } from './files.js';
@@ -113,7 +113,7 @@ function lastSeenSeq(header, bootId) {
 
 /** @param {unknown} err */
 function errorResponse(err) {
-  const status = err instanceof HttpError || err instanceof MoveRefused ? err.status : err instanceof SessionNotRunning ? 409 : 500;
+  const status = err instanceof HttpError || err instanceof JournalRefused ? err.status : err instanceof SessionNotRunning ? 409 : 500;
   if (status === 500) console.error('[daemon]', err);
   return json({ error: err instanceof Error ? err.message : String(err) }, status);
 }
@@ -254,8 +254,18 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
       '/api/history/archive': api({
         POST: async (req) => {
           const { file } = (await readJson(req)) ?? {};
-          if (typeof file === 'string' && hub.writing(resolve(file))) throw new HttpError(409, 'the session is running; stop it to archive it');
+          // omp must not write a journal while it moves: an idle session goes to sleep first.
+          const running = typeof file === 'string' ? hub.writing(resolve(file)) : null;
+          if (running && !hub.idle(running.id)) throw new HttpError(409, 'the agent is working on it; archive it once it is done');
+          if (running) await hub.get(running.id)?.close();
           return json({ file: await history.archive(file) });
+        },
+      }),
+      '/api/conversation': api({
+        GET: async (req) => {
+          const file = new URL(req.url).searchParams.get('file') ?? '';
+          // A journal this daemon's sessions wrote may be anywhere omp keeps it; others must be listed ones.
+          return json(file && hub.wrote(resolve(file)) ? await readConversation(resolve(file)) : await history.conversation(file));
         },
       }),
       '/api/history/restore': api({ POST: async (req) => json({ file: await history.restore((await readJson(req))?.file) }) }),
@@ -341,6 +351,13 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
           return noContent();
         },
       }),
+      '/api/sessions/:id/seen': api({
+        POST: (req) => {
+          sessionOf(req);
+          hub.seen(req.params.id);
+          return noContent();
+        },
+      }),
       '/api/sessions/:id/rpc': api({
         POST: async (req) => {
           const session = sessionOf(req);
@@ -355,7 +372,6 @@ export function createDaemonServer({ hub, history, scratchpads, attachments, wor
         },
       }),
       '/api/files': api({ GET: (req) => listing(req, homedir()) }),
-      '/api/sessions/:id/files': api({ GET: (req) => listing(req, sessionOf(req).meta().cwd) }),
       '/api/sessions/:id/ui': api({
         POST: async (req) => {
           const session = sessionOf(req);

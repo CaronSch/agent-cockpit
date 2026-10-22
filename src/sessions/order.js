@@ -36,8 +36,9 @@ const ASCENDING = {
 /**
  * A sorted copy. Ties (same directory, same prompt count) fall back to most recently active
  * first, so a group's order is stable and useful whichever way the main key runs.
- * @param {readonly PastSession[]} sessions @param {SortKey} key @param {SortDir} dir
- * @returns {PastSession[]}
+ * @template {PastSession} T
+ * @param {readonly T[]} sessions @param {SortKey} key @param {SortDir} dir
+ * @returns {T[]}
  */
 export function sortSessions(sessions, key, dir) {
   const sign = dir === 'asc' ? 1 : -1;

@@ -760,6 +760,24 @@ function seed(state, messages) {
 }
 
 /**
+ * Shows a conversation read from its journal while no omp holds it (daemon/conversation.js):
+ * its messages as `get_messages` would seed them, and what the journal says of the session,
+ * the model as `provider/id`.
+ * @param {Transcript} state
+ * @param {{ messages: any[], title: string | null, model: string | null, thinkingLevel: string | null }} conversation
+ */
+export function seedConversation(state, { messages, title, model, thinkingLevel }) {
+  seed(state, messages);
+  const [provider, ...id] = model?.split('/') ?? [];
+  state.session = {
+    ...state.session,
+    model: provider && id.length ? { provider, id: id.join('/'), name: id.join('/') } : null,
+    thinkingLevel,
+    name: title ? withoutIcons(title) || null : null,
+  };
+}
+
+/**
  * Replaces the transcript with the conversation omp has after a rewind (`branch`), in every
  * window alike. Each rewind's items get keys of their own, so none clashes with an earlier
  * seed's; the cost spent so far stays as it was, rewound turns included.

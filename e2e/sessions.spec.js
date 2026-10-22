@@ -1,6 +1,7 @@
-// Behaviour tests for the Sessions window: running sessions with their status and Stop,
-// listing, search, sort, showing a session in an omp window, and archiving, against the real
-// daemon reading journals from E2E_OMP_SESSIONS.
+// Behaviour tests for the Sessions window: one list of conversations, how awake ones are
+// doing, search, sort, showing one in an omp window (asleep or awake), unread marks, links to
+// the omp windows, and archiving, against the real daemon reading journals from
+// E2E_OMP_SESSIONS.
 import { test, expect } from '@playwright/test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -82,7 +83,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.afterEach(async ({ page }) => {
-  // Sessions this spec resumed would otherwise stay running and show as open in the next test.
+  // Sessions this spec woke would otherwise stay awake and show as such in the next test.
   await page.evaluate(async (dir) => {
     const { sessions } = await (await fetch('/api/sessions')).json();
     for (const s of sessions) {
@@ -102,42 +103,66 @@ async function addSessionsWindow(page) {
   return window;
 }
 
-/** Past rows' titles in display order. @param {Locator} window */
-const titles = (window) => window.locator('.sessions-list .sessions-title');
+/**
+ * This spec's rows, in display order: its own journals', archived or not. Tests run in
+ * parallel against one daemon, so the list also holds other spec files' conversations; those
+ * are left out.
+ * @param {Locator} window
+ */
+const ours = (window) => window.locator(`.sessions-list .sessions-item:is([data-key^="${E2E_OMP_SESSIONS}/"], [data-key^="${ARCHIVE}/"])`);
 
-/** A past session's row. @param {Locator} window @param {string} title */
+/** This spec's rows' titles, in display order. @param {Locator} window */
+const titles = (window) => ours(window).locator('.sessions-title');
+
+/** A conversation's row, by title. @param {Locator} window @param {string} title */
 const row = (window, title) => window.locator('.sessions-list .sessions-item', { has: window.page().locator('.sessions-title', { hasText: title }) });
 
-/**
- * A running session's row. Tests run in parallel against one daemon, so the Running list also
- * holds other tests' sessions: rows are found by session id.
- * @param {Locator} window @param {string} session
- */
-const runningRow = (window, session) => window.locator(`.sessions-running .sessions-item[data-session="${session}"]`);
+/** A conversation's row, by what names it (its journal, else a new one's session). @param {Locator} window @param {string} key */
+const keyRow = (window, key) => window.locator(`.sessions-list .sessions-item[data-key="${key}"]`);
 
 /** @param {Page} page */
 const daemonSessions = async (page) => (await (await page.request.get('/api/sessions')).json()).sessions;
 
-/** The session omp window `pane` shows, once the layout saved with it says. @param {Page} page @param {Locator} pane @returns {Promise<string>} */
-async function shownSession(page, pane) {
+/** The awake sessions holding journal `file`. @param {Page} page @param {string} file */
+const awake = async (page, file) => (await daemonSessions(page)).filter((/** @type {any} */ s) => s.sessionFile === file && (s.status === 'ready' || s.status === 'starting'));
+
+/** The settings omp window `pane` is saved with, once the layout saved has it. @param {Page} page @param {Locator} pane */
+async function savedPane(page, pane) {
   const id = await pane.getAttribute('data-id');
   /** @param {any} node @returns {any} */
   const find = (node) => (node?.id === id ? node : (node?.children ?? []).map(find).find(Boolean));
-  let session = null;
-  await expect.poll(async () => (session = find(await savedLayout(page.request, workspace))?.params?.session ?? null)).toBeTruthy();
-  return /** @type {string} */ (/** @type {unknown} */ (session));
+  return find(await savedLayout(page.request, workspace))?.params ?? null;
+}
+
+/**
+ * The conversation omp window `pane` shows (its journal, else a new one's session), once the
+ * layout saved with it says.
+ * @param {Page} page @param {Locator} pane @returns {Promise<string>}
+ */
+async function shownConversation(page, pane) {
+  let key = null;
+  await expect.poll(async () => (key = ((p) => p?.sessionFile ?? p?.session ?? null)(await savedPane(page, pane)))).toBeTruthy();
+  return /** @type {string} */ (/** @type {unknown} */ (key));
 }
 
 /** Starts omp in a new omp window (added through the palette), in `dir`. @param {Page} page @param {string} dir */
 async function startedPane(page, dir) {
-  const before = await page.locator('.widget[data-widget="omp"]').count();
+  const before = new Set(await page.locator('.widget[data-widget="omp"]').evaluateAll((nodes) => nodes.map((n) => /** @type {HTMLElement} */ (n).dataset.id)));
   await page.locator('#palette-toggle').click();
   await page.locator('#palette [data-type="omp"]').click();
   await page.keyboard.press('Escape');
-  const pane = page.locator('.widget[data-widget="omp"]').nth(before);
+  // The new window, wherever the layout put it.
+  const id = await expect
+    .poll(async () => (await page.locator('.widget[data-widget="omp"]').evaluateAll((nodes) => nodes.map((n) => /** @type {HTMLElement} */ (n).dataset.id))).find((i) => !before.has(i)))
+    .toBeTruthy()
+    .then(async () => (await page.locator('.widget[data-widget="omp"]').evaluateAll((nodes) => nodes.map((n) => /** @type {HTMLElement} */ (n).dataset.id))).find((i) => !before.has(i)));
+  const pane = page.locator(`.widget[data-id="${id}"]`);
   await pane.locator('input').fill(dir);
-  await pane.getByRole('button', { name: 'Start omp' }).click();
+  // Enter in the directory field starts it, as the button does.
+  await pane.locator('input').press('Enter');
   await expect(pane.getByText('Fake Model')).toBeVisible();
+  // Its journal is known as omp starts, and names it from then on.
+  await expect.poll(async () => (await savedPane(page, pane))?.sessionFile ?? null).toBeTruthy();
   return pane;
 }
 
@@ -173,7 +198,14 @@ async function middleOf(window) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-test('past sessions are listed newest first, searchable across prompts and directories, and sortable', async ({ page }) => {
+/** Sends `text` in omp window `pane` and waits for the reply. @param {Locator} pane @param {string} text */
+async function turn(pane, text) {
+  await pane.locator('textarea').fill(text);
+  await pane.locator('textarea').press('Enter');
+  await expect(pane.locator('.omp-assistant').last()).toContainText(`You said: ${text}`);
+}
+
+test('sessions are listed newest first, searchable across prompts and directories, and sortable', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await expect(titles(window)).toHaveText(['Zebra cleanup', 'deploy staging', 'Fix the login flow']);
   // Separate words, not "2h ago2 prompts": what copy-paste and screen readers get.
@@ -208,7 +240,7 @@ test('a session omp writes while the window is open shows up by itself', async (
   await expect(titles(window)).toHaveText(['Fresh work', 'Zebra cleanup', 'deploy staging', 'Fix the login flow']);
 });
 
-test('dragging a session onto the grid resumes it in a new omp window; dragged again, a second window shows the same session', async ({ page }) => {
+test('a conversation dragged onto the grid shows in a new omp window without starting omp; dragged again, a second window shows it too', async ({ page }) => {
   const window = await addSessionsWindow(page);
   const deploy = row(window, 'deploy staging');
   await dragToGridRight(page, deploy);
@@ -218,74 +250,54 @@ test('dragging a session onto the grid resumes it in a new omp window; dragged a
 
   const pane = page.locator('.widget[data-widget="omp"]');
   await expect(pane).toHaveCount(1);
-  await expect(pane.locator('.omp-user')).toContainText('earlier question');
-  await expect(pane.locator('.omp-assistant')).toContainText('earlier answer');
-  const live = async () => (await daemonSessions(page)).filter((/** @type {any} */ s) => s.sessionFile === fileOf('deploy') && s.status !== 'exited');
-  expect(await live()).toHaveLength(1);
-  expect((await live())[0].cwd).toBe(BRAVO);
-  const session = await shownSession(page, pane);
-  await expect(deploy, 'listed once: as running, not as past').toHaveCount(0);
-  await expect(runningRow(window, session)).toBeVisible();
+  await expect(pane.locator('.omp-user .omp-md')).toHaveText(['deploy staging'], { useInnerText: true });
+  expect(await awake(page, fileOf('deploy')), 'shown from its journal: no omp').toHaveLength(0);
+  expect(await shownConversation(page, pane)).toBe(fileOf('deploy'));
 
-  // Running, it is shown again rather than resumed a second time: one omp, two windows.
-  await dragToGridRight(page, runningRow(window, session));
-  await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
+  await dragToGridRight(page, deploy);
   await page.mouse.up();
   await expect(pane).toHaveCount(2);
-  await expect(pane.nth(1).locator('.omp-assistant')).toContainText('earlier answer');
-  expect(await shownSession(page, pane.nth(1))).toBe(session);
-  expect(await live()).toHaveLength(1);
+  expect(await shownConversation(page, pane.nth(1))).toBe(fileOf('deploy'));
+
+  // Sending from one wakes it once; the other window follows the same session.
+  await turn(pane.nth(0), 'hello');
+  await expect(pane.nth(1).locator('.omp-assistant').last()).toContainText('You said: hello');
+  const live = await awake(page, fileOf('deploy'));
+  expect(live).toHaveLength(1);
+  expect(live[0].cwd).toBe(BRAVO);
+  await expect(deploy, 'listed once, awake or not').toHaveCount(1);
 });
 
-test('the Resume button drags out too, resuming the session where it is dropped', async ({ page }) => {
+test('a click shows a conversation in a new omp window when there is none, then in the last one used; Enter does the same', async ({ page }) => {
   const window = await addSessionsWindow(page);
-  const resume = row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' });
-  await row(window, 'Fix the login flow').scrollIntoViewIfNeeded();
-  const from = await resume.boundingBox();
-  const grid = await page.locator('#grid').boundingBox();
-  if (!from || !grid) throw new Error('nothing to drag');
-  // The grid's left edge: a click on Resume would open it beside the list instead.
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(grid.x + 10, grid.y + grid.height / 2, { steps: 12 });
-  await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
-  await page.mouse.up();
-
+  await row(window, 'Fix the login flow').click();
   const pane = page.locator('.widget[data-widget="omp"]');
   await expect(pane).toHaveCount(1);
-  await expect(pane.locator('.omp-user')).toContainText('earlier question');
-  const [placed, list] = [await pane.boundingBox(), await window.boundingBox()];
-  expect(placed && list && placed.x < list.x).toBe(true);
-});
-
-test('Resume opens the session in a new omp window when there is none, then in the last one used; Enter does the same', async ({ page }) => {
-  const window = await addSessionsWindow(page);
-  await row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' }).click();
-  const pane = page.locator('.widget[data-widget="omp"]');
-  await expect(pane).toHaveCount(1);
-  await expect(pane.locator('.omp-user')).toContainText('earlier question');
-  const login = await shownSession(page, pane);
+  await expect(pane.locator('.omp-user .omp-md')).toHaveText(['fix the login bug', 'now add tests'], { useInnerText: true });
+  expect(await shownConversation(page, pane)).toBe(fileOf('login'));
 
   await row(window, 'Zebra cleanup').focus();
   await page.keyboard.press('Enter');
-  await expect.poll(() => shownSession(page, pane)).not.toBe(login);
+  await expect.poll(() => shownConversation(page, pane)).toBe(fileOf('zebra'));
   await expect(pane, 'shown in the window there is, not a new one').toHaveCount(1);
-  await expect(runningRow(window, await shownSession(page, pane))).toBeVisible();
-  await expect(runningRow(window, login), 'the session it showed before runs on').toBeVisible();
+  await expect(pane.locator('.omp-user .omp-md')).toHaveText(['remove dead code'], { useInnerText: true });
   await expect(page.locator('.widget[data-widget="sessions"]'), 'the list stays').toHaveCount(1);
 });
 
-test('a session whose directory is gone says so instead of starting omp somewhere else', async ({ page }) => {
+test('a conversation whose directory is gone shows, and says so once something is sent', async ({ page }) => {
   const gone = join(tmpdir(), 'ac-e2e-gone-dir-that-does-not-exist');
   writeFileSync(
     fileOf('gone'),
     `${[{ type: 'session', version: 3, id: 'gone', timestamp: '2026-10-01T10:00:00.000Z', cwd: gone }, { type: 'message', message: { role: 'user', content: 'old work' } }].map((l) => JSON.stringify(l)).join('\n')}\n`,
   );
   const window = await addSessionsWindow(page);
-  await row(window, 'old work').getByRole('button', { name: 'Resume' }).click();
+  await row(window, 'old work').click();
   const pane = page.locator('.widget[data-widget="omp"]');
-  await expect(pane.locator('.omp-error')).toContainText('cwd is not an existing directory');
-  await expect(pane.getByRole('button', { name: 'New session' })).toBeVisible();
+  await expect(pane.locator('.omp-user')).toContainText('old work');
+  await pane.locator('textarea').fill('carry on');
+  await pane.locator('textarea').press('Enter');
+  await expect(pane.locator('.omp-note', { hasText: 'omp did not start' })).toContainText('cwd is not an existing directory');
+  await expect(pane.locator('textarea'), 'the message stays to send again').toHaveValue('carry on');
   // A failed request logs a console error in the browser; that is the expected outcome here.
   problems = problems.filter((p) => !p.includes('400'));
 });
@@ -305,10 +317,10 @@ test('Archive hides a session from the list (and from omp), Archived lists it, a
   await expect(titles(window)).toHaveText(['Zebra cleanup']);
   await expect(window.locator('.sessions-status')).toHaveText('1 archived session');
   const archived = row(window, 'Zebra cleanup');
-  await expect(archived.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+  await expect(archived.getByRole('button', { name: 'Archive' })).toHaveCount(0);
   await archived.dblclick();
   await settle(page);
-  await expect(page.locator('.widget[data-widget="omp"]'), 'an archived session does not resume').toHaveCount(0);
+  await expect(page.locator('.widget[data-widget="omp"]'), 'an archived session does not show').toHaveCount(0);
 
   await archived.getByRole('button', { name: 'Restore' }).click();
   await expect(window.locator('.sessions-status')).toHaveText('No archived sessions.');
@@ -332,79 +344,80 @@ test('Archive does not drag the session out: pressed and moved onto the grid, it
   await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(0);
 });
 
-test('a running session is listed once, as running, even with its window closed, and only Stop lists it as past again to archive', async ({ page }) => {
+test('a conversation is listed once, awake or not, even with its window closed; archived while idle, its session goes to sleep', async ({ page }) => {
   const window = await addSessionsWindow(page);
-  await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  await row(window, 'deploy staging').click();
   const pane = page.locator('.widget[data-widget="omp"]');
-  const session = await shownSession(page, pane);
+  await turn(pane, 'hello');
   await pane.locator('.widget-close').click();
   await expect(pane).toHaveCount(0);
 
-  await expect(runningRow(window, session)).toBeVisible();
-  await expect(titles(window), 'not as past, where it could be archived').toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  const deploy = keyRow(window, fileOf('deploy'));
+  await expect(deploy).toHaveCount(1);
+  expect(await awake(page, fileOf('deploy'))).toHaveLength(1);
   const search = window.getByRole('searchbox', { name: 'Search sessions' });
   await search.fill('deploy');
-  await expect(titles(window), 'searched, through its journal').toHaveText([]);
-  await expect(runningRow(window, session)).toBeVisible();
+  await expect(titles(window)).toHaveText([/deploy staging/], { timeout: 3000 }); // titled by omp since it woke
   await search.fill('login');
   await expect(titles(window)).toHaveText(['Fix the login flow'], { timeout: 3000 });
-  await expect(runningRow(window, session)).toHaveCount(0);
   await search.fill('');
 
-  await runningRow(window, session).getByRole('button', { name: 'Stop' }).click();
-  await expect(runningRow(window, session)).toHaveCount(0);
-  await expect(titles(window)).toHaveText(['Zebra cleanup', 'deploy staging', 'Fix the login flow']);
-  await expect(row(window, 'deploy staging').getByRole('button', { name: 'Archive' })).toBeEnabled();
+  await deploy.getByRole('button', { name: 'Archive' }).click();
+  await expect(titles(window)).toHaveText(['Zebra cleanup', 'Fix the login flow']);
+  expect(await awake(page, fileOf('deploy')), 'asleep before its journal moved').toHaveLength(0);
 });
 
-test('running sessions are listed with how each is doing; a click shows one in the omp window used last', async ({ page }) => {
+test('awake conversations are listed with how each is doing; a click shows one in the omp window used last', async ({ page }) => {
   const window = await addSessionsWindow(page);
-  await row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' }).click();
+  await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA); // only this test's sessions
+  await row(window, 'Fix the login flow').click();
   const first = page.locator('.widget[data-widget="omp"]').first();
-  const login = await shownSession(page, first);
+  await expect(first.locator('.omp-user').first()).toContainText('fix the login bug');
   const second = await startedPane(page, ALPHA);
-  const fresh = await shownSession(page, second);
-  await expect(runningRow(window, login).locator('.sessions-title')).toHaveText('Earlier work');
-  await expect(runningRow(window, fresh).locator('.sessions-title')).toHaveText('New session');
-  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('idle');
+  const fresh = await shownConversation(page, second);
+  const freshRow = keyRow(window, fresh);
+  await expect(freshRow.locator('.sessions-title')).toHaveText('New session');
+  // Ready, as the session is: never left showing as starting.
+  await expect(freshRow).toHaveClass(/is-idle/);
+  await expect(freshRow.locator('.sessions-state'), 'idle needs no word').toHaveCount(0);
+  await expect(keyRow(window, fileOf('login')), 'asleep: no state at all').not.toHaveClass(/is-(idle|working|done|asking|starting)/);
 
   // Working while a turn runs; done (and unread) once it ends unread; idle again once looked at.
   await page.mouse.move(5, 5); // the top bar: no window is being looked at
   await second.locator('textarea').fill('slow');
   await second.locator('textarea').press('Enter');
-  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('working');
-  await expect(runningRow(window, fresh).locator('.sessions-title'), 'titled while the turn runs').toHaveText('About slow');
-  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('done', { timeout: 5000 });
-  await expect(runningRow(window, fresh)).toHaveClass(/is-unread/);
+  await expect(freshRow.locator('.sessions-state')).toHaveText('working');
+  await expect(freshRow.locator('.sessions-title'), 'titled while the turn runs').toHaveText('About slow');
+  await expect(freshRow).toHaveClass(/is-done/, { timeout: 5000 });
+  await expect(freshRow).toHaveClass(/is-unread/);
   const { x, y } = await middleOf(second);
   await page.mouse.move(x, y);
-  await expect(runningRow(window, fresh).locator('.sessions-state')).toHaveText('idle');
+  await expect(freshRow).toHaveClass(/is-idle/);
 
-  // The second window was used last: a click shows the session there; its own runs on.
-  await runningRow(window, login).click();
-  await expect.poll(() => shownSession(page, second)).toBe(login);
-  await expect(second.locator('.omp-user')).toContainText('earlier question');
-  expect(await shownSession(page, first)).toBe(login);
-  await expect(runningRow(window, fresh)).toBeVisible();
-  expect((await daemonSessions(page)).find((/** @type {any} */ s) => s.id === fresh).status).toBe('ready');
+  // The second window was used last: a click shows the conversation there; its own carries on.
+  await keyRow(window, fileOf('login')).click();
+  await expect.poll(() => shownConversation(page, second)).toBe(fileOf('login'));
+  await expect(second.locator('.omp-user').first()).toContainText('fix the login bug');
+  expect(await shownConversation(page, first)).toBe(fileOf('login'));
+  await expect(freshRow).toBeVisible();
 });
 
 test('a session dragged onto the middle of an omp window is shown there', async ({ page }) => {
   const window = await addSessionsWindow(page);
   const target = await startedPane(page, ALPHA);
-  const before = await shownSession(page, target);
+  const before = await shownConversation(page, target);
   await dragTo(page, row(window, 'Zebra cleanup'), await middleOf(target));
   await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
   await expect(page.locator('.drop-indicator')).toContainText('Show here');
   await page.mouse.up();
   await expect(page.locator('.widget[data-widget="omp"]'), 'no window added').toHaveCount(1);
-  await expect(target.locator('.omp-user')).toContainText('earlier question');
-  await expect.poll(() => shownSession(page, target)).not.toBe(before);
+  await expect(target.locator('.omp-user')).toContainText('remove dead code');
+  await expect.poll(() => shownConversation(page, target)).toBe(fileOf('zebra'));
 
-  // A running one too: the window goes back to the session it showed first.
-  await dragTo(page, runningRow(window, before), await middleOf(target));
+  // An awake one too: the window goes back to the conversation it showed first.
+  await dragTo(page, keyRow(window, before), await middleOf(target));
   await page.mouse.up();
-  await expect.poll(() => shownSession(page, target)).toBe(before);
+  await expect.poll(() => shownConversation(page, target)).toBe(before);
   await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(1);
 });
 
@@ -460,69 +473,72 @@ async function turnWhileAway(page, pane, text) {
   await expect(pane.locator('.omp-assistant').last()).toContainText(text);
 }
 
-test('a turn that ends while nobody looks stays unread, across reloads and after the session stops, until it is read', async ({ page }) => {
+/** Puts the sessions holding `file` to sleep, as the daemon does once they are idle and unused. @param {Page} page @param {string} file */
+async function sleep(page, file) {
+  for (const s of await awake(page, file)) await page.evaluate((id) => fetch(`/api/sessions/${id}`, { method: 'DELETE' }).then(() => {}), s.id);
+  await expect.poll(async () => (await awake(page, file)).length).toBe(0);
+}
+
+test('a turn that ends while nobody looks stays unread, across reloads and asleep, until it is read', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await window.getByRole('combobox', { name: 'Directory' }).selectOption(BRAVO); // only this test's sessions
-  await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  await row(window, 'deploy staging').click();
   const pane = page.locator('.widget[data-widget="omp"]');
-  const session = await shownSession(page, pane);
   await expect(window.locator('.widget-label')).toBeHidden();
 
   await turnWhileAway(page, pane, 'hello');
-  const running = runningRow(window, session);
-  await expect(running).toHaveClass(/is-unread/);
-  await expect(running.locator('.sessions-state')).toHaveText('done');
-  await expect(running.getByRole('img', { name: 'Unread' })).toBeVisible();
+  const deploy = keyRow(window, fileOf('deploy'));
+  await expect(deploy).toHaveClass(/is-unread/);
+  await expect(deploy).toHaveClass(/is-done/);
+  await expect(deploy.getByRole('img', { name: 'Unread' })).toBeVisible();
   await expect(window.locator('.widget-label')).toHaveText('1 unread');
   await expect(pane).toHaveClass(/is-unread/);
 
   await page.reload();
-  await expect(running).toHaveClass(/is-unread/);
+  await expect(deploy).toHaveClass(/is-unread/);
   await expect(pane).toHaveClass(/is-unread/);
 
-  // Stopped, it is a past session, still unread: blue dot, bold title.
-  await running.getByRole('button', { name: 'Stop' }).click();
-  const past = row(window, 'deploy staging');
-  await expect(past).toHaveClass(/is-unread/);
-  await expect(past.locator('.sessions-title')).toHaveCSS('font-weight', '600');
+  // Asleep, still unread: blue dot, bold title, in its window too.
+  await sleep(page, fileOf('deploy'));
+  await expect(deploy).not.toHaveClass(/is-done/);
+  await expect(deploy).toHaveClass(/is-unread/);
+  await expect(deploy.locator('.sessions-title')).toHaveCSS('font-weight', '600');
   await expect(window.locator('.widget-label')).toHaveText('1 unread');
   await page.reload();
-  await expect(past).toHaveClass(/is-unread/);
+  await expect(deploy).toHaveClass(/is-unread/);
+  await expect(pane).toHaveClass(/is-unread/);
 
   // Archived, it keeps the mark; restored, it still has it.
-  await past.getByRole('button', { name: 'Archive' }).click();
+  await deploy.getByRole('button', { name: 'Archive' }).click();
   await window.getByRole('button', { name: 'Archived' }).click();
-  await expect(past).toHaveClass(/is-unread/);
-  await past.getByRole('button', { name: 'Restore' }).click();
+  const archived = row(window, 'deploy staging');
+  await expect(archived).toHaveClass(/is-unread/);
+  await archived.getByRole('button', { name: 'Restore' }).click();
   await window.getByRole('button', { name: 'Archived' }).click();
-  await expect(past).toHaveClass(/is-unread/);
+  await expect(deploy).toHaveClass(/is-unread/);
 
   // Showing it from Sessions reads it.
-  await past.getByRole('button', { name: 'Resume' }).click();
-  await expect(past).toHaveCount(0); // listed as running again
-  await expect.poll(() => shownSession(page, pane)).not.toBe(session);
-  const again = runningRow(window, await shownSession(page, pane));
-  await expect(again).toBeVisible();
-  await expect(again).not.toHaveClass(/is-unread/);
+  await deploy.click();
+  await expect(deploy).not.toHaveClass(/is-unread/);
   await expect(pane).not.toHaveClass(/is-unread/);
   await expect(window.locator('.widget-label')).toBeHidden();
 });
 
 test('reading a session in its omp window clears its mark in Sessions', async ({ page }) => {
   const window = await addSessionsWindow(page);
-  await row(window, 'deploy staging').getByRole('button', { name: 'Resume' }).click();
+  await row(window, 'deploy staging').click();
   const pane = page.locator('.widget[data-widget="omp"]');
-  const running = runningRow(window, await shownSession(page, pane));
+  const deploy = keyRow(window, fileOf('deploy'));
   await turnWhileAway(page, pane, 'hello');
-  await expect(running).toHaveClass(/is-unread/);
+  await expect(deploy).toHaveClass(/is-unread/);
   const { x, y } = await middleOf(pane);
   await page.mouse.move(x, y);
   await expect(pane).not.toHaveClass(/is-unread/);
-  await expect(running).not.toHaveClass(/is-unread/);
-  await expect(running.locator('.sessions-state')).toHaveText('idle');
+  await expect(deploy).not.toHaveClass(/is-unread/);
+  await expect(deploy).toHaveClass(/is-idle/);
   await page.reload();
-  await expect(running).toBeVisible();
-  await expect(running).not.toHaveClass(/is-unread/);
+  await expect(deploy).toBeVisible();
+  await expect(deploy).not.toHaveClass(/is-unread/);
 });
 
 test('a row’s menu, from a right-click or its ⋯ button, marks a session read or unread beside its other actions', async ({ page }) => {
@@ -531,7 +547,7 @@ test('a row’s menu, from a right-click or its ⋯ button, marks a session read
   const menu = page.getByRole('menu');
   const zebra = row(window, 'Zebra cleanup');
   await zebra.click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Resume', 'Mark as unread', 'Archive']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Show', 'Mark as unread', 'Archive']);
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await menu.getByRole('menuitem', { name: 'Mark as unread' }).click();
   await expect(menu).toHaveCount(0);
@@ -540,7 +556,7 @@ test('a row’s menu, from a right-click or its ⋯ button, marks a session read
 
   await zebra.hover();
   await zebra.getByRole('button', { name: 'More actions' }).click();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Resume', 'Mark as read', 'Archive']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Show', 'Mark as read', 'Archive']);
   await menu.getByRole('menuitem', { name: 'Mark as read' }).click();
   await expect(zebra).not.toHaveClass(/is-unread/);
 
@@ -555,98 +571,125 @@ test('a row’s menu, from a right-click or its ⋯ button, marks a session read
   await expect(menu).toHaveCount(0);
 });
 
-test('from the keyboard, Shift+F10 opens a running row’s menu; Mark as unread lights its window, which the pointer resting there does not clear', async ({ page }) => {
+test('from the keyboard, Shift+F10 opens a row’s menu; Mark as unread lights its window, which the pointer resting there does not clear', async ({ page }) => {
   const window = await addSessionsWindow(page);
-  await row(window, 'Zebra cleanup').getByRole('button', { name: 'Resume' }).click();
+  await row(window, 'Zebra cleanup').click();
   const pane = page.locator('.widget[data-widget="omp"]');
-  const running = runningRow(window, await shownSession(page, pane));
-  await expect(pane.locator('.omp-user')).toContainText('earlier question');
+  const zebra = keyRow(window, fileOf('zebra'));
+  await expect(pane.locator('.omp-user')).toContainText('remove dead code');
   const { x, y } = await middleOf(pane);
   await page.mouse.move(x, y); // looking at the window
 
   const menu = page.getByRole('menu');
-  await running.focus();
+  await zebra.focus();
   await page.keyboard.press('Shift+F10');
-  await expect(menu.getByRole('menuitem')).toHaveText(['Show', 'Mark as unread', 'Stop']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Show', 'Mark as unread', 'Archive']);
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
-  await expect(running, 'Esc gives focus back to the row').toBeFocused();
+  await expect(zebra, 'Esc gives focus back to the row').toBeFocused();
 
   await page.keyboard.press('ContextMenu');
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem', { name: 'Mark as unread' })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(running).toHaveClass(/is-unread/);
-  await expect(running, 'focus is back on the row').toBeFocused();
+  await expect(zebra).toHaveClass(/is-unread/);
+  await expect(zebra, 'focus is back on the row').toBeFocused();
   await expect(pane).toHaveClass(/is-unread/);
   // The pointer has been resting on the window all along: that is not reading the mark.
   await settle(page);
   await expect(pane).toHaveClass(/is-unread/);
-  await expect(running).toHaveClass(/is-unread/);
+  await expect(zebra).toHaveClass(/is-unread/);
   // Moving it there again is.
   await page.mouse.move(x + 10, y + 10);
   await expect(pane).not.toHaveClass(/is-unread/);
-  await expect(running).not.toHaveClass(/is-unread/);
+  await expect(zebra).not.toHaveClass(/is-unread/);
 });
 
 test('rows mark the sessions shown in omp windows, the last-used one brighter; pointing links rows and windows both ways', async ({ page }) => {
   const window = await addSessionsWindow(page);
-  // Only this test's directory: Sessions lists every session the daemon runs, newest first,
-  // and those other test files start meanwhile would push these rows out from under the pointer.
+  // Only this test's directory: Sessions lists every conversation, newest first, and those
+  // other test files start meanwhile would push these rows out from under the pointer.
   await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA);
   const first = await startedPane(page, ALPHA);
   const second = await startedPane(page, ALPHA);
-  const [a, b] = [await shownSession(page, first), await shownSession(page, second)];
-  await expect(runningRow(window, a)).toHaveClass(/is-shown/);
-  await expect(runningRow(window, b)).toHaveClass(/is-shown/);
+  const [a, b] = [keyRow(window, await shownConversation(page, first)), keyRow(window, await shownConversation(page, second))];
+  await expect(a).toHaveClass(/is-shown/);
+  await expect(b).toHaveClass(/is-shown/);
 
   // The brighter mark follows the omp window used last: where a click in Sessions shows a session.
   await first.locator('.omp-transcript').click();
-  await expect(runningRow(window, a)).toHaveClass(/is-current/);
-  await expect(runningRow(window, b)).not.toHaveClass(/is-current/);
+  await expect(a).toHaveClass(/is-current/);
+  await expect(b).not.toHaveClass(/is-current/);
   await second.locator('.omp-transcript').click();
-  await expect(runningRow(window, b)).toHaveClass(/is-current/);
-  await expect(runningRow(window, a)).not.toHaveClass(/is-current/);
+  await expect(b).toHaveClass(/is-current/);
+  await expect(a).not.toHaveClass(/is-current/);
 
   // Pointing at a row outlines its window, and only while pointed at.
-  await runningRow(window, a).locator('.sessions-title').hover();
+  await a.locator('.sessions-title').hover();
   await expect(first).toHaveClass(/is-outlined/);
   await expect(second).not.toHaveClass(/is-outlined/);
   await page.mouse.move(5, 5); // the top bar
   await expect(first).not.toHaveClass(/is-outlined/);
 
   // Straight from one row to the next: the outline moves with the pointer.
-  await runningRow(window, a).locator('.sessions-title').hover();
-  await runningRow(window, b).locator('.sessions-title').hover();
+  await a.locator('.sessions-title').hover();
+  await b.locator('.sessions-title').hover();
   await expect(second).toHaveClass(/is-outlined/);
   await expect(first).not.toHaveClass(/is-outlined/);
 
   // A click focuses its row too; that focus does not keep the outline once the pointer leaves.
-  await runningRow(window, b).locator('.sessions-title').click();
-  await expect(runningRow(window, b)).toBeFocused();
+  await b.locator('.sessions-title').click();
+  await expect(b).toBeFocused();
   await page.mouse.move(5, 5);
   await expect(second).not.toHaveClass(/is-outlined/);
 
   // A row redrawn under the pointer (its session starts working) keeps the outline while
   // pointed at, and lets go of it as the pointer leaves.
-  await runningRow(window, a).locator('.sessions-title').hover();
+  await a.locator('.sessions-title').hover();
   await first.locator('textarea').evaluate((node) => {
     const area = /** @type {HTMLTextAreaElement} */ (node);
     area.value = 'slow';
     area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   });
-  await expect(runningRow(window, a).locator('.sessions-state')).toHaveText('working');
+  await expect(a.locator('.sessions-state')).toHaveText('working');
   await expect(first).toHaveClass(/is-outlined/);
   await page.mouse.move(5, 5);
   await expect(first).not.toHaveClass(/is-outlined/);
 
-  // Pointing at an omp window lights its session's row.
+  // Pointing at an omp window lights its conversation's row.
   await first.locator('.omp-transcript').hover();
-  await expect(runningRow(window, a)).toHaveClass(/is-pointed/);
-  await expect(runningRow(window, b)).not.toHaveClass(/is-pointed/);
+  await expect(a).toHaveClass(/is-pointed/);
+  await expect(b).not.toHaveClass(/is-pointed/);
 
-  // A window that stops showing it takes the marker away.
+  // A window that stops showing it takes the mark away.
   await second.locator('.widget-close').click();
-  await expect(runningRow(window, b)).not.toHaveClass(/is-shown/);
+  await expect(b).not.toHaveClass(/is-shown/);
+});
+
+test('a rewind moves the conversation onto a new journal: the window and its row follow it, and the old one is archived', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA); // only this test's sessions
+  await row(window, 'Zebra cleanup').click();
+  const pane = page.locator('.widget[data-widget="omp"]');
+  await turn(pane, 'first question');
+  await turn(pane, 'second question');
+
+  await pane.locator('.omp-user', { hasText: 'second question' }).hover();
+  await pane.locator('.omp-user', { hasText: 'second question' }).getByRole('button', { name: 'Rewind' }).click();
+  await pane.locator('textarea').fill('second question, reworded');
+  await pane.locator('textarea').press('Enter');
+  await expect(pane.locator('.omp-assistant').last()).toContainText('You said: second question, reworded');
+
+  // omp goes on in a new journal beside the old one; the window names the conversation by it.
+  await expect.poll(() => shownConversation(page, pane)).not.toBe(fileOf('zebra'));
+  const moved = await shownConversation(page, pane);
+  expect(moved.startsWith(join(E2E_OMP_SESSIONS, '-e2e-project'))).toBe(true);
+  await expect(keyRow(window, moved)).toHaveClass(/is-shown/);
+  await expect(keyRow(window, moved).locator('.sessions-title')).toHaveText('Zebra cleanup');
+  // The journal before the rewind keeps what was set aside, archived: listed there, not here.
+  await expect(keyRow(window, fileOf('zebra'))).toHaveCount(0);
+  expect(existsSync(join(ARCHIVE, '-e2e-project', '2026-10-01_zebra.jsonl'))).toBe(true);
+  await window.getByRole('button', { name: 'Archived' }).click();
+  await expect(titles(window)).toHaveText(['Zebra cleanup']);
 });

@@ -12,8 +12,8 @@ import { button, el } from '../ui/dom.js';
 /**
  * `tab` replaces Tab's default (picking the selected row), told whether the selection was
  * moved; `enter` makes Enter pick (otherwise the draft keeps it: a slash command is sent as
- * typed); `note` is a line under the rows.
- * @typedef {{ tab?: (moved: boolean, selected: Suggestion) => void, enter?: boolean, note?: string }} SuggestOptions
+ * typed), or, as `'moved'`, only a row the arrows picked; `note` is a line under the rows.
+ * @typedef {{ tab?: (moved: boolean, selected: Suggestion) => void, enter?: boolean | 'moved', note?: string }} SuggestOptions
  */
 
 export function createSuggestions() {
@@ -71,7 +71,7 @@ export function createSuggestions() {
       } else if (e.key === 'Tab' && !e.shiftKey) {
         if (options.tab) options.tab(moved, rows[selected]);
         else rows[selected].pick();
-      } else if (e.key === 'Enter' && !e.shiftKey && options.enter) {
+      } else if (e.key === 'Enter' && !e.shiftKey && (options.enter === true || (options.enter === 'moved' && moved))) {
         rows[selected].pick();
       } else {
         return false;

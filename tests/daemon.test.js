@@ -261,7 +261,12 @@ describe('sessions', () => {
 
   test('a session started from a journal has its earlier history in the log before it is ready', async () => {
     const journal = join(cwd, 'history-first.jsonl');
-    await Bun.write(journal, '');
+    const lines = [
+      { type: 'session', version: 3, id: 'history-first', timestamp: '2026-10-01T10:00:00.000Z', cwd },
+      { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'earlier question' }] } },
+      { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] } },
+    ];
+    await Bun.write(journal, `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } });
     const id = json.session.id;
     await waitForStatus(id, 'ready');
@@ -530,7 +535,7 @@ describe('sessions', () => {
 
   test('a session that already has a name is never asked for a title', async () => {
     const journal = join(cwd, 'titled.jsonl');
-    await Bun.write(journal, '');
+    await Bun.write(journal, `${JSON.stringify({ type: 'title', v: 1, title: 'Earlier work' })}\n`);
     const id = (await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: journal } })).json.session.id;
     await waitForStatus(id, 'ready');
     assert.deepEqual(sentAfterPrompt(await turn(id, 'fix the login bug')), ['fix the login bug', 'get_state', 'get_state']);
@@ -749,6 +754,153 @@ describe('workspaces', () => {
   });
 });
 
+describe('sleep', () => {
+  /**
+   * A hub of the test's own whose sessions sleep after `after` ms, and a way to wait for one
+   * of its sessions to reach a status.
+   * @param {number} after
+   */
+  function sleepyHub(after) {
+    const sleepy = createHub({ ompPath: FAKE_OMP, unread, sleepAfterMs: after });
+    /** @type {SessionEvent[]} */
+    const events = [];
+    /** @type {Set<() => void>} */
+    const waiters = new Set();
+    sleepy.subscribe((e) => {
+      events.push(e);
+      for (const fn of waiters) fn();
+    });
+    /** @param {(e: SessionEvent) => boolean} match @returns {Promise<SessionEvent>} */
+    const next = (match) =>
+      new Promise((resolve) => {
+        const check = () => {
+          const found = events.find(match);
+          if (!found) return;
+          waiters.delete(check);
+          resolve(found);
+        };
+        waiters.add(check);
+        check();
+      });
+    /** @param {string} id @param {string} status */
+    const reaches = (id, status) => next((e) => e.session === id && e.kind === 'session' && e.meta.status === status);
+    return { sleepy, events, next, reaches };
+  }
+
+  test('an idle session nobody uses goes to sleep; being used keeps it awake', async () => {
+    const { sleepy, reaches } = sleepyHub(400);
+    const id = sleepy.create({ cwd, resume: null, fork: null }).id;
+    await reaches(id, 'ready');
+    // Used every 100 ms for a while: still awake.
+    for (let i = 0; i < 8; i++) {
+      await Bun.sleep(100);
+      sleepy.seen(id);
+    }
+    assert.equal(sleepy.get(id)?.meta().status, 'ready');
+    assert.equal(sleepy.idle(id), true, 'nothing under way');
+    await reaches(id, 'exited');
+    await sleepy.closeAll();
+  });
+
+  test('a session never sleeps while its agent works, and does once it is done', async () => {
+    const { sleepy, events, next, reaches } = sleepyHub(300);
+    const id = sleepy.create({ cwd, resume: null, fork: null }).id;
+    await reaches(id, 'ready');
+    // "slow" keeps the turn running for 1.5 s: five times the wait before sleep.
+    sleepy.get(id)?.command({ type: 'prompt', message: 'slow' });
+    await next((e) => e.session === id && e.kind === 'frame' && e.frame.type === 'agent_start');
+    assert.equal(sleepy.idle(id), false);
+    await next((e) => e.session === id && e.kind === 'frame' && e.frame.type === 'session_settled');
+    const settled = events.length;
+    assert.equal(sleepy.get(id)?.meta().status, 'ready', 'awake all through the turn');
+    await reaches(id, 'exited');
+    assert.ok(events.length > settled);
+    await sleepy.closeAll();
+  });
+});
+
+test('a rewind moves the session onto a new journal; the hub tells which one it left', async () => {
+  /** @type {string[]} */
+  const left = [];
+  const rewinding = createHub({ ompPath: FAKE_OMP, unread, onRewound: (file) => left.push(file) });
+  /** @type {SessionEvent[]} */
+  const events = [];
+  /** @type {() => void} */
+  let heard = () => {};
+  rewinding.subscribe((e) => {
+    events.push(e);
+    heard();
+  });
+  /** @param {(e: SessionEvent) => boolean} match */
+  const next = async (match) => {
+    while (!events.some(match)) await new Promise((r) => (heard = () => r(undefined)));
+    return /** @type {SessionEvent} */ (events.find(match));
+  };
+  const id = rewinding.create({ cwd, resume: null, fork: null }).id;
+  await next((e) => e.kind === 'session' && e.meta.status === 'ready');
+  const session = /** @type {import('../daemon/omp-session.js').OmpSession} */ (rewinding.get(id));
+  for (const message of ['first', 'second']) {
+    const settled = events.length;
+    session.command({ type: 'prompt', message });
+    await next((e) => events.indexOf(e) >= settled && e.kind === 'frame' && e.frame.type === 'session_settled');
+  }
+  const before = String(session.meta().sessionFile);
+  const listed = await session.command({ type: 'get_branch_messages' }).response;
+  const answered = await session.command({ type: 'branch', entryId: listed.data.messages[1].entryId }).response;
+  assert.equal(answered.data.text, 'second');
+  await next((e) => e.kind === 'session' && e.meta.sessionFile !== null && e.meta.sessionFile !== before);
+  assert.deepEqual(left, [before]);
+  assert.notEqual(session.meta().sessionFile, before);
+  assert.ok(await Bun.file(before).exists(), 'the old journal keeps the path set aside');
+  await rewinding.closeAll();
+});
+
+describe('conversations from their journals', () => {
+  const journalsDir = () => join(cwd, 'omp-sessions', '-conv');
+
+  test('a listed journal reads back as its conversation, without starting omp', async () => {
+    const file = join(journalsDir(), 'read-me.jsonl');
+    const lines = [
+      { type: 'title', v: 1, title: 'Read me' },
+      { type: 'session', version: 3, id: 'read-me', timestamp: '2026-10-01T10:00:00.000Z', cwd },
+      { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } },
+    ];
+    await mkdir(journalsDir(), { recursive: true });
+    await Bun.write(file, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+    const before = hub.list().length;
+    const res = await call({ path: `/api/conversation?file=${encodeURIComponent(file)}` });
+    assert.equal(res.status, 200);
+    assert.deepEqual({ id: res.json.id, title: res.json.title, cwd: res.json.cwd, messages: res.json.messages.length }, { id: 'read-me', title: 'Read me', cwd, messages: 1 });
+    assert.equal(hub.list().length, before, 'no omp was started');
+  });
+
+  test('a journal a session of this daemon wrote reads back wherever it is; any other path is refused', async () => {
+    const created = (await call({ method: 'POST', path: '/api/sessions', body: { cwd } })).json.session;
+    await waitForStatus(created.id, 'ready');
+    const from = hub.since(0).length;
+    await rpc(created.id, { type: 'prompt', message: 'hello' });
+    await logged((e) => e.seq > from && e.session === created.id && e.kind === 'frame' && e.frame.type === 'session_settled');
+    const file = String(hub.get(created.id)?.meta().sessionFile);
+    const res = await call({ path: `/api/conversation?file=${encodeURIComponent(file)}` });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.json.messages.map((/** @type {any} */ m) => m.role), ['user', 'assistant']);
+
+    const outside = join(cwd, 'state', 'not-a-journal.jsonl');
+    await Bun.write(outside, 'secret');
+    assert.equal((await call({ path: `/api/conversation?file=${encodeURIComponent(outside)}` })).status, 400);
+    assert.equal((await call({ path: `/api/conversation?file=${encodeURIComponent(join(journalsDir(), 'missing.jsonl'))}` })).status, 404);
+    assert.equal((await call({ path: '/api/conversation?file=x', auth: false })).status, 401);
+    await call({ method: 'DELETE', path: `/api/sessions/${created.id}` });
+  });
+
+  test('a window being used keeps its session awake (POST seen); an unknown session is a 404', async () => {
+    const created = (await call({ method: 'POST', path: '/api/sessions', body: { cwd } })).json.session;
+    assert.equal((await call({ method: 'POST', path: `/api/sessions/${created.id}/seen` })).status, 204);
+    assert.equal((await call({ method: 'POST', path: '/api/sessions/nope/seen' })).status, 404);
+    await call({ method: 'DELETE', path: `/api/sessions/${created.id}` });
+  });
+});
+
 describe('session archive', () => {
   const sessionsDir = () => join(cwd, 'omp-sessions', '-p');
   const archiveDir = () => join(cwd, 'state', 'archive', 'sessions', '-p');
@@ -806,18 +958,22 @@ describe('session archive', () => {
     assert.ok(await Bun.file(json.file).exists());
   });
 
-  test('a running session cannot be archived until it is stopped', async () => {
+  test('a conversation whose agent works is not archived until it is done; one idle goes to sleep and moves', async () => {
     const file = await pastSession('busy');
     const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd, resume: file } });
-    await waitForStatus(json.session.id, 'ready');
+    const id = json.session.id;
+    await waitForStatus(id, 'ready');
+    const from = hub.since(0).length;
+    await call({ method: 'POST', path: `/api/sessions/${id}/rpc`, body: { type: 'prompt', message: 'slow' } });
+    await logged((e) => e.seq > from && e.session === id && e.kind === 'frame' && e.frame.type === 'agent_start');
     const refused = await call({ method: 'POST', path: '/api/history/archive', body: { file } });
     assert.equal(refused.status, 409);
-    assert.match(refused.json.error, /running; stop it/);
+    assert.match(refused.json.error, /working/);
     assert.ok(await Bun.file(file).exists());
 
-    await call({ method: 'DELETE', path: `/api/sessions/${json.session.id}` });
-    await waitForStatus(json.session.id, 'exited');
+    await logged((e) => e.seq > from && e.session === id && e.kind === 'frame' && e.frame.type === 'session_settled');
     assert.equal((await call({ method: 'POST', path: '/api/history/archive', body: { file } })).status, 200);
+    assert.equal(hub.get(id)?.meta().status, 'exited', 'asleep before its journal moved');
   });
 
   test('only journals the Sessions window lists can move: traversal and other paths are refused', async () => {
@@ -875,12 +1031,11 @@ describe('file listings for @ mentions', () => {
     await Bun.write(join(project, '.env'), 'X=1');
     await Bun.write(join(cwd, 'listing', 'sibling.txt'), 'hi');
     await symlink(join(project, 'src'), join(project, 'linked'));
-    const created = await call({ method: 'POST', path: '/api/sessions', body: { cwd: project } });
-    files = `/api/sessions/${created.json.session.id}/files`;
+    files = '/api/files';
   });
 
-  /** @param {string} dir */
-  const list = (dir) => call({ path: `${files}?dir=${encodeURIComponent(dir)}` });
+  /** A folder named as an omp window names it: from the conversation's directory. @param {string} dir */
+  const list = (dir) => call({ path: `${files}?dir=${encodeURIComponent(`${project}/${dir}`)}` });
 
   test('like every API route, listings need the token and refuse a foreign page', async () => {
     assert.equal((await call({ path: files, auth: false })).status, 401);
@@ -888,7 +1043,7 @@ describe('file listings for @ mentions', () => {
     assert.equal((await call({ path: files, headers: { 'sec-fetch-site': 'cross-site' } })).status, 403);
   });
 
-  test('a folder is listed relative to the session’s directory, dotfiles and links to folders included', async () => {
+  test('a folder in the conversation’s directory is listed, dotfiles and links to folders included', async () => {
     const res = await list('');
     assert.equal(res.status, 200);
     assert.deepEqual(res.json, {
@@ -904,18 +1059,17 @@ describe('file listings for @ mentions', () => {
     assert.deepEqual((await list('src/')).json, { dir: join(project, 'src'), entries: [], truncated: false });
   });
 
-  test('a path may leave the session’s directory: up, from home, or absolute', async () => {
+  test('a path may leave the conversation’s directory: up, from home, or absolute', async () => {
     const up = await list('../');
     assert.equal(up.json.dir, join(cwd, 'listing'));
     assert.deepEqual(up.json.entries, [
       { name: 'project', isDir: true },
       { name: 'sibling.txt', isDir: false },
     ]);
-    assert.equal((await list('~/')).json.dir, homedir());
-    assert.equal((await list(`${project}/src`)).json.dir, join(project, 'src'));
+    assert.equal((await call({ path: `${files}?dir=${encodeURIComponent('~/')}` })).json.dir, homedir());
   });
 
-  test('without a session, a folder is listed relative to home, as a new session’s directory is found', async () => {
+  test('a relative folder is listed from home, as a new session’s directory is found', async () => {
     const fromHome = (/** @type {string} */ dir) => call({ path: `/api/files?dir=${encodeURIComponent(dir)}` });
     assert.equal((await fromHome('')).json.dir, homedir());
     assert.equal((await fromHome('~/')).json.dir, homedir());
@@ -930,10 +1084,9 @@ describe('file listings for @ mentions', () => {
     assert.equal(created.json.session.cwd, project);
   });
 
-  test('what is not a folder is a 404, and so is a session that does not exist', async () => {
+  test('what is not a folder is a 404', async () => {
     assert.equal((await list('notes with space.md')).status, 404);
     assert.equal((await list('missing/')).status, 404);
-    assert.equal((await call({ path: '/api/sessions/nope/files' })).status, 404);
   });
 
   test('a huge folder is cut short by name, and says so', async () => {
