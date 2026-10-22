@@ -15,6 +15,7 @@ import { createDragController } from './interaction/drag-controller.js';
 import { createPalette } from './ui/palette.js';
 import { createScreenSwitcher } from './ui/screen-switcher.js';
 import { createUpdateNotice } from './ui/update-notice.js';
+import { createNotifier } from './sessions/notify.js';
 import { button, el } from './ui/dom.js';
 import { getDaemon } from './daemon/client.js';
 import { openScreen } from './workspace/screen.js';
@@ -308,6 +309,14 @@ export async function createApp(root) {
   query(root, '.brand').after(createUpdateNotice({ daemon }).root);
   query(root, '.topbar-actions').prepend(
     createScreenSwitcher({ opened, describe: (tree) => describeWindows(tree, titleOf) }).root,
+  );
+  query(root, '.topbar-actions').prepend(
+    createNotifier({
+      daemon,
+      shown: () =>
+        new Set(listLeaves(layoutAtom.get()).flatMap((l) => (l.widget === 'omp' && typeof l.params?.session === 'string' ? [l.params.session] : []))),
+      show: (params) => showWidget('omp', params),
+    }).root,
   );
 
   schedule();

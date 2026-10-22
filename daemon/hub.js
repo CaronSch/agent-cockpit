@@ -28,6 +28,7 @@ import { awaitsUser } from '../src/omp/activity.js';
  *   list(): SessionMeta[],
  *   writing(file: string): SessionMeta | null,
  *   since(seq: number): SessionEvent[],
+ *   latest(): number,
  *   subscribe(fn: (event: SessionEvent) => void): () => void,
  *   closeAll(): Promise<void>,
  * }} Hub
@@ -69,6 +70,7 @@ export function createHub({ ompPath, unread, now = Date.now, launch = launchOmp 
     writing: (file) => [...sessions.values()].map((s) => s.meta()).find((m) => (m.status === 'starting' || m.status === 'ready') && m.sessionFile === file) ?? null,
     // Sequence numbers are 1-based log positions, so events after `seq` start at index `seq`.
     since: (seq) => log.slice(Math.max(0, seq)),
+    latest: () => log.length,
     subscribe(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

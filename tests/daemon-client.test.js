@@ -30,8 +30,8 @@ const meta = (id, status = 'ready') => ({ id, cwd: '/p', resume: null, fork: nul
 /** @param {string} session @param {number} seq @returns {SessionEvent} */
 const frame = (session, seq) => ({ kind: 'frame', frame: { type: 'agent_start' }, seq, at: 0, session });
 
-/** @param {string} bootId @param {SessionMeta[]} [sessions] @param {string} [ui] @param {Record<string, number>} [unread] @returns {StreamEvent} */
-const hello = (bootId, sessions = [], ui = 'v1', unread = {}) => ({ kind: 'hello', bootId, sessions, unread, ui });
+/** @param {string} bootId @param {SessionMeta[]} [sessions] @param {string} [ui] @param {Record<string, number>} [unread] @param {number} [seq] @returns {StreamEvent} */
+const hello = (bootId, sessions = [], ui = 'v1', unread = {}, seq = 0) => ({ kind: 'hello', bootId, seq, sessions, unread, ui });
 
 /** The daemon's answer to POST /rpc: the id omp's response will carry on the stream. */
 const accepted = () => new Response(JSON.stringify({ id: 'ac_7' }), { status: 202 });
@@ -94,6 +94,20 @@ describe('daemon client', () => {
     client.subscribe('s1', (e) => seen.push(e.seq));
     assert.equal(resets, 0);
     assert.deepEqual(seen, [1]);
+  });
+
+  test('events up to the hello’s seq are a replay of what happened before the page connected; later ones are live', async () => {
+    const { client, source } = await connectedClient();
+    source.deliver(hello('b1', [meta('s1')], 'v1', {}, 2));
+    /** @type {boolean[]} */
+    const replayed = [];
+    client.subscribe('s1', (e) => replayed.push(client.replayed(e)));
+    for (const seq of [1, 2, 3]) source.deliver(frame('s1', seq));
+    assert.deepEqual(replayed, [true, true, false]);
+    // A reconnect replays what the page missed while away: that is history too.
+    source.deliver(hello('b1', [meta('s1')], 'v1', {}, 5));
+    for (const seq of [4, 5, 6]) source.deliver(frame('s1', seq));
+    assert.deepEqual(replayed.slice(3), [true, true, false]);
   });
 
   test('a page hears when the UI files it loaded stop being the ones served, and when they are again', async () => {

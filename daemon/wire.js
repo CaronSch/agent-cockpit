@@ -53,8 +53,8 @@
  *
  * Errors are `{ error: string }` with a 4xx/5xx status. The stream's SSE ids are
  * `<bootId>:<seq>`, so a reconnect resumes after the last event it saw; the first message
- * on every connection is a `hello` carrying the current boot id, session list, unread
- * conversations and UI version. `scratchpad`, `history` and `unread` events carry no id and are
+ * on every connection is a `hello` carrying the current boot id, the newest event's seq (the
+ * events up to it that follow are a replay), session list, unread conversations and UI version. `scratchpad`, `history` and `unread` events carry no id and are
  * not replayed: a reconnecting page reads GET /api/scratchpads/:id and GET /api/history instead,
  * and its `hello` carries the unread conversations.
  */
@@ -119,7 +119,7 @@
  * `ui` is the version of the UI files being served (see `ui-files.js`): a page that loaded
  * other files is running older code than the daemon now serves. `unread` holds the
  * conversations with news their user has not read: when each became unread, by omp id.
- * @typedef {{ kind: 'hello', bootId: string, sessions: SessionMeta[], unread: Unread, ui: string }} HelloEvent
+ * @typedef {{ kind: 'hello', bootId: string, seq: number, sessions: SessionMeta[], unread: Unread, ui: string }} HelloEvent
  */
 
 /** A scratchpad's text; `rev` names this exact text (a hash of it). @typedef {{ text: string, rev: string }} Scratchpad */

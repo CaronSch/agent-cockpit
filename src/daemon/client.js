@@ -9,6 +9,10 @@
  * It keeps which conversations are unread (daemon/unread.js), as the daemon last said: every
  * window reads them here, so all of them, and every page, agree.
  *
+ * `replayed` tells events the daemon replays on (re)connecting, which happened before this
+ * page heard of them, from those happening now: the replay is everything up to the `hello`'s
+ * seq.
+ *
  * It also tracks the UI files' version (see daemon/ui-files.js): the first one the daemon
  * reports is the code this page loaded, and `onUiChange` hears when the files served stop
  * being, or become again, those.
@@ -38,6 +42,7 @@ export class DaemonError extends Error {
  *   onStatus(fn: (status: ConnectionStatus) => void): () => void,
  *   onReset(fn: () => void): () => void,
  *   subscribe(session: string, fn: (event: SessionEvent) => void): () => void,
+ *   replayed(event: SessionEvent): boolean,
  *   meta(session: string): SessionMeta | null,
  *   sessions(): SessionMeta[],
  *   onSessions(fn: () => void): () => void,
@@ -87,6 +92,8 @@ export function createDaemonClient(env = {}) {
   let status = 'connecting';
   /** @type {string | null} */
   let bootId = null;
+  /** The newest event's seq when this connection opened: the events up to it are a replay. */
+  let replayedTo = 0;
   /** @type {Map<string, SessionEvent[]>} */
   const buffers = new Map();
   /** @type {Map<string, SessionMeta>} */
@@ -148,6 +155,7 @@ export function createDaemonClient(env = {}) {
       for (const fn of resetListeners) fn();
     }
     bootId = hello.bootId;
+    replayedTo = hello.seq;
     for (const meta of hello.sessions) metas.set(meta.id, meta);
     noteUi(hello.ui);
     setStatus('open');
@@ -305,6 +313,7 @@ export function createDaemonClient(env = {}) {
       return () => resetListeners.delete(fn);
     },
     subscribe,
+    replayed: (event) => event.seq <= replayedTo,
     meta: (session) => metas.get(session) ?? null,
     sessions: () => [...metas.values()],
     onSessions(fn) {
