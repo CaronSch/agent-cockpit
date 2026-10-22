@@ -1179,6 +1179,8 @@ test('the top bar’s Config opens on hover or a click and shows only prompts an
   const only = menu.getByRole('checkbox', { name: 'Only prompts and responses' });
   await config.hover();
   await expect(menu).toBeVisible();
+  const [button, opened] = [await config.boundingBox(), await menu.boundingBox()];
+  expect(Math.abs((opened?.y ?? 0) - ((button?.y ?? 0) + (button?.height ?? 0))), 'right under its button').toBeLessThan(12);
   await expect(only).not.toBeChecked();
   await page.mouse.move(5, 300);
   await expect(menu).toBeHidden();

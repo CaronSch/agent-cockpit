@@ -95,7 +95,7 @@ export function createConfigMenu() {
     clearTimeout(closing);
     if (open()) return;
     hovering = true;
-    menu.showPopover();
+    menu.showPopover({ source: toggle }); // under its button, as a click would open it
   });
   root.addEventListener('pointerleave', (e) => {
     if (e.pointerType !== 'mouse' || !hovering) return;
