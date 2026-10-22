@@ -21,11 +21,13 @@
 /**
  * How paths are written in one kind of text: `at` finds the one the caret ends; `complete` and
  * `extend` give the text that replaces it (`start`…`end`) once an entry is chosen, or once Tab
- * extends its last segment.
+ * extends its last segment; `ended`, if given, says when the path is done though the caret
+ * still ends it (`entries` being its folder's).
  * @typedef {{
  *   at: (text: string, caret: number) => MentionQuery | null,
  *   complete: (query: MentionQuery, entry: DirEntry) => string,
  *   extend: (query: MentionQuery, segment: string) => string,
+ *   ended?: (query: MentionQuery, entries: readonly DirEntry[]) => boolean,
  * }} PathSyntax
  */
 
@@ -103,6 +105,27 @@ export function completeEntry(query, entry) {
   return entry.isDir ? `@${quote}${path}` : `@${quote}${path}${quote} `;
 }
 
+/** Sentence punctuation typed after a path, at the end of what is being typed. */
+const TRAILING_PUNCTUATION = /[.,;:!?)]+$/;
+
+/**
+ * Whether a bare mention is done because the sentence goes on after it: what follows the path
+ * is punctuation (`@benches/.`, `@src/app.js,`, `@README.md)`), which omp trims from a bare
+ * mention's end anyway (see BREAKS_FINISHED). The path before it must be a finished one, a
+ * folder (`…/`) or an entry's exact name, and no entry may start with what is typed, since
+ * names hold these characters too: `@src/.` may be on its way to `.env`, `@app.js.` to
+ * `app.js.bak`, and `@.` or `@..` to `./` and `../`.
+ * @param {MentionQuery} query @param {readonly DirEntry[]} entries
+ */
+export function endedByPunctuation(query, entries) {
+  if (query.quote) return false;
+  const name = query.segment.replace(TRAILING_PUNCTUATION, '');
+  if (name === query.segment) return false;
+  const finished = name ? entries.some((e) => e.name === name) : query.dir.endsWith('/');
+  const typed = query.segment.toLowerCase();
+  return finished && !entries.some((e) => e.name.toLowerCase().startsWith(typed));
+}
+
 /**
  * The text that replaces the mention when Tab extends its last segment to `segment`.
  * @param {MentionQuery} query @param {string} segment
@@ -113,7 +136,7 @@ export function extendSegment(query, segment) {
 }
 
 /** `@` mentions in the omp draft. @type {PathSyntax} */
-export const MENTIONS = { at: mentionAt, complete: completeEntry, extend: extendSegment };
+export const MENTIONS = { at: mentionAt, complete: completeEntry, extend: extendSegment, ended: endedByPunctuation };
 
 /**
  * A field that holds one path: all of its text, while the caret is at its end, with no `@` and

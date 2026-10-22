@@ -592,8 +592,11 @@ test('from the keyboard, Shift+F10 opens a running row’s menu; Mark as unread 
 
 test('rows mark the sessions shown in omp windows, the last-used one brighter; pointing links rows and windows both ways', async ({ page }) => {
   const window = await addSessionsWindow(page);
+  // Only this test's directory: Sessions lists every session the daemon runs, newest first,
+  // and those other test files start meanwhile would push these rows out from under the pointer.
+  await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA);
   const first = await startedPane(page, ALPHA);
-  const second = await startedPane(page, BRAVO);
+  const second = await startedPane(page, ALPHA);
   const [a, b] = [await shownSession(page, first), await shownSession(page, second)];
   await expect(runningRow(window, a)).toHaveClass(/is-shown/);
   await expect(runningRow(window, b)).toHaveClass(/is-shown/);

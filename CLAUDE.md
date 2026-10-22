@@ -153,7 +153,8 @@ What runs today:
   it names (`@src/`, `@../`, `@~/`, `@/abs`), filtered by what follows the last `/`;
   Tab completes (a folder opens on its contents), arrows, Enter or a click pick, and
   a file goes in as an omp file mention (quoted when its path needs it), which omp
-  reads with the prompt. **Rewind** on one of the user's own prompts puts it back
+  reads with the prompt; punctuation typed right after a finished path (`@benches/.`,
+  `@app.js,`) closes the list, unless a name in that folder starts with it. **Rewind** on one of the user's own prompts puts it back
   in the box and dims what sending would set aside; nothing reaches omp until the
   box is sent (Undo or Esc puts the box back), when omp is rewound to just before
   the prompt (`branch`, matched to omp's entry by its place among the user
