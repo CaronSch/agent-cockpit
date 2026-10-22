@@ -512,6 +512,22 @@ describe('sessions', () => {
     assert.equal(sentAfterPrompt(log).filter((m) => m === '/rename').length, 1, 'a failed title is not asked for again');
   });
 
+  test('after omp rewinds (`branch`), the daemon asks it for the conversation as it now stands', async () => {
+    const { json } = await call({ method: 'POST', path: '/api/sessions', body: { cwd } });
+    const id = json.session.id;
+    await waitForStatus(id, 'ready');
+    await turn(id, 'first question');
+    await turn(id, 'second question');
+    const listed = /** @type {any} */ (await rpc(id, { type: 'get_branch_messages' })).data.messages;
+    assert.deepEqual(listed.map((/** @type {any} */ m) => m.text), ['first question', 'second question']);
+    const from = hub.since(0).length;
+    const branched = await rpc(id, { type: 'branch', entryId: listed[1].entryId });
+    assert.equal(/** @type {any} */ (branched).data.text, 'second question');
+    const history = await logged((e) => e.seq > from && e.session === id && e.kind === 'frame' && e.frame.type === 'response' && e.frame.command === 'get_messages');
+    const messages = history.kind === 'frame' ? history.frame.data.messages : [];
+    assert.deepEqual(messages.map((/** @type {any} */ m) => m.role), ['user', 'assistant'], 'the first turn only');
+  });
+
   test('a session that already has a name is never asked for a title', async () => {
     const journal = join(cwd, 'titled.jsonl');
     await Bun.write(journal, '');

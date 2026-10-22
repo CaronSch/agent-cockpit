@@ -107,6 +107,8 @@ import { todoPhases } from './todos.js';
  *   editorText: { seq: number, text: string } | null,
  *   openUrl: { url: string, launchUrl: string | null, instructions: string | null } | null,
  *   loggedIn: Map<string, boolean> | null,
+ *   rewinds: number,
+ *   rewound: boolean,
  *   index: Map<string, Item>,
  *   toolOwner: Map<string, string>,
  *   failedRequests: Set<string>,
@@ -158,6 +160,8 @@ export function createTranscript() {
     editorText: null,
     openUrl: null,
     loggedIn: null,
+    rewinds: 0,
+    rewound: false,
     index: new Map(),
     toolOwner: new Map(),
     failedRequests: new Set(),
@@ -420,7 +424,14 @@ function applyResponse(state, frame) {
       if (frame.data && typeof frame.data === 'object') applyState(state, frame.data);
       return;
     case 'get_messages':
-      if (Array.isArray(frame.data?.messages)) seed(state, frame.data.messages);
+      if (!Array.isArray(frame.data?.messages)) return;
+      if (state.rewound) reseed(state, frame.data.messages);
+      else seed(state, frame.data.messages);
+      return;
+    case 'branch':
+      // omp has rewound: the daemon asks for the conversation as it now stands (omp streams
+      // none of it), and that answer replaces the transcript.
+      state.rewound = true;
       return;
     case 'bash':
       finishBash(state, id, frame.data ?? {}, null);
@@ -746,6 +757,23 @@ function seed(state, messages) {
   state.items = [];
   messages.forEach((message, i) => applyMessage(state, message, `seed:${i}`, true));
   state.items.push(...live);
+}
+
+/**
+ * Replaces the transcript with the conversation omp has after a rewind (`branch`), in every
+ * window alike. Each rewind's items get keys of their own, so none clashes with an earlier
+ * seed's; the cost spent so far stays as it was, rewound turns included.
+ * @param {Transcript} state @param {any[]} messages
+ */
+function reseed(state, messages) {
+  const cost = state.cost;
+  state.rewound = false;
+  state.rewinds++;
+  state.items = [];
+  state.index.clear();
+  state.toolOwner.clear();
+  messages.forEach((message, i) => applyMessage(state, message, `rewind${state.rewinds}:${i}`, true));
+  state.cost = cost;
 }
 
 // ── Tools ───────────────────────────────────────────────

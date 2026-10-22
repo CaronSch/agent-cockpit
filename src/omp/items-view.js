@@ -2,7 +2,7 @@
  * DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes,
  * unrecognised frames), built from text nodes only.
  */
-import { el } from '../ui/dom.js';
+import { button, el } from '../ui/dom.js';
 import { json } from '../ui/format.js';
 import { renderMarkdown } from './markdown-dom.js';
 /** @import { Block, Item, ToolRun } from './transcript.js' */
@@ -21,12 +21,19 @@ export function renderItem(item, ctx) {
   switch (item.kind) {
     case 'user': {
       const node = el('div', `omp-msg omp-user${item.byAgent ? ' is-agent' : ''}`);
+      node.dataset.key = item.key;
       // The user's own prompts need no label (the band and prompt mark say it); another agent's do.
       if (item.byAgent) node.append(el('div', 'omp-role', 'agent → omp'));
       const body = el('div', 'omp-md');
       body.append(renderMarkdown(item.text));
       if (item.images) body.append(statusLine('muted', `[${item.images} image${item.images === 1 ? '' : 's'}]`));
       node.append(body);
+      // The pane acts on it (omp/rewind.js); the user's own prompts can be reworded, not an agent's.
+      if (!item.byAgent) {
+        const rewind = button('omp-rewind-btn', 'Rewind');
+        rewind.title = 'Rewind to here: reword this prompt and send it again (the later turns are set aside)';
+        node.append(rewind);
+      }
       return node;
     }
     case 'assistant': {

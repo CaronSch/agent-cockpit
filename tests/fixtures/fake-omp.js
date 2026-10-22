@@ -24,6 +24,11 @@
  *   the answer bolds the first quoted line; a follow-up (`recordId`) appends a turn to its
  *   topic and answers from the topic's quote. A question containing "slow" waits 1.5 s, one
  *   containing "fail" fails as a provider error would.
+ * - `get_branch_messages` lists the user messages of the conversation, oldest first, each with
+ *   an entry id (not the `msg-N` ids frames carry, as in omp); `branch` rewinds to just before
+ *   one and answers with its text, emitting no frames. omp keeps the old path in the journal
+ *   as a branch; the fake drops it. A prompt containing "drift" is listed reworded, as if
+ *   another client had rewound and resent it without the windows hearing of it.
  * - logins: the default model's provider, `fake`, is not logged in (a `login` to it stays
  *   under way); `keyed` is, and its `keyed-model` can be picked from the models
  * With `--resume <file>`, `get_messages` returns a short earlier conversation, and the
@@ -131,6 +136,9 @@ const out = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 /** @param {string | undefined} id @param {string} command @param {unknown} [data] */
 const ok = (id, command, data) => out({ id, type: 'response', command, success: true, ...(data === undefined ? {} : { data }) });
 const usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.0125 } };
+
+/** The entry id of the message at `index`: stable while the conversation only grows or rewinds. @param {number} index */
+const entryId = (index) => `e${index.toString(16).padStart(8, '0')}`;
 
 /** @param {Record<string, any>} message */
 function record(message) {
@@ -387,6 +395,21 @@ lines.on('line', (line) => {
       });
     case 'get_messages':
       return ok(id, type, { messages });
+    case 'get_branch_messages':
+      return ok(id, type, {
+        messages: messages.flatMap((m, i) => {
+          const text = String(m.content?.[0]?.text ?? '');
+          return m.role === 'user' ? [{ entryId: entryId(i), text: /drift/.test(text) ? `${text} (reworded elsewhere)` : text }] : [];
+        }),
+      });
+    case 'branch': {
+      const at = messages.findIndex((m, i) => m.role === 'user' && entryId(i) === cmd.entryId);
+      if (at === -1) return out({ id, type: 'response', command: type, success: false, error: `Entry ${cmd.entryId} not found` });
+      const text = String(messages[at].content?.[0]?.text ?? '');
+      messages.splice(at);
+      persist();
+      return ok(id, type, { text, cancelled: false });
+    }
     case 'get_available_models':
       return ok(id, type, { models: [model, { provider: 'fake', id: 'fake-large', name: 'Fake Large' }, { provider: 'keyed', id: 'keyed-model', name: 'Keyed Model' }] });
     case 'set_model':
