@@ -237,9 +237,22 @@ describe('loopback guard', () => {
     assert.equal((await stat(file)).mode & 0o777, 0o600);
   });
 
-  test('static serving stays inside the UI directories', async () => {
+  test('static serving stays inside the UI directories, and of node_modules serves only the listed vendor files', async () => {
     assert.equal((await call({ path: '/src/main.js', auth: false })).status, 200);
-    const outside = ['/src/../daemon/token.js', '/src/%2e%2e/daemon/token.js', '/src/..%2fdaemon/token.js', '/src/..%2f..%2findex.html', '/daemon/token.js', '/package.json'];
+    const vendor = await call({ path: '/vendor/temml.mjs', auth: false });
+    assert.equal(vendor.status, 200);
+    assert.match(vendor.headers.get('content-type') ?? '', /^text\/javascript/);
+    const outside = [
+      '/src/../daemon/token.js',
+      '/src/%2e%2e/daemon/token.js',
+      '/src/..%2fdaemon/token.js',
+      '/src/..%2f..%2findex.html',
+      '/daemon/token.js',
+      '/package.json',
+      '/node_modules/temml/dist/temml.mjs',
+      '/vendor/temml.js',
+      '/vendor/..%2fpackage.json',
+    ];
     for (const path of outside) {
       assert.equal((await call({ path, auth: false })).status, 404, path);
     }

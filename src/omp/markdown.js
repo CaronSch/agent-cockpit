@@ -4,7 +4,9 @@
  * Supported: paragraphs (newlines kept as line breaks), ATX headings, fenced code with a
  * language, inline code, bold/italic, bullet and numbered lists, block quotes, horizontal
  * rules, links and autolinks, and GFM tables (column alignment, inline formatting in cells;
- * a table may start right under a paragraph line). Raw HTML is plain text. Only
+ * a table may start right under a paragraph line), and TeX math: `$$…$$` and `\[…\]` on their
+ * own as display math, `$…$` and `\(…\)` inline (markdown-dom.js renders it). Raw HTML is
+ * plain text. Only
  * http, https and mailto targets become links; anything else stays text. An unterminated
  * fence (text still streaming) runs to the end of the input.
  */
@@ -17,6 +19,7 @@
  *   | { type: 'em', children: Inline[] }
  *   | { type: 'link', href: string, children: Inline[] }
  *   | { type: 'break' }
+ *   | { type: 'math', tex: string, display: boolean }
  * )} Inline
  */
 
@@ -275,6 +278,14 @@ export function parseInline(text) {
   while (i < text.length) {
     const ch = text[i];
 
+    const math = parseMath(text, i);
+    if (math) {
+      flush();
+      out.push(math.node);
+      i = math.next;
+      continue;
+    }
+
     if (ch === '\\' && i + 1 < text.length && PUNCTUATION.test(text[i + 1])) {
       buf += text[i + 1];
       i += 2;
@@ -360,6 +371,40 @@ export function parseInline(text) {
   }
   flush();
   return out;
+}
+
+/** Math delimiters: what opens, what closes, and whether it is display math. */
+const MATH = /** @type {const} */ ([
+  ['$$', '$$', true],
+  ['\\[', '\\]', true],
+  ['\\(', '\\)', false],
+  ['$', '$', false],
+]);
+
+/**
+ * TeX math starting at `start`, or null. Display math may span lines; inline math may not.
+ * A single `$` only counts as Pandoc has it, so prices stay text ("$5 and $10"): the opening
+ * `$` has no space after it, and the next `$` closes it only with no space before it and no
+ * digit after it (else neither is math).
+ * Without its closing delimiter, a `\[` or `\(` is the Markdown escape it also is.
+ * @param {string} text @param {number} start
+ * @returns {{ node: Inline, next: number } | null}
+ */
+function parseMath(text, start) {
+  for (const [open, close, display] of MATH) {
+    if (!text.startsWith(open, start)) continue;
+    const from = start + open.length;
+    if (open === '$' && (from >= text.length || /\s/.test(text[from]))) return null;
+    for (let end = text.indexOf(close, from); end !== -1; end = text.indexOf(close, end + 1)) {
+      const tex = text.slice(from, end);
+      if (!display && tex.includes('\n')) break;
+      if (open === '$' && (/\s$/.test(tex) || /\d/.test(text[end + 1] ?? ''))) break;
+      if (!tex.trim()) break;
+      return { node: { type: 'math', tex: tex.trim(), display }, next: end + close.length };
+    }
+    return null;
+  }
+  return null;
 }
 
 /**

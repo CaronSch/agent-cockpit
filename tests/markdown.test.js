@@ -134,3 +134,34 @@ describe('link safety', () => {
     ]);
   });
 });
+
+describe('math', () => {
+  const math = (/** @type {string} */ tex, display = false) => ({ type: 'math', tex, display });
+
+  test('$$…$$ and \\[…\\] are display math, across lines too; $…$ and \\(…\\) are inline', () => {
+    assert.deepEqual(parseMarkdown('$$\na + b\n= c\n$$'), [{ type: 'paragraph', children: [math('a + b\n= c', true)] }]);
+    assert.deepEqual(parseInline('so \\[x^2\\] and \\(y\\), or $z_1$.'), [
+      { type: 'text', text: 'so ' },
+      math('x^2', true),
+      { type: 'text', text: ' and ' },
+      math('y'),
+      { type: 'text', text: ', or ' },
+      math('z_1'),
+      { type: 'text', text: '.' },
+    ]);
+  });
+
+  test('prices stay text: a single $ needs no space inside it and no digit after the closing one', () => {
+    assert.deepEqual(parseInline('costs $5 and $10'), [{ type: 'text', text: 'costs $5 and $10' }]);
+    assert.deepEqual(parseInline('$ x $ and $x$5'), [{ type: 'text', text: '$ x $ and $x$5' }]);
+    assert.deepEqual(parseInline('escaped \\$x$'), [{ type: 'text', text: 'escaped $x$' }]);
+    assert.deepEqual(parseInline('$5 and $10, then $y$'), [{ type: 'text', text: '$5 and $10, then ' }, math('y')]);
+  });
+
+  test('inline math stays on its line; code and unterminated delimiters stay text', () => {
+    assert.deepEqual(parseInline('$a\nb$'), [{ type: 'text', text: '$a' }, { type: 'break' }, { type: 'text', text: 'b$' }]);
+    assert.deepEqual(parseInline('`$x$`'), [{ type: 'code', text: '$x$' }]);
+    assert.deepEqual(parseInline('$$x and \\[y'), [{ type: 'text', text: '$$x and [y' }]);
+    assert.deepEqual(parseMarkdown('```\n$$x$$\n```'), [{ type: 'code', lang: '', text: '$$x$$' }]);
+  });
+});

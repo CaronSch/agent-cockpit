@@ -89,8 +89,9 @@ bun run test:e2e                   # Playwright: real app and daemon in Chromium
 bun run claude-md:check            # generated part of CLAUDE.md is current
 ```
 
-No build step: the UI is plain ES modules. CI runs all four checks on every
-push to `main` and every pull request.
+No build step: the UI is plain ES modules, with one runtime dependency, Temml,
+which turns agents' TeX math into MathML the browser typesets. CI runs all four
+checks on every push to `main` and every pull request.
 
 - [`CLAUDE.md`](CLAUDE.md): architecture, conventions, how to add a widget.
 - [`RISKS.md`](RISKS.md): deferred risks and when they bite.

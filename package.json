@@ -20,5 +20,8 @@
     "@playwright/test": "1.64.1",
     "@types/bun": "1.4.3",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "temml": "0.14.0"
   }
 }
