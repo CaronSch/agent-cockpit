@@ -415,8 +415,12 @@
   position: absolute;
   top: 0;
   left: 0;
-  border-radius: 2px;
-  background: color-mix(in oklch, var(--color-unread) 32%, transparent);
+  /* A little wider than the text, so the rounding never clips a letter. */
+  margin-left: -2px;
+  padding-right: 4px;
+  box-sizing: content-box;
+  border-radius: 4px;
+  background: var(--color-selection);
   transition:
     transform 90ms ease-out,
     width 90ms ease-out,

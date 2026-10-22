@@ -817,10 +817,17 @@ test('with Animated selection on, a drag shows whole words in its own highlight;
   await expect(lines.first()).toBeVisible();
   expect(await page.evaluate(() => document.getSelection()?.toString().startsWith('id'))).toBe(true);
   const first = await lines.first().boundingBox();
-  expect(Math.abs((first?.x ?? 0) - points.wordLeft)).toBeLessThan(2);
+  expect(Math.abs((first?.x ?? 0) + 2 - points.wordLeft)).toBeLessThan(2); // drawn 2px wider each side
   expect(await selectionBackground()).toBe('rgba(0, 0, 0, 0)');
   await page.mouse.up();
   await expect(lines).toHaveCount(2); // a line each for "said: hello" and "one"
+
+  // Within one line, even inside a single run of text, it is drawn too.
+  await paragraph.evaluate((p) => {
+    const text = /** @type {Text} */ (p.firstChild);
+    document.getSelection()?.setBaseAndExtent(text, 'You '.length, text, 'You said'.length);
+  });
+  await expect(lines).toHaveCount(1);
 
   // Off: no highlight of its own, the browser's selection colour back.
   await page.evaluate(() => getSelection()?.removeAllRanges());

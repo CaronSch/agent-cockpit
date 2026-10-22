@@ -590,16 +590,15 @@ test('from the keyboard, Shift+F10 opens a running row’s menu; Mark as unread 
   await expect(running).not.toHaveClass(/is-unread/);
 });
 
-test('rows mark the sessions shown in omp windows, the last-used one in the accent; pointing links rows and windows both ways', async ({ page }) => {
+test('rows mark the sessions shown in omp windows, the last-used one brighter; pointing links rows and windows both ways', async ({ page }) => {
   const window = await addSessionsWindow(page);
   const first = await startedPane(page, ALPHA);
   const second = await startedPane(page, BRAVO);
   const [a, b] = [await shownSession(page, first), await shownSession(page, second)];
-  const marker = (/** @type {string} */ session) => runningRow(window, session).locator('.sessions-shown');
-  await expect(marker(a)).toBeVisible();
-  await expect(marker(b)).toBeVisible();
+  await expect(runningRow(window, a)).toHaveClass(/is-shown/);
+  await expect(runningRow(window, b)).toHaveClass(/is-shown/);
 
-  // The accent follows the omp window used last: where a click in Sessions shows a session.
+  // The brighter mark follows the omp window used last: where a click in Sessions shows a session.
   await first.locator('.omp-transcript').click();
   await expect(runningRow(window, a)).toHaveClass(/is-current/);
   await expect(runningRow(window, b)).not.toHaveClass(/is-current/);
@@ -646,5 +645,5 @@ test('rows mark the sessions shown in omp windows, the last-used one in the acce
 
   // A window that stops showing it takes the marker away.
   await second.locator('.widget-close').click();
-  await expect(marker(b)).toBeHidden();
+  await expect(runningRow(window, b)).not.toHaveClass(/is-shown/);
 });

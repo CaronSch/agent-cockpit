@@ -189,7 +189,7 @@ What runs today:
   last), or a new one if there is none; dragging it onto the middle of an omp
   window shows it there, and onto the grid elsewhere opens a new omp window where
   it is dropped. A running session shown in an omp window of this screen has a
-  small window marker (in the accent for the omp window used last); pointing at a
+  bar at its row's left edge (brighter for the omp window used last); pointing at a
   row outlines its windows, and pointing at an omp window lights its row
   (`ctx.screen`, `ctx.outline`;
   `src/sessions/links.js`). A past session is resumed when shown, unless a running session
