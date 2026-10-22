@@ -33,6 +33,8 @@ button {
 
 .app {
   display: grid;
+  /* The top bar never widens the page past the window: on a narrow one, its controls scroll. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--topbar-h) minmax(0, 1fr);
   height: 100dvh;
 }
@@ -82,6 +84,55 @@ button {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Room inside the scroller for the controls' focus outlines. */
+  margin-inline-end: -4px;
+  padding: 4px;
+}
+
+@media (max-width: 640px) {
+  .brand-name {
+    display: none;
+  }
+}
+
+/* The top bar's controls sit a little tighter than buttons elsewhere, to fit its height. */
+.topbar-actions :is(.btn, .screen-switch, .notify-toggle) {
+  padding-block: 3px;
+}
+
+/* Text size: − 100% +, joined into one quiet control; the percentage resets it. */
+.zoom {
+  display: flex;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+}
+
+.zoom-btn {
+  padding: 3px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-dim);
+  font: 600 var(--text-sm) / 1.4 var(--font-mono);
+  cursor: pointer;
+}
+
+.zoom-btn:hover:enabled {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.zoom-btn:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
+}
+
+.zoom-level {
+  min-width: 5ch;
+  border-inline: 1px solid var(--color-line);
+  font-variant-numeric: tabular-nums;
 }
 
 /* This page is running older UI code than the daemon now serves. */

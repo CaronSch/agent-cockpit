@@ -13,6 +13,7 @@ import { button, carriesFiles, el } from '../ui/dom.js';
 import { errorMessage } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
 import { tabIndent } from '../ui/indent.js';
+import { onZoom } from '../ui/zoom.js';
 import { composeMessage, shellCommand } from './message.js';
 /** @import { QuoteComment } from './message.js' */
 
@@ -88,6 +89,7 @@ export function createComposer({ pane, upload, onError, shellDir }) {
   // The cap follows the pane, and the wrap follows the draft's width.
   const resizes = new ResizeObserver(fit);
   resizes.observe(pane);
+  const offZoom = onZoom(fit);
 
   draft.addEventListener('paste', (e) => {
     const files = e.clipboardData?.files;
@@ -326,6 +328,7 @@ export function createComposer({ pane, upload, onError, shellDir }) {
     },
     destroy() {
       resizes.disconnect();
+      offZoom();
       pane.removeEventListener('dragover', onDragOver);
       pane.removeEventListener('dragleave', onDragLeave);
       pane.removeEventListener('drop', onDrop);

@@ -510,11 +510,13 @@ test('a click in the pane puts the caret in the message box, unless it is on a c
 
   // Clicking reply text, even scrolled up, focuses the box with the caret at the end, and
   // leaves the transcript where it was.
+  const item = pane.locator('.omp-assistant').nth(2).locator('li').first();
   await transcript.evaluate((t) => (t.scrollTop = t.scrollHeight / 3));
+  await item.scrollIntoViewIfNeeded(); // so the click below has no need to scroll it into view
   const top = await transcript.evaluate((t) => t.scrollTop);
   await draft.fill('draft text');
   await blur();
-  await pane.locator('.omp-assistant').nth(2).locator('li').first().click();
+  await item.click();
   await expect(draft).toBeFocused();
   expect(await draft.evaluate((d) => /** @type {HTMLTextAreaElement} */ (d).selectionStart)).toBe(10);
   expect(await transcript.evaluate((t) => t.scrollTop)).toBe(top);
@@ -698,6 +700,39 @@ test('a login under way is shown from the stream, so a reload still shows it', a
   await expect(pane.getByText('Logging in to fake…')).toBeVisible();
   await page.reload();
   await expect(page.locator('.widget[data-widget="omp"]').getByText('Logging in to fake…')).toBeVisible();
+});
+
+test('the top bar sizes all text up and down, resets it, and keeps it across a reload', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await send(pane, 'hello');
+  const reply = pane.locator('.omp-assistant').last().locator('.omp-md > p').first();
+  await expect(reply).toContainText('You said');
+  const size = () => reply.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+  const base = await size();
+  const larger = page.getByRole('button', { name: 'Larger text' });
+  const level = page.getByRole('button', { name: /^Text size/ });
+
+  await larger.click();
+  await larger.click();
+  await expect(level).toHaveText('120%');
+  expect(await size()).toBeCloseTo(base * 1.2, 1);
+  const height = await page.locator('.topbar').evaluate((n) => n.getBoundingClientRect().height);
+  expect(height, 'layout stays as it is').toBe(40);
+
+  await page.reload();
+  await expect(level).toHaveText('120%');
+  expect(await size()).toBeCloseTo(base * 1.2, 1);
+
+  await level.click();
+  await expect(level).toHaveText('100%');
+  expect(await size()).toBeCloseTo(base, 1);
+  await page.getByRole('button', { name: 'Smaller text' }).click();
+  await expect(level).toHaveText('90%');
+  expect(await size()).toBeCloseTo(base * 0.9, 1);
+  await page.reload();
+  await expect(level).toHaveText('90%');
+  await level.click();
 });
 
 test('a rough drag over reply text snaps out to whole words, punctuation included, before Comment', async ({ page }) => {

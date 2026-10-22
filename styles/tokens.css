@@ -30,13 +30,15 @@
 
   /* Type: one monospace face for everything, chrome and conversation alike; hierarchy
      comes from size, weight and colour. `--text-sm` is reading text: the omp transcript,
-     its message box and scratchpads. */
+     its message box and scratchpads. Every size follows `--font-scale`, the text size the
+     top bar sets (ui/zoom.js). */
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
-  --text-2xs: 0.6875rem;
-  --text-xs: 0.75rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.9375rem;
-  --text-lg: 1.25rem;
+  --font-scale: 1;
+  --text-2xs: calc(0.6875rem * var(--font-scale));
+  --text-xs: calc(0.75rem * var(--font-scale));
+  --text-sm: calc(0.8125rem * var(--font-scale));
+  --text-base: calc(0.9375rem * var(--font-scale));
+  --text-lg: calc(1.25rem * var(--font-scale));
   --leading-read: 1.5;
   --tracking-caps: 0.08em;
 
@@ -47,7 +49,7 @@
   --space-4: 16px;
   --radius-s: 3px;
   --radius-m: 6px;
-  --topbar-h: 48px;
+  --topbar-h: 40px;
 
   /* Motion */
   --duration-snap: 90ms;

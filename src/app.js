@@ -16,6 +16,7 @@ import { createPalette } from './ui/palette.js';
 import { createScreenSwitcher } from './ui/screen-switcher.js';
 import { createUpdateNotice } from './ui/update-notice.js';
 import { createNotifier } from './sessions/notify.js';
+import { createZoomControl } from './ui/zoom.js';
 import { button, el } from './ui/dom.js';
 import { getDaemon } from './daemon/client.js';
 import { openScreen } from './workspace/screen.js';
@@ -310,6 +311,7 @@ export async function createApp(root) {
   query(root, '.topbar-actions').prepend(
     createScreenSwitcher({ opened, describe: (tree) => describeWindows(tree, titleOf) }).root,
   );
+  query(root, '.topbar-actions').prepend(createZoomControl().root);
   query(root, '.topbar-actions').prepend(
     createNotifier({
       daemon,
