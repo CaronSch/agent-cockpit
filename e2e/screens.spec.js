@@ -207,7 +207,7 @@ test('the switcher opens a screen open nowhere in this window, and deletes one, 
   const omp = await addWindow(one, 'omp');
   const pane = one.locator(`.widget[data-id="${omp}"]`);
   await pane.locator('input').fill(PROJECT);
-  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await pane.getByRole('button', { name: 'Start agent' }).click();
   await expect(pane.getByText('Fake Model')).toBeVisible(); // the session is ready
   await expect.poll(async () => (await storedScreens(one, workspace))[0]?.tree.params?.session).toBeTruthy();
   const agent = (await storedScreens(one, workspace))[0].tree.params.session;
@@ -221,7 +221,7 @@ test('the switcher opens a screen open nowhere in this window, and deletes one, 
 
   // Open here: this window shows Screen 1 instead, and Screen 2 stays, open nowhere.
   await switcher(two).click();
-  await expect(row(two, 1)).toContainText('1 omp');
+  await expect(row(two, 1)).toContainText('1 Agent');
   await expect(row(two, 2)).toContainText('this window');
   await two.getByRole('button', { name: 'Open Screen 1 here' }).click();
   await expect(switcher(two)).toHaveText('Screen 1 of 2');
@@ -241,7 +241,7 @@ test('the switcher opens a screen open nowhere in this window, and deletes one, 
   await switcher(two).click();
   await two.getByRole('button', { name: 'Delete Screen 1' }).click();
   const menu = two.locator('.screen-menu');
-  await expect(menu).toContainText('Delete Screen 1 and close its windows (1 omp)?');
+  await expect(menu).toContainText('Delete Screen 1 and close its windows (1 Agent)?');
   await menu.getByRole('button', { name: 'Cancel' }).click();
   await expect(row(two, 1)).toBeVisible();
   await two.getByRole('button', { name: 'Delete Screen 1' }).click();

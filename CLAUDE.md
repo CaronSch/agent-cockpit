@@ -7,7 +7,7 @@ harnesses. v1 drives omp only.
 
 The reason this project exists is to make agentic development **as modular as
 possible**. Every surface is a window (a widget) that the user places, splits,
-stacks, duplicates and closes: chats, terminals, scratchpads, process views,
+stacks, duplicates and closes: chats, terminals, notes, process views,
 telemetry views. Nothing is a fixed panel. If a feature tempts you to add a
 sidebar, a modal workflow, or a view that only works in one spot, make it a
 widget instead.
@@ -32,7 +32,7 @@ Planned capabilities:
   screen-scraped. Several open at once, side by side, each bound to a session.
 - **Saved context**: pin parts of a chat into their own windows; fork a session
   into a new pane to compare.
-- **Scratchpads**: free-form notes with screenshots next to the agents, any
+- **Notes**: free-form notes with screenshots next to the agents, any
   number of them, each openable in several windows.
 - **Terminal panes**: a real shell (and omp's own TUI, if wanted).
 - **Process view**: the processes each agent runs, and their CPU, memory and I/O.
@@ -64,7 +64,7 @@ Planned capabilities:
   no session holds reads it from its journal (`GET /api/conversation`,
   `daemon/conversation.js`, in `get_messages`' shape), without starting omp.
 - **Windows keep their own settings** in `leaf.params` (e.g. which conversation an
-  omp pane shows: its journal, `sessionFile`), saved with the layout.
+  agent pane shows: its journal, `sessionFile`), saved with the layout.
   **Conversations are named by their journal, and asleep or awake is the daemon's
   business:** the user never starts or stops one. A window only shows one, two
   windows may show the same one, and switching or closing a window never ends it.
@@ -107,7 +107,7 @@ What runs today:
   one that is open nowhere in this window (a reload, so its agents keep running)
   or deletes it (asking first; the agents it showed keep running). A tab running older UI code than the daemon serves says so in the top
   bar and offers Reload (the files' version: `daemon/ui-files.js`).
-- The daemon and the `omp` pane: start omp in a directory (the Directory field
+- The daemon and the Agent window (the `omp` widget; "Agent" to the user, omp underneath): start omp in a directory (the Directory field
   suggests folders as the path is typed, relative to home, `~/`, `../` or absolute,
   and lists home's folders while empty or `~/`; Tab completes and opens a folder on its
   own folders, arrows move, Enter picks the folder the arrows moved to, else starts omp
@@ -139,7 +139,7 @@ What runs today:
   replied. Dragging **Send** onto the grid does the same, placed where it is
   dropped, and sends the message there instead (the box empties once the fork is
   placed; a click still sends here). The message box starts one line high, set like
-  scratchpad text, and grows with the prompt; a plain click anywhere else in the pane
+  Notes text, and grows with the prompt; a plain click anywhere else in the pane
   (not on a control, in a dialog omp asked for, or ending a text selection) puts the caret
   at its end without scrolling, as in a terminal (`src/ui/click-focus.js`); Tab indents by two spaces as in a code
   editor (every selected line; Shift+Tab, or Backspace in the leading spaces, outdents; Cmd/Ctrl+Z undoes it) unless a
@@ -181,11 +181,11 @@ What runs today:
   moments, a second after them if the session is still unread and not shown in a
   focused tab: never for events replayed on (re)connecting (the `hello` carries the seq
   they run to), one per session (tagged with its id, so tabs replace each other's), closed
-  once the session is read; a click shows it in the omp window used last. The top
+  once the session is read; a click shows it in the agent window used last. The top
   bar's Config menu (open while pointed at, or pinned by a click) holds the app's
   switches, kept per browser (`src/ui/settings.js`): *Only prompts and responses*
   shows only prompts and responses (every reply the agent finished, not only a turn's
-  last) in every omp window, hiding thinking, tool calls and the narration between
+  last) in every agent window, hiding thinking, tool calls and the narration between
   them, with one "Working…" line while a turn runs;
   *Animated selection* (on) draws a drag's selection in the transcript as Google
   Docs does, whole words gliding into place (`src/omp/drag-highlight.js`), with the
@@ -197,12 +197,12 @@ What runs today:
   (starting, working, idle, *done*: it finished and nobody has read it, or *needs
   you*: it asks a question or an approval), searchable across titles, directories
   and prompts, and sortable. A click on a conversation (or Enter) shows it in the
-  omp window this screen used last (pressed or focused last), or a new one if
-  there is none; dragging it onto the middle of an omp window shows it there, and
-  onto the grid elsewhere opens a new omp window where it is dropped. Showing one
-  starts no omp. A conversation shown in an omp window of this screen has a bar at
-  its row's left edge (brighter for the omp window used last); pointing at a row
-  outlines its windows, and pointing at an omp window lights its row (`ctx.screen`,
+  agent window this screen used last (pressed or focused last), or a new one if
+  there is none; dragging it onto the middle of an agent window shows it there, and
+  onto the grid elsewhere opens a new agent window where it is dropped. Showing one
+  starts no omp. A conversation shown in an agent window of this screen has a bar at
+  its row's left edge (brighter for the agent window used last); pointing at a row
+  outlines its windows, and pointing at an agent window lights its row (`ctx.screen`,
   `ctx.outline`; `src/sessions/links.js`). Waking a journal a session already
   holds gets that session: the daemon never starts a second omp on one. A
   directory menu (every directory with sessions, A→Z, with counts) narrows a
@@ -222,7 +222,7 @@ What runs today:
   **⋯** button, or Shift+F10 / the ContextMenu key on a focused row opens its menu
   (`src/ui/context-menu.js`, a popover the arrow keys move through): **Mark as
   unread** or **Mark as read**, with Show and Archive / Restore.
-- Scratchpad windows: each new window starts its own pad; a switcher reopens or
+- Notes windows (the `scratchpad` widget): each new window starts its own pad; a switcher reopens or
   deletes any pad, and two windows (or tabs) on one pad stay in sync. Pads are
   Markdown files in `~/.cockpit/scratchpads/`; pasted or dropped
   screenshots and files are stored beside them and shown inline. Tab indents pad text
@@ -299,7 +299,7 @@ telemetry views, cmux-parity features beyond the above.
   keeps a cookie afterwards). Cookies and browser storage are per address, so a
   new address (`127.0.0.1` still works) needs the printed URL once. `--port`,
   `--omp <path>` (or `COCKPIT_OMP`), `--cwd <dir>` (or `COCKPIT_CWD`: the
-  directory a new omp window suggests, home by default) and `COCKPIT_STATE_DIR`
+  directory a new agent window suggests, home by default) and `COCKPIT_STATE_DIR`
   override the defaults.
 - Before committing, all of these must pass (CI in `.github/workflows/ci.yml`
   runs the same on every push to `main` and every PR):
@@ -387,32 +387,32 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
 - `src/omp/activity.js` — Which omp events make a session "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
-- `src/omp/composer.js` — The omp pane's message box: a draft that starts one line high and grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, files), and the Send button.
+- `src/omp/composer.js` — The agent pane's message box: a draft that starts one line high and grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/drag-highlight.js` — The omp transcript's selection highlight, drawn as in Google Docs: while the pointer drags, it already covers whole words (ui/word-snap.js) and its edges glide from word to word.
-- `src/omp/file-mention.js` — Paths typed in the omp pane, as `@` file mentions in its draft or plainly in its Directory field: the path being typed at the caret, the folder entries that match it, and the text that completes it, kept free of the DOM so they can be tested.
-- `src/omp/file-suggest.js` — Path suggestions in the omp pane's text boxes (`@` file mentions in its draft, its Directory field): while the caret ends a path, the suggestion list shows the matching entries of the folder it names, and Tab, Enter or a click completes the path (see `file-mention.js`).
-- `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
+- `src/omp/file-mention.js` — Paths typed in the agent pane, as `@` file mentions in its draft or plainly in its Directory field: the path being typed at the caret, the folder entries that match it, and the text that completes it, kept free of the DOM so they can be tested.
+- `src/omp/file-suggest.js` — Path suggestions in the agent pane's text boxes (`@` file mentions in its draft, its Directory field): while the caret ends a path, the suggestion list shows the matching entries of the folder it names, and Tab, Enter or a click completes the path (see `file-mention.js`).
+- `src/omp/items-view.js` — DOM for one transcript item of the agent pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
-- `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then files), `!` shell commands, and side questions about a quote.
-- `src/omp/prompt-history.js` — Up and Down in the omp pane's message box step through what was sent in its conversation, as omp's own editor and a shell do: the user's prompts and `!` commands, newest first.
+- `src/omp/message.js` — Builds what the agent pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then files), `!` shell commands, and side questions about a quote.
+- `src/omp/prompt-history.js` — Up and Down in the agent pane's message box step through what was sent in its conversation, as omp's own editor and a shell do: the user's prompts and `!` commands, newest first.
 - `src/omp/rewind.js` — Rewinding an omp conversation to one of the user's prompts, as omp's `/branch` does: what the rewind sets aside, and which of omp's entries the prompt is.
 - `src/omp/selection-popup.js` — Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons appear at the end of the selection.
-- `src/omp/suggestions.js` — The suggestion list above the omp pane's message box (slash commands, `@` file entries), driven from the draft's keys so focus never leaves it.
+- `src/omp/suggestions.js` — The suggestion list above the agent pane's message box (slash commands, `@` file entries), driven from the draft's keys so focus never leaves it.
 - `src/omp/table-copy.js` — Copy control for a rendered Markdown table: a button whose menu copies the table as Markdown, CSV or a PNG image.
 - `src/omp/table-text.js` — Plain-text forms of a parsed Markdown table: a cell's text without its formatting, and the table as CSV.
 - `src/omp/todos.js` — How far along the agent is, from the todo list omp agents keep with their `todo` tool: how many of its tasks are done and which one it is on.
 - `src/omp/transcript.js` — Transcript reducer for one omp session: folds the daemon's SessionEvents into display items plus derived session state, with no DOM.
-- `src/omp/visibility.js` — Which transcript items an omp pane shows when it is set to only prompts and responses: what the user said and ran, and what the agent finally answered, without the work in between.
+- `src/omp/visibility.js` — Which transcript items an agent pane shows when it is set to only prompts and responses: what the user said and ran, and what the agent finally answered, without the work in between.
 - `src/render/drop-indicator.js` — Landing preview for drag & drop, plus the sash snap guide.
 - `src/render/grid-renderer.js` — Imperative, diffed DOM writer for the grid.
 - `src/scratchpad/blocks.js` — A scratchpad's text as blocks to edit: runs of text, and the images and files it references, kept free of the DOM so the round trip can be tested.
 - `src/scratchpad/store.js` — The page's copy of one scratchpad: every window in the page showing that pad edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
-- `src/sessions/links.js` — Which omp windows of this screen show which conversations, so the Sessions window can mark its rows and point at their windows.
+- `src/sessions/links.js` — Which agent windows of this screen show which conversations, so the Sessions window can mark its rows and point at their windows.
 - `src/sessions/notify.js` — Desktop notifications when an agent is done or needs its user, so a session can be left running while the user is elsewhere: the moments that mark a conversation unread (omp/activity.js), as they happen.
 - `src/sessions/order.js` — Sorting and labels for the Sessions window, kept free of the DOM so they can be tested.
-- `src/sessions/running.js` — Conversations as the Sessions window lists them, kept free of the DOM so they can be tested: every journal with the session holding it while one is awake, how each is doing, and what an omp window is given to show one.
+- `src/sessions/running.js` — Conversations as the Sessions window lists them, kept free of the DOM so they can be tested: every journal with the session holding it while one is awake, how each is doing, and what an agent window is given to show one.
 - `src/state/atom.js` — Tiny observable cell: get/set/subscribe.
 - `src/ui/autosize.js` — Grows a textarea to fit its text, up to a maximum height, after which it scrolls.
 - `src/ui/click-focus.js` — Click-to-focus, as in a terminal: a plain click on a window's own surface puts the caret at the end of its main text box, while clicks on controls, in boxes of their own, and those that end a text selection do what they did before.
@@ -428,7 +428,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/ui/update-notice.js` — The "updated, reload" notice in the top bar: shown while the daemon serves other UI files than this page loaded (see daemon/ui-files.js), so a tab left open never runs stale code unknowingly.
 - `src/ui/word-snap.js` — Grows a selection out to whole words once it spans more than one, as Google Docs does, so a rough drag still quotes clean text, while a selection inside one word stays exactly as made.
 - `src/ui/zoom.js` — Text size for the whole app, picked in the top bar (− 100% +; the percentage resets it) and kept per browser.
-- `src/widgets/omp.js` — The omp pane: a conversation with an omp coding agent in a chosen directory, through the daemon, rendered from omp's structured event stream.
+- `src/widgets/omp.js` — The agent pane: a conversation with an omp coding agent in a chosen directory, through the daemon, rendered from omp's structured event stream.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.
 - `src/widgets/registry.js` — Widgets the palette can add, keyed by type.
 - `src/widgets/scratchpad.js` — Notes beside the agents: text with screenshots and files in it.
@@ -438,7 +438,7 @@ particular, move a capability into "Current state" when it ships.
 - `daemon/attachments.js` — Files attached to omp prompts: stored where omp can read them, one folder per day, so a prompt can mention them as `@"<path>"` and omp attaches them itself (images to the model, text inlined; see omp's file mentions).
 - `daemon/clock.js` — The daemon's clock for the times it stamps on events and unread marks: Date.now, but never the same value twice and never earlier than the last, so any two stamps are ordered, even within one millisecond.
 - `daemon/conversation.js` — A conversation read from its journal, for a window to show while no omp process holds it: the messages omp's `get_messages` would answer with once resumed, so the transcript seeds from either the same way, and what the journal records about the session around them.
-- `daemon/files.js` — Folder listings for path suggestions (the omp pane's `@` file mentions, its Directory field): each entry's name and whether it is a folder (a link to one counts), capped so a huge folder cannot flood the page; and how a typed path is read.
+- `daemon/files.js` — Folder listings for path suggestions (the agent pane's `@` file mentions, its Directory field): each entry's name and whether it is a folder (a link to one counts), capped so a huge folder cannot flood the page; and how a typed path is read.
 - `daemon/frame-decoder.js` — Decodes omp's stdout: newline-delimited JSON frames, with protocol-v2 `rpc_chunk` sequences reassembled into the one frame they carry.
 - `daemon/guard.js` — Loopback guard: decides which requests may reach the daemon (CLAUDE.md, Invariants).
 - `daemon/history.js` — Past omp sessions, read from omp's session files: one summary per conversation, searchable by title, directory and what the user asked.
@@ -457,9 +457,9 @@ particular, move a capability into "Current state" when it ships.
 ### Registered widgets
 
 - `pane` — Pane: An empty window
-- `omp` — omp: Chat with an omp coding agent
-- `sessions` — Sessions: omp conversations: click or drag one to show it in an omp window
-- `scratchpad` — Scratchpad: Notes with screenshots and files; each new window starts its own pad
+- `omp` — Agent: Chat with a coding agent in a directory
+- `sessions` — Sessions: Agent conversations: click or drag one to show it in an agent window
+- `scratchpad` — Notes: Notes with screenshots and files; each new window starts a fresh page
 
 ### Scripts
 

@@ -1,6 +1,6 @@
 /**
  * omp conversations, one list, searchable and sortable. A click shows a conversation in the
- * omp window this screen used last (or a new one); dragging it shows it in the omp window it
+ * agent window this screen used last (or a new one); dragging it shows it in the agent window it
  * is dropped on, or in a new window where it is dropped.
  *
  * Every journal is listed, with how it is doing while a session holds it (sessions/running.js):
@@ -22,10 +22,10 @@
  * button) marks it read or unread, beside the row's other actions.
  *
  * Rows show where their conversations are on this screen (sessions/links.js): a bar at the
- * left edge for one shown in an omp window, brighter for the one in the omp window used last
+ * left edge for one shown in an agent window, brighter for the one in the agent window used last
  * (where a click shows conversations). Pointing at a row (hover, or keyboard focus: a click
  * also focuses a row, but that is not pointing at it once the pointer moves on) outlines its
- * windows, and pointing at an omp window lights its conversation's row.
+ * windows, and pointing at an agent window lights its conversation's row.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -46,7 +46,7 @@ export default {
   type: 'sessions',
   title: 'Sessions',
   glyph: '☰',
-  description: 'omp conversations: click or drag one to show it in an omp window',
+  description: 'Agent conversations: click or drag one to show it in an agent window',
 
   /** @param {HTMLElement} body @param {WidgetContext} ctx */
   mount(body, ctx) {
@@ -208,7 +208,7 @@ function createSessionsWindow(body, ctx, daemon) {
   const conversationAt = (row) => shown.get(row.dataset.key ?? '') ?? null;
 
   /**
-   * The omp window settings that show the row's conversation, or null for an archived one (it
+   * The agent window settings that show the row's conversation, or null for an archived one (it
    * must be restored first).
    * @param {HTMLElement} row @returns {import('../layout/grid-model.js').LeafParams | null}
    */
@@ -234,7 +234,7 @@ function createSessionsWindow(body, ctx, daemon) {
     });
   }
 
-  /** Shows the row's conversation in the omp window this screen used last; that reads it. @param {HTMLElement} row */
+  /** Shows the row's conversation in the agent window this screen used last; that reads it. @param {HTMLElement} row */
   function show(row) {
     const params = paramsFor(row);
     if (!params) return;
@@ -326,7 +326,7 @@ function createSessionsWindow(body, ctx, daemon) {
     const row = el('li', `sessions-item${state ? ` is-${state}` : ''}${archived ? ' is-archived' : ''}${unread ? ' is-unread' : ''}`);
     row.tabIndex = 0;
     row.dataset.key = c.key;
-    const hint = archived ? 'Archived: Restore to show it' : 'Click to show it in the last omp window used, or drag it onto one';
+    const hint = archived ? 'Archived: Restore to show it' : 'Click to show it in the last agent window used, or drag it onto one';
     row.title = `${c.title && c.firstPrompt ? `${c.firstPrompt}\n` : ''}${c.file || c.cwd}\nLast active ${new Date(c.modifiedAt).toLocaleString()}\n${hint}`;
     const facts = [shortDir(c.cwd), relativeTime(c.modifiedAt, now), ...(c.prompts ? [`${c.prompts} prompt${c.prompts === 1 ? '' : 's'}`] : [])];
     const main = rowText(nameOf(c) ?? 'New session', facts);
@@ -422,8 +422,8 @@ function createSessionsWindow(body, ctx, daemon) {
     const row = rowAt(event.target);
     const params = row && paramsFor(row);
     if (!row || !params) return;
-    const label = row.querySelector('.sessions-title')?.textContent ?? 'omp';
-    // Dropped, it shows in an omp window: that reads it, as a click does.
+    const label = row.querySelector('.sessions-title')?.textContent ?? 'Agent';
+    // Dropped, it shows in an agent window: that reads it, as a click does.
     ctx.dragWidget('omp', params, event, { label, into: true, onEnd: ({ dropped }) => dropped && mark(row, false) });
   });
   root.addEventListener('contextmenu', (event) => {
@@ -504,7 +504,7 @@ function createSessionsWindow(body, ctx, daemon) {
   // The daemon says when a journal changes: omp wrote one, or a session was archived or restored.
   const offHistory = daemon.onHistory(() => void load());
 
-  // ── links to this screen's omp windows ──
+  // ── links to this screen's agent windows ──
   /** Marks each row by where its conversation is shown, and outlines the pointed row's windows. */
   function drawLinks() {
     for (const [key, { node }] of rows) {

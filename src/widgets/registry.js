@@ -22,7 +22,7 @@ import scratchpad from './scratchpad.js';
  * like dragging from the palette (a plain click does nothing); with `into`, it may also be
  * dropped onto the middle of a window of `type`, which then shows it.
  * `ctx.setUnread(true)` lights the window's border: it has news its user has not seen.
- * `ctx.setLabel(text)` names what the window shows (e.g. the omp window's conversation) in
+ * `ctx.setLabel(text)` names what the window shows (e.g. the agent window's conversation) in
  * its top bar, beside its type's title; null removes the name. `ctx.headActions` is where the
  * window puts controls of its own in that bar, before its close button (pressing them never
  * drags the window).

@@ -1,5 +1,5 @@
 /**
- * The omp pane's message box: a draft that starts one line high and grows with its text up
+ * The agent pane's message box: a draft that starts one line high and grows with its text up
  * to half the pane, cards for what goes with the next message (comments on quoted transcript
  * text, files), and the Send button.
  *
@@ -64,7 +64,7 @@ export function createComposer({ pane, upload, onError, shellDir }) {
   const row = el('div', 'omp-compose-row');
   const draft = el('textarea', 'omp-draft');
   draft.rows = 1;
-  draft.setAttribute('aria-label', 'Message omp');
+  draft.setAttribute('aria-label', 'Message the agent');
   const sendBtn = button('btn btn-accent', 'Send');
   row.append(draft, sendBtn);
   root.append(cards, editor, mark, row);

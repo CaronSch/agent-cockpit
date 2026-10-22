@@ -1,5 +1,5 @@
 /**
- * DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes,
+ * DOM for one transcript item of the agent pane (messages, tool cards, shell runs, notes,
  * unrecognised frames), built from text nodes only.
  */
 import { button, el } from '../ui/dom.js';
@@ -23,7 +23,7 @@ export function renderItem(item, ctx) {
       const node = el('div', `omp-msg omp-user${item.byAgent ? ' is-agent' : ''}`);
       node.dataset.key = item.key;
       // The user's own prompts need no label (the band and prompt mark say it); another agent's do.
-      if (item.byAgent) node.append(el('div', 'omp-role', 'agent → omp'));
+      if (item.byAgent) node.append(el('div', 'omp-role', 'another agent →'));
       const body = el('div', 'omp-md');
       body.append(renderMarkdown(item.text));
       if (item.images) body.append(statusLine('muted', `[${item.images} image${item.images === 1 ? '' : 's'}]`));

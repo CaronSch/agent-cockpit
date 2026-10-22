@@ -39,7 +39,7 @@ export const claimOrder = (remembered, saved) =>
   remembered ? [remembered, ...saved.filter((id) => id !== remembered)] : [...saved];
 
 /**
- * What a screen holds, e.g. "2 omp, 1 Scratchpad", kinds in the order they first appear.
+ * What a screen holds, e.g. "2 Agent, 1 Notes", kinds in the order they first appear.
  * @param {Tree} tree @param {(widget: string) => string} titleOf @returns {string}
  */
 export function describeWindows(tree, titleOf) {

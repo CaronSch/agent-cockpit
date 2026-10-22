@@ -1,5 +1,5 @@
 /**
- * Up and Down in the omp pane's message box step through what was sent in its conversation,
+ * Up and Down in the agent pane's message box step through what was sent in its conversation,
  * as omp's own editor and a shell do: the user's prompts and `!` commands, newest first.
  *
  * Browsing starts only from an empty box, so Up never replaces a draft. Up steps back while

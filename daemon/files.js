@@ -1,5 +1,5 @@
 /**
- * Folder listings for path suggestions (the omp pane's `@` file mentions, its Directory field):
+ * Folder listings for path suggestions (the agent pane's `@` file mentions, its Directory field):
  * each entry's name and whether it is a folder (a link to one counts), capped so a huge folder
  * cannot flood the page; and how a typed path is read.
  */

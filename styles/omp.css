@@ -1,4 +1,4 @@
-/* omp pane: toolbar, transcript, dialogs and composer of one omp agent session. */
+/* agent pane: toolbar, transcript, dialogs and composer of one omp agent session. */
 
 .widget-body:has(> .omp) {
   padding: 0;

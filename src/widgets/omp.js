@@ -1,5 +1,5 @@
 /**
- * The omp pane: a conversation with an omp coding agent in a chosen directory, through the
+ * The agent pane: a conversation with an omp coding agent in a chosen directory, through the
  * daemon, rendered from omp's structured event stream.
  *
  * The window shows one conversation at a time, named by its journal (`sessionFile`). Whether
@@ -14,7 +14,7 @@
  * (the conversation's title, shown in the window's top bar), `fork` while the window is
  * starting a copy of another journal, and `prompt` while a fork waits to send the message it
  * was dragged off another pane's Send with. What the pane shows follows the app's settings
- * (ui/settings.js), the same in every omp window.
+ * (ui/settings.js), the same in every agent window.
  *
  * New, Fork, Accounts and Stop sit in the window's top bar, beside its close button.
  */
@@ -57,14 +57,14 @@ const MAX_SUGGESTIONS = 8;
 const BOTTOM_SLACK_PX = 24;
 const REFUSED = 'The daemon refused this page.';
 const FORK_TITLE = 'Fork: continue a copy of this conversation in a new window';
-const NOTHING_TO_FORK = 'Nothing to fork yet: omp saves a conversation once the model has replied';
+const NOTHING_TO_FORK = 'Nothing to fork yet: the conversation is saved once the agent has replied';
 const SEND_TITLE = 'Drag onto the grid to send this in a fork of the conversation instead';
 
 export default {
   type: 'omp',
-  title: 'omp',
-  glyph: 'π',
-  description: 'Chat with an omp coding agent',
+  title: 'Agent',
+  glyph: '✦',
+  description: 'Chat with a coding agent in a directory',
 
   /** @param {HTMLElement} body @param {WidgetContext} ctx */
   mount(body, ctx) {
@@ -251,7 +251,7 @@ function createPane(body, ctx, daemon) {
         })
         .catch(() => {});
     }
-    const start = el('button', 'btn btn-accent', 'Start omp');
+    const start = el('button', 'btn btn-accent', 'Start agent');
     start.type = 'submit';
     const error = el('p', 'omp-error');
     error.hidden = true;
@@ -281,7 +281,7 @@ function createPane(body, ctx, daemon) {
     field.append(input, suggestions.root);
     const row = el('div', 'omp-row');
     row.append(field, start);
-    form.append(el('p', 'omp-setup-title', 'Start an omp agent'), label, row, error);
+    form.append(el('p', 'omp-setup-title', 'Start an agent'), label, row, error);
     queueMicrotask(() => input.focus());
     return [form];
   }
@@ -452,7 +452,7 @@ function createPane(body, ctx, daemon) {
           try {
             const res = await daemon.rpc(await wake(), command);
             const record = res.success ? res.data?.record : null;
-            if (typeof record?.id !== 'string') return { error: res.error ?? 'omp did not take the question.' };
+            if (typeof record?.id !== 'string') return { error: res.error ?? 'The agent did not take the question.' };
             // omp's record is the topic's first turn; the question just taken is its newest.
             return { id: record.id, turn: Array.isArray(record.followUps) ? record.followUps.length : 0 };
           } catch (err) {
@@ -560,7 +560,7 @@ function createPane(body, ctx, daemon) {
           settled = true;
           off();
           if (event.meta.status === 'ready') resolve();
-          else reject(new Error(event.meta.error ?? 'omp exited before it was ready'));
+          else reject(new Error(event.meta.error ?? 'The agent exited before it was ready'));
         });
         if (settled) off(); // settled during the synchronous replay, before `off` was assigned
       });
@@ -661,7 +661,7 @@ function createPane(body, ctx, daemon) {
       if (!point || !listed?.success) return false;
       const entryId = branchEntry(listed.data?.messages ?? [], point);
       if (!entryId) {
-        addNote(state, 'error', 'rewind', 'Not rewound, and nothing sent: omp’s conversation no longer matches this window’s.');
+        addNote(state, 'error', 'rewind', 'Not rewound, and nothing sent: the agent’s conversation no longer matches this window’s.');
         schedule();
         return false;
       }
@@ -685,7 +685,7 @@ function createPane(body, ctx, daemon) {
         try {
           await wake();
         } catch (err) {
-          addNote(state, 'error', 'wake', `omp did not start: ${errorMessage(err)}`);
+          addNote(state, 'error', 'wake', `The agent did not start: ${errorMessage(err)}`);
           return schedule();
         }
       }
@@ -1087,7 +1087,7 @@ function createPane(body, ctx, daemon) {
       } else if (m?.status === 'failed' || (m?.status === 'exited' && (m.error || (m.exitCode ?? 0) !== 0))) {
         // Going to sleep is not news; omp failing is (the next message tries again).
         banner.classList.add('is-ended');
-        const text = m.status === 'failed' ? `omp failed${m.error ? `: ${m.error}` : ''}` : `omp exited${m.exitCode !== null ? ` (code ${m.exitCode})` : ''}${m.error ? `: ${m.error}` : ''}`;
+        const text = m.status === 'failed' ? `The agent failed${m.error ? `: ${m.error}` : ''}` : `The agent exited${m.exitCode !== null ? ` (code ${m.exitCode})` : ''}${m.error ? `: ${m.error}` : ''}`;
         banner.append(el('span', 'omp-error', text));
       }
       banner.hidden = banner.childElementCount === 0;
@@ -1126,7 +1126,7 @@ function createPane(body, ctx, daemon) {
       sendBtn.title = forkable() ? SEND_TITLE : '';
       // The message waits in the box while the conversation wakes; it goes once omp is up.
       composer.root.classList.toggle('is-waking', waking !== null);
-      draft.placeholder = state.streaming ? 'Steer the agent… (Esc stops)' : 'Message omp… (@ files, / commands, ! shell)';
+      draft.placeholder = state.streaming ? 'Steer the agent… (Esc stops)' : 'Message the agent… (@ files, / commands, ! shell)';
       if (state.editorText && state.editorText.seq > editorSeen) {
         editorSeen = state.editorText.seq;
         composer.setText(state.editorText.text);

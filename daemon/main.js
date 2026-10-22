@@ -6,7 +6,7 @@
  *   bun daemon/main.js [--port 4777] [--omp <path to omp>] [--cwd <dir>]
  *
  * omp defaults to the `omp` on PATH (install it from https://omp.sh). `--cwd` is the
- * directory a new omp window suggests, the home directory unless given.
+ * directory a new agent window suggests, the home directory unless given.
  * Environment: COCKPIT_PORT, COCKPIT_OMP, COCKPIT_CWD, COCKPIT_STATE_DIR (default ~/.cockpit; holds the
  * access token, unread.json (which conversations have news not read yet), scratchpads/,
  * attachments/, workspaces/ and archive/sessions/, the archived omp sessions), COCKPIT_OMP_SESSIONS (omp's session journals; default

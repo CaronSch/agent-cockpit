@@ -29,9 +29,9 @@ const newPadId = () => crypto.randomUUID().slice(0, 8);
 
 export default {
   type: 'scratchpad',
-  title: 'Scratchpad',
+  title: 'Notes',
   glyph: '✎',
-  description: 'Notes with screenshots and files; each new window starts its own pad',
+  description: 'Notes with screenshots and files; each new window starts a fresh page',
   newParams: () => ({ pad: newPadId() }),
 
   /** @param {HTMLElement} body @param {WidgetContext} ctx */
@@ -57,7 +57,7 @@ function createScratchpadWindow(body, ctx, daemon) {
   const bar = el('div', 'pad-bar');
   const switcher = button('pad-switch');
   switcher.setAttribute('aria-haspopup', 'menu');
-  switcher.title = 'Switch scratchpad';
+  switcher.title = 'Switch notes';
   const switchTitle = el('span', 'pad-title');
   switcher.append(switchTitle, el('span', 'pad-caret', '▾'));
   const menu = el('div', 'pad-menu');
@@ -79,7 +79,7 @@ function createScratchpadWindow(body, ctx, daemon) {
   const theirsText = el('pre', '');
   theirsView.append(el('summary', '', 'Show their version'), theirsText);
   conflict.append(
-    el('p', '', 'This scratchpad was changed somewhere else (another tab, or the file itself) while you were typing.'),
+    el('p', '', 'These notes were changed somewhere else (another tab, or the file itself) while you were typing.'),
     theirsView,
     conflictActions,
   );
@@ -122,7 +122,7 @@ function createScratchpadWindow(body, ctx, daemon) {
       area.spellcheck = false;
       area.value = block.text;
       area.dataset.index = String(index);
-      area.setAttribute('aria-label', 'Scratchpad text');
+      area.setAttribute('aria-label', 'Notes text');
       if (onlyBlock) area.placeholder = 'Notes, links, commands… Paste a screenshot or drop a file to add it.';
       return area;
     }
@@ -340,11 +340,11 @@ function createScratchpadWindow(body, ctx, daemon) {
       menu.append(item);
     }
     menu.append(el('div', 'pad-menu-sep'));
-    const fresh = menuItem('New scratchpad');
+    const fresh = menuItem('New notes');
     fresh.addEventListener('click', () => showPad(newPadId()));
     menu.append(fresh);
     if (listed) {
-      const remove = menuItem('Delete this scratchpad…');
+      const remove = menuItem('Delete these notes…');
       remove.classList.add('is-danger');
       remove.addEventListener('click', confirmDelete);
       menu.append(remove);
@@ -383,7 +383,7 @@ function createScratchpadWindow(body, ctx, daemon) {
         fillMenu(pads);
         /** @type {HTMLElement | null} */ (menu.querySelector('[aria-current="true"]') ?? menu.querySelector('.pad-menu-item'))?.focus();
       })
-      .catch((err) => menu.replaceChildren(el('p', 'pad-menu-confirm', `Could not list scratchpads: ${errorMessage(err)}`)));
+      .catch((err) => menu.replaceChildren(el('p', 'pad-menu-confirm', `Could not list notes: ${errorMessage(err)}`)));
   });
   menu.addEventListener('keydown', (event) => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;

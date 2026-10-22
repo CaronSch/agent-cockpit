@@ -2,16 +2,16 @@
 
 **A modular, in-browser workbench for coding agents.**
 
-Cockpit runs [omp](https://omp.sh) coding agents from a local daemon and
-shows them in your browser. Everything is a window: chats, past sessions and
-scratchpads are widgets you drag, split, stack and resize on a snapping grid,
+Cockpit runs coding agents from a local daemon and shows them in your browser;
+each Agent window runs [omp](https://omp.sh). Everything is a window: chats,
+past sessions and notes are widgets you drag, split, stack and resize on a snapping grid,
 as many as you like, side by side.
 
 | Window | What it does |
 | --- | --- |
-| **omp** | Chat with an agent in a directory: streamed replies, tool calls, model and thinking level, slash commands, approvals and questions, steer or stop. The window's top bar shows the conversation's title (generated during the first turn, or set with `/rename`; its first prompt until then), and the toolbar how far the agent is through its todo list while it works. **Up** / **Down** in an empty message box recall earlier prompts, as in a shell. Start a line with `!` to run it as a shell command in the session's directory, even while the agent works (the message box turns into a shell line). Comment on or **Ask** about selected reply text (a rough selection spanning words snaps to whole ones, a path by segment; short answers, with follow-up questions, kept out of the chat); paste screenshots or drop files to attach them, or type `@` to mention files from the session's directory (`@src/`, `@../`, `@~/`; Tab completes). Copy a reply's table as Markdown, CSV or an image (**Copy**, on hover). **Rewind** (on hover over one of your prompts) puts it back in the message box to reword, dimming what sending would set aside; **Undo** or Esc puts everything back, and sending rewinds the conversation to just before it (omp goes on in a new journal; the one before, holding what was set aside, is archived). A window shows one conversation at a time, and any conversation is always there to open and carry on: idle and unused for a while, its omp goes to sleep, and the next message wakes it (a moment's "waking…"), so there is nothing to start or stop. **New**, **Fork**, **Accounts** and **Stop** sit in the window's title bar: **New** starts another conversation there (the one before carries on), **Fork** continues a copy of this one in a new window, **Accounts** connects a model provider or another account, and **Stop** stops the agent's turn. **Sign in** shows in the toolbar while the conversation's model has no account to use. Drag **Send** onto the grid to send the message in a fork instead, placed where you drop it. |
-| **Sessions** | Every omp conversation in one list, most recently active first, with how each is doing while its agent is at it (working, *done*, or *needs you* while it asks something); searchable, sortable and narrowed to one directory if wanted. A bar at a row's left edge shows which are in an omp window (brighter for the one you used last), and hovering a row outlines its window (hovering an omp window lights its row). Click a conversation to show it in the omp window you used last (or a new one), drag it onto an omp window to show it there, or onto the grid to open it in a new window. **Archive** moves one out of omp's sessions into `~/.cockpit/archive/` (omp's own resume no longer offers it); **Archived** lists those, and **Restore** puts one back. Unread conversations (archived too) have a blue dot and a bold title, and the window's top bar counts them; right-click a row (or its **⋯**, or Shift+F10) to **Mark as unread** or **Mark as read**. |
-| **Scratchpad** | Markdown notes with inline screenshots and files, stored in `~/.cockpit/scratchpads/`. |
+| **Agent** | Chat with an agent in a directory: streamed replies, tool calls, model and thinking level, slash commands, approvals and questions, steer or stop. The window's top bar shows the conversation's title (generated during the first turn, or set with `/rename`; its first prompt until then), and the toolbar how far the agent is through its todo list while it works. **Up** / **Down** in an empty message box recall earlier prompts, as in a shell. Start a line with `!` to run it as a shell command in the session's directory, even while the agent works (the message box turns into a shell line). Comment on or **Ask** about selected reply text (a rough selection spanning words snaps to whole ones, a path by segment; short answers, with follow-up questions, kept out of the chat); paste screenshots or drop files to attach them, or type `@` to mention files from the session's directory (`@src/`, `@../`, `@~/`; Tab completes). Copy a reply's table as Markdown, CSV or an image (**Copy**, on hover). **Rewind** (on hover over one of your prompts) puts it back in the message box to reword, dimming what sending would set aside; **Undo** or Esc puts everything back, and sending rewinds the conversation to just before it (omp goes on in a new journal; the one before, holding what was set aside, is archived). A window shows one conversation at a time, and any conversation is always there to open and carry on: idle and unused for a while, its omp goes to sleep, and the next message wakes it (a moment's "waking…"), so there is nothing to start or stop. **New**, **Fork**, **Accounts** and **Stop** sit in the window's title bar: **New** starts another conversation there (the one before carries on), **Fork** continues a copy of this one in a new window, **Accounts** connects a model provider or another account, and **Stop** stops the agent's turn. **Sign in** shows in the toolbar while the conversation's model has no account to use. Drag **Send** onto the grid to send the message in a fork instead, placed where you drop it. |
+| **Sessions** | Every agent conversation in one list, most recently active first, with how each is doing while its agent is at it (working, *done*, or *needs you* while it asks something); searchable, sortable and narrowed to one directory if wanted. A bar at a row's left edge shows which are in an agent window (brighter for the one you used last), and hovering a row outlines its window (hovering an agent window lights its row). Click a conversation to show it in the agent window you used last (or a new one), drag it onto an agent window to show it there, or onto the grid to open it in a new window. **Archive** moves one out of omp's sessions into `~/.cockpit/archive/` (omp's own resume no longer offers it); **Archived** lists those, and **Restore** puts one back. Unread conversations (archived too) have a blue dot and a bold title, and the window's top bar counts them; right-click a row (or its **⋯**, or Shift+F10) to **Mark as unread** or **Mark as read**. |
+| **Notes** | Markdown notes with inline screenshots and files, stored in `~/.cockpit/scratchpads/`. |
 
 A pane whose agent finished or asks something while you looked away gets a blue
 border, and its session stays unread (in every window, across reloads and daemon
@@ -19,7 +19,7 @@ restarts, after it stops) until you hover, scroll, click or type in a window
 showing it, or show it from Sessions. The marks are kept in `~/.cockpit/unread.json`. Turn
 on **Notify** in the top bar for a desktop notification as well, while you are not looking at
 that session; clicking it shows the session. When the workbench's files change under an open tab, the top bar offers
-**Reload**. **Config** in the top bar (it opens as you point at it) holds the app's switches, kept per browser: *Only prompts and responses* hides the work in between in every omp window, and *Animated selection* (on) highlights whole words while you drag over a reply, gliding between them as in Google Docs. **− 100% +** in the top bar sets the text size (the percentage resets it), kept per
+**Reload**. **Config** in the top bar (it opens as you point at it) holds the app's switches, kept per browser: *Only prompts and responses* hides the work in between in every agent window, and *Animated selection* (on) highlights whole words while you drag over a reply, gliding between them as in Google Docs. **− 100% +** in the top bar sets the text size (the percentage resets it), kept per
 browser.
 
 **Screens.** Each browser window is a screen of your workspace, like an extra
@@ -62,7 +62,7 @@ bun start     # daemon on http://cockpit.localhost:4777
    the browser keeps as a cookie. Cookies and browser storage belong to one
    address, so the first visit at a new one (say `cockpit.localhost` after
    `127.0.0.1`, which still works) needs that printed URL once more.
-2. **＋ Widget → omp**, pick a directory (folders are suggested as you type, from
+2. **＋ Widget → Agent**, pick a directory (folders are suggested as you type, from
    your home folder; Tab completes), start chatting.
 3. To connect a model provider (Anthropic/Claude, for example), press
    **Accounts** in the window's title bar (omp's `/login`).
@@ -73,8 +73,8 @@ The daemon listens on loopback only and refuses requests from other sites.
 | --- | --- |
 | `--port <n>` / `COCKPIT_PORT` | `4777` |
 | `--omp <path>` / `COCKPIT_OMP` | `omp` on `PATH` |
-| `--cwd <dir>` / `COCKPIT_CWD` (the directory a new omp window suggests) | your home directory |
-| `COCKPIT_STATE_DIR` (token, scratchpads, attachments, workspaces) | `~/.cockpit` |
+| `--cwd <dir>` / `COCKPIT_CWD` (the directory a new agent window suggests) | your home directory |
+| `COCKPIT_STATE_DIR` (token, notes, attachments, workspaces) | `~/.cockpit` |
 | `COCKPIT_OMP_SESSIONS` (omp's session files) | `~/.omp/agent/sessions` |
 
 Pass flags through with `bun start --port 4800 --cwd ~/code/app`.

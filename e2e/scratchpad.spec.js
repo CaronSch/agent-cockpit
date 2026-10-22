@@ -187,7 +187,7 @@ test('the pad switcher opens under its button, follows arrow keys, and closes on
   expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
 
   await page.keyboard.press('ArrowDown');
-  await expect(window.getByRole('menuitem', { name: 'New scratchpad' })).toBeFocused();
+  await expect(window.getByRole('menuitem', { name: 'New notes' })).toBeFocused();
   await page.keyboard.press('ArrowUp');
   await expect(current).toBeFocused();
   await page.keyboard.press('Escape');
@@ -208,7 +208,7 @@ test('deleting a pad removes its file, and the window moves on to a fresh pad', 
   const file = await padFile(window);
 
   await window.locator('.pad-switch').click();
-  await window.getByRole('menuitem', { name: 'Delete this scratchpad…' }).click();
+  await window.getByRole('menuitem', { name: 'Delete these notes…' }).click();
   await expect(window.locator('.pad-menu')).toContainText('Delete “temporary”');
   await window.getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(window.locator('.pad-title')).toHaveText('Untitled');

@@ -1,5 +1,5 @@
 /**
- * Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted
+ * Builds what the agent pane sends from what the user wrote: the prompt (comments on quoted
  * parts of earlier replies, the draft, then files), `!` shell commands, and side questions
  * about a quote.
  *

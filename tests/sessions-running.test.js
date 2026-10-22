@@ -69,14 +69,14 @@ describe('conversations', () => {
     assert.equal(runningState(followed, meta({ id: 's' }), false), 'working');
   });
 
-  test('are named as an omp window names them: the first prompt until omp has a title', () => {
+  test('are named as an agent window names them: the first prompt until omp has a title', () => {
     const followed = follow();
     assert.equal(followedName(followed), null);
     noteEvent(followed, frame({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text: 'fix the login bug' }] } }, 1));
     assert.equal(followedName(followed), 'fix the login bug');
   });
 
-  test('are shown in an omp window by journal, with the session holding it, dropping whatever it was starting from', () => {
+  test('are shown in an agent window by journal, with the session holding it, dropping whatever it was starting from', () => {
     assert.deepEqual(showConversation({ file: '/j.jsonl', meta: meta({ id: 's1', sessionFile: '/j.jsonl' }), cwd: '/p', name: 'Login' }), {
       session: 's1', cwd: '/p', sessionFile: '/j.jsonl', name: 'Login', fork: null, prompt: null,
     });

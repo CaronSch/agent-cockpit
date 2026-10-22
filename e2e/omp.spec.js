@@ -1,4 +1,4 @@
-// Behaviour tests for the omp pane against the real daemon driving tests/fixtures/fake-omp.js.
+// Behaviour tests for the agent pane against the real daemon driving tests/fixtures/fake-omp.js.
 import { test, expect } from '@playwright/test';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,7 +37,7 @@ test.afterEach(() => {
 });
 
 /**
- * Runs `open`, which adds one omp window, and returns a locator pinned to that window
+ * Runs `open`, which adds one agent window, and returns a locator pinned to that window
  * (`.last()` would re-resolve to whichever pane was added most recently).
  * @param {Page} page @param {() => Promise<void>} open
  */
@@ -50,7 +50,7 @@ async function paneAddedBy(page, open) {
   return page.locator(`.widget[data-id="${added}"]`);
 }
 
-/** Adds an omp pane through the palette. @param {Page} page */
+/** Adds an agent pane through the palette. @param {Page} page */
 async function addOmpPane(page) {
   return paneAddedBy(page, async () => {
     await page.locator('#palette-toggle').click();
@@ -63,7 +63,7 @@ async function addOmpPane(page) {
 async function startedPane(page, dir = PROJECT) {
   const pane = await addOmpPane(page);
   await pane.locator('input').fill(dir);
-  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await pane.getByRole('button', { name: 'Start agent' }).click();
   await expect(pane.locator('textarea')).toBeVisible();
   await expect(pane.getByText('Fake Model')).toBeVisible(); // get_state answered: the session is ready
   return pane;
@@ -274,7 +274,7 @@ test('the message box is set like scratchpad text and starts one line high, plac
       const s = getComputedStyle(el);
       return (el.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom)) / parseFloat(s.lineHeight);
     });
-  await expect(draft).toHaveAttribute('placeholder', /^Message omp/);
+  await expect(draft).toHaveAttribute('placeholder', /^Message the agent/);
   expect(await lines()).toBeCloseTo(1, 1);
   await page.setViewportSize({ width: 360, height: 800 });
   await expect.poll(lines).toBeCloseTo(1, 1);
@@ -791,7 +791,7 @@ test('New, Fork, Accounts and Stop sit in the window’s top bar; pressing them 
 
   // New starts over in this window: the setup screen, and the bar loses the session's controls.
   await head.getByRole('button', { name: 'New', exact: true }).click();
-  await expect(pane.getByRole('button', { name: 'Start omp' })).toBeVisible();
+  await expect(pane.getByRole('button', { name: 'Start agent' })).toBeVisible();
   await expect(head.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
 });
 
@@ -1196,7 +1196,7 @@ test('a tool call is one card whose output appears when expanded', async ({ page
   await expect(card.locator('pre').last()).toHaveText('hi');
 });
 
-test('the top bar’s Config opens on hover or a click and shows only prompts and final replies in every omp window, across a reload', async ({ page }) => {
+test('the top bar’s Config opens on hover or a click and shows only prompts and final replies in every agent window, across a reload', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
   const reply = pane.locator('.omp-assistant', { hasText: 'You said: run a tool and think' });
@@ -1220,7 +1220,7 @@ test('the top bar’s Config opens on hover or a click and shows only prompts an
   await page.mouse.move(5, 300);
   await expect(menu).toBeHidden();
 
-  // A click opens it to stay; the switch applies to every omp window.
+  // A click opens it to stay; the switch applies to every agent window.
   await config.click();
   await page.mouse.move(5, 300);
   await expect(menu).toBeVisible();
@@ -1436,7 +1436,7 @@ test('the window’s top bar names its conversation, and the name is saved with 
   // "hi" is too little for omp to name the session by.
   await expect(pane.locator('.omp-note.is-muted', { hasText: 'Could not generate a session title' })).toBeVisible();
   await expect(label, 'untitled: named by the first prompt').toHaveText('hi');
-  await expect(pane.getByRole('heading', { name: 'omp hi' })).toBeVisible();
+  await expect(pane.getByRole('heading', { name: 'Agent hi' })).toBeVisible();
   await expect.poll(async () => (await savedParams(page, workspace, pane))?.name).toBe('hi');
   await send(pane, '/rename Login fix');
   await expect(label, 'a title the user gives wins').toHaveText('Login fix');
@@ -1537,7 +1537,7 @@ test('sending a reworded prompt rewinds omp to just before it, in every window s
   await conversation(pane, ['first question', 'second question', 'third question']);
   await expect.poll(async () => (await savedParams(page, workspace, pane))?.sessionFile).toMatch(/\.jsonl$/);
   const { session, sessionFile } = await savedParams(page, workspace, pane);
-  // A second window showing the same conversation: Sessions shows it in the omp window used last.
+  // A second window showing the same conversation: Sessions shows it in the agent window used last.
   const other = await addOmpPane(page);
   await other.click();
   await page.locator('#palette-toggle').click();
@@ -1666,7 +1666,7 @@ test('New starts another session in the window, in the same directory, and the o
 
   await pane.getByRole('button', { name: 'New', exact: true }).click();
   await expect(pane.locator('input')).toHaveValue(PROJECT);
-  await pane.getByRole('button', { name: 'Start omp' }).click();
+  await pane.getByRole('button', { name: 'Start agent' }).click();
   await expect(pane.getByText('Fake Model')).toBeVisible();
   await expect.poll(sessionOf).not.toBe(before);
   await expect(pane.getByText('first conversation')).toHaveCount(0);

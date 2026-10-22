@@ -1,5 +1,5 @@
 /**
- * Paths typed in the omp pane, as `@` file mentions in its draft or plainly in its Directory
+ * Paths typed in the agent pane, as `@` file mentions in its draft or plainly in its Directory
  * field: the path being typed at the caret, the folder entries that match it, and the text that
  * completes it, kept free of the DOM so they can be tested.
  *

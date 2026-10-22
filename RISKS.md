@@ -32,7 +32,7 @@ Each entry gives: what goes wrong, and the planned response once the threshold i
 ## When the daemon restarts start costing work
 
 - **A daemon restart interrupts running agents.** omp runs as a child of the
-  daemon, so a restart ends every session. An omp pane can resume the
+  daemon, so a restart ends every session. An agent pane can resume the
   conversation (`omp --resume`), but a turn that was running is lost.
   *Response:* relaunch with `omp --restore <session.jsonl>`, which also resumes
   the interrupted turn and its subagents; supervise outside the daemon only if

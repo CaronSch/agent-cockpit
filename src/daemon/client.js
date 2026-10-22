@@ -288,13 +288,13 @@ export function createDaemonClient(env = {}) {
         resetListeners.delete(onReset);
         settle();
       };
-      const onReset = () => finish(() => reject(new DaemonError(409, 'the daemon restarted before omp answered')));
+      const onReset = () => finish(() => reject(new DaemonError(409, 'the daemon restarted before the agent answered')));
       resetListeners.add(onReset);
       stop = subscribe(session, (event) => {
         if (event.kind === 'frame' && event.frame.type === 'response' && event.frame.id === id) {
           finish(() => resolve(/** @type {RpcResponse} */ (event.frame)));
         } else if (event.kind === 'session' && (event.meta.status === 'exited' || event.meta.status === 'failed')) {
-          finish(() => reject(new DaemonError(409, 'omp exited before answering')));
+          finish(() => reject(new DaemonError(409, 'the agent exited before answering')));
         }
       });
       if (done) stop(); // settled during the synchronous replay, before `stop` was assigned
