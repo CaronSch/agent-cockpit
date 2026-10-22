@@ -27,6 +27,7 @@
   --color-unread: oklch(80% 0.16 225);
   /* Inline code in agent replies: soft periwinkle, about 8:1 on --color-bg. */
   --color-code: oklch(76% 0.11 265);
+  --color-selection: color-mix(in oklch, var(--color-code) 30%, transparent);
 
   /* Type: one monospace face for everything, chrome and conversation alike; hierarchy
      comes from size, weight and colour. `--text-sm` is reading text: the omp transcript,

@@ -22,8 +22,8 @@
  * Showing one from here reads it. Each row's menu (a right-click, the ContextMenu key,
  * Shift+F10, or its ⋯ button) marks it read or unread, beside the row's other actions.
  *
- * Running rows show where their sessions are on this screen (sessions/links.js): a window
- * marker for one shown in an omp window, in the accent for the one in the omp window used
+ * Running rows show where their sessions are on this screen (sessions/links.js): a bar at
+ * the left edge for one shown in an omp window, brighter for the one in the omp window used
  * last (where a click shows sessions). Pointing at a row (hover, or keyboard focus: a click
  * also focuses a row, but that is not pointing at it once the pointer moves on) outlines its
  * windows, and pointing at an omp window lights its session's row.
@@ -354,10 +354,7 @@ function createSessionsWindow(body, ctx, daemon) {
     const stopBtn = button('sessions-action sessions-stop', 'Stop');
     stopBtn.title = 'End this session';
     actions.append(stopBtn, moreButton());
-    const shown = el('span', 'sessions-shown');
-    shown.hidden = true; // until drawLinks finds a window showing it
-    shown.title = 'Shown in an omp window';
-    row.append(rowDot(unread), main, shown, actions);
+    row.append(rowDot(unread), main, actions);
     return row;
   }
 
@@ -604,8 +601,7 @@ function createSessionsWindow(body, ctx, daemon) {
   /** Marks each running row by where its session is shown, and outlines the pointed row's windows. */
   function drawLinks() {
     for (const [id, { node }] of runningRows) {
-      const shown = node.querySelector('.sessions-shown');
-      if (shown instanceof HTMLElement) shown.hidden = !links.windows.has(id);
+      node.classList.toggle('is-shown', links.windows.has(id));
       node.classList.toggle('is-current', links.current === id);
       node.classList.toggle('is-pointed', links.pointed === id);
       if (links.current === id) node.setAttribute('aria-current', 'true');

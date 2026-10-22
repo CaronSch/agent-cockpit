@@ -13,6 +13,10 @@ body {
   height: 100%;
 }
 
+::selection {
+  background: var(--color-selection);
+}
+
 body {
   margin: 0;
   overflow: hidden;

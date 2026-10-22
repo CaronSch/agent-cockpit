@@ -46,8 +46,10 @@ export function lineBoxes(boxes) {
  * @param {Range} range @param {Node} within @returns {DOMRect[]}
  */
 function textBoxes(range, within) {
-  const common = range.commonAncestorContainer;
-  const root = within.contains(common) ? common : common.contains(within) ? within : null;
+  // A range inside one text node has it as common ancestor; walk from its parent, since a
+  // walker finds nothing under a text node.
+  const common = range.commonAncestorContainer instanceof Text ? range.commonAncestorContainer.parentNode : range.commonAncestorContainer;
+  const root = common && within.contains(common) ? common : common?.contains(within) ? within : null;
   if (!root) return [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const part = document.createRange();
