@@ -1,6 +1,6 @@
 import { test, describe } from 'bun:test';
 import assert from 'node:assert/strict';
-import { PLAIN_PATH, commonPrefix, completeEntry, extendSegment, matchEntries, mentionAt } from '../src/omp/file-mention.js';
+import { PLAIN_PATH, commonPrefix, completeEntry, endedByPunctuation, extendSegment, matchEntries, mentionAt } from '../src/omp/file-mention.js';
 /** @import { DirEntry } from '../src/omp/file-mention.js' */
 
 /** @param {string} text */
@@ -112,5 +112,33 @@ describe('a field that holds one path', () => {
     const query = /** @type {import('../src/omp/file-mention.js').MentionQuery} */ (pathAt('~/my co'));
     assert.equal(PLAIN_PATH.complete(query, dir('my code')), '~/my code/');
     assert.equal(PLAIN_PATH.extend(query, 'my cod'), '~/my cod');
+  });
+});
+
+describe('a mention the sentence goes on after', () => {
+  /** @type {DirEntry[]} */
+  const entries = [dir('benches'), file('app.js'), file('app.js.bak'), file('README.md'), file('.env')];
+  /** @param {string} text @param {readonly DirEntry[]} [folder] */
+  const ended = (text, folder = entries) => endedByPunctuation(/** @type {import('../src/omp/file-mention.js').MentionQuery} */ (at(text)), folder);
+
+  test('ends at punctuation after a folder or an entry’s exact name', () => {
+    assert.equal(ended('see @benches/.', []), true);
+    assert.equal(ended('see @benches/,', [file('bench.rs')]), true);
+    assert.equal(ended('in @README.md)'), true);
+    assert.equal(ended('and @README.md!?'), true);
+  });
+
+  test('goes on while a name could still start with what is typed', () => {
+    assert.equal(ended('@src/.', [file('.env')]), false, 'a dotfile');
+    assert.equal(ended('@app.js.'), false, 'app.js.bak');
+    assert.equal(ended('@.'), false, './ or a dotfile');
+    assert.equal(ended('@..'), false, '../');
+  });
+
+  test('goes on for a name not finished, without punctuation, or quoted', () => {
+    assert.equal(ended('@READ.'), false, 'no entry is called READ');
+    assert.equal(ended('@README.md'), false);
+    assert.equal(ended('@benches/'), false);
+    assert.equal(ended('@"benches/.', []), false, 'a quoted path takes punctuation as typed');
   });
 });

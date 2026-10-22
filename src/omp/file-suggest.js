@@ -66,6 +66,7 @@ export function createFileSuggest({ draft, syntax, foldersOnly = false, list, li
 
   /** @param {MentionQuery} q @param {DirListing} found */
   function draw(q, found) {
+    if (syntax.ended?.(q, found.entries)) return list.hide();
     const matches = matchEntries(foldersOnly ? found.entries.filter((e) => e.isDir) : found.entries, q.segment);
     const shown = matches.slice(0, MAX_ROWS);
     const more = matches.length - shown.length;
