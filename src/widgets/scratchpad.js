@@ -10,6 +10,7 @@ import { button, carriesFiles, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
 import { autosize } from '../ui/autosize.js';
 import { tabIndent } from '../ui/indent.js';
+import { onZoom } from '../ui/zoom.js';
 import { getDaemon } from '../daemon/client.js';
 import { getScratchpad } from '../scratchpad/store.js';
 import { IMAGE_TYPES, DEFAULT_PAD, PAD_ID, assetUrl, insertAsset, parseBlocks, serializeBlocks, titleOf, withGaps } from '../scratchpad/blocks.js';
@@ -394,6 +395,7 @@ function createScratchpadWindow(body, ctx, daemon) {
 
   const resize = new ResizeObserver(sizeAll);
   resize.observe(doc);
+  const offZoom = onZoom(sizeAll);
   draw();
 
   return {
@@ -401,6 +403,7 @@ function createScratchpadWindow(body, ctx, daemon) {
       // The store is the page's, not this window's: it still saves anything typed here.
       off();
       resize.disconnect();
+      offZoom();
       root.remove();
     },
   };

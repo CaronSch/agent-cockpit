@@ -1,6 +1,8 @@
 /** Bootstrap: starts the app and shows a visible error if it cannot. */
 import { createApp } from './app.js';
+import { applySavedZoom } from './ui/zoom.js';
 
+applySavedZoom();
 try {
   await createApp(document);
 } catch (err) {

@@ -19,7 +19,8 @@ restarts, after it stops) until you hover, scroll, click or type in a window
 showing it, or show it from Sessions. The marks are kept in `~/.cockpit/unread.json`. Turn
 on **Notify** in the top bar for a desktop notification as well, while you are not looking at
 that session; clicking it shows the session. When the workbench's files change under an open tab, the top bar offers
-**Reload**.
+**Reload**. **− 100% +** in the top bar sets the text size (the percentage resets it), kept per
+browser.
 
 **Screens.** Each browser window is a screen of your workspace, like an extra
 monitor: open a second window and it starts empty, with its own panes. Layouts
