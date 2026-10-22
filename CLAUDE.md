@@ -178,7 +178,8 @@ What runs today:
   calls and the messages in between, with one "Working…" line while a turn runs;
   *Animated selection* (on) draws a drag's selection in the transcript as Google
   Docs does, whole words gliding into place (`src/omp/drag-highlight.js`), with the
-  browser's own highlight hidden under it.
+  browser's own highlight hidden under it. Snapping (`src/ui/word-snap.js`) leaves a
+  selection inside one word alone and takes a long token (a path, a URL) by segment.
 - The Sessions window: first the daemon's **running** sessions (whatever screen
   shows them, or none), newest first, each with how it is doing (starting,
   working, idle, *done*: it finished and nobody has read it, or *needs you*: it asks
@@ -416,7 +417,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/ui/screen-switcher.js` — The screen switcher in the top bar: which screen of its workspace this window shows, and a menu of every screen, with what it holds and where it is open, to open one here or delete it.
 - `src/ui/settings.js` — App-wide settings, picked in the top bar's Config menu and kept per browser.
 - `src/ui/update-notice.js` — The "updated, reload" notice in the top bar: shown while the daemon serves other UI files than this page loaded (see daemon/ui-files.js), so a tab left open never runs stale code unknowingly.
-- `src/ui/word-snap.js` — Grows a selection that starts or ends partway through a word to take the whole word, as word processors do, so a rough drag still quotes clean text.
+- `src/ui/word-snap.js` — Grows a selection out to whole words once it spans more than one, as Google Docs does, so a rough drag still quotes clean text, while a selection inside one word stays exactly as made.
 - `src/ui/zoom.js` — Text size for the whole app, picked in the top bar (− 100% +; the percentage resets it) and kept per browser.
 - `src/widgets/omp.js` — The omp pane: starts an omp coding agent in a chosen directory through the daemon and lets the user chat with it and set it up, rendered from omp's structured event stream.
 - `src/widgets/pane.js` — An empty window: the frame every real widget is mounted into, with nothing inside.

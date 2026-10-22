@@ -843,7 +843,7 @@ test('with Animated selection on, a drag shows whole words in its own highlight;
   await expect.poll(() => page.evaluate(() => document.getSelection()?.toString().replace(/\s+/g, ' '))).toBe('said: hello one');
 });
 
-test('a rough drag over reply text snaps out to whole words, punctuation included, before Comment', async ({ page }) => {
+test('a rough drag over reply text snaps out to whole words once it spans two, punctuation included, before Comment', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
   await send(pane, 'hello');
@@ -876,7 +876,8 @@ test('a rough drag over reply text snaps out to whole words, punctuation include
   await box.press('Enter');
   await expect(pane.locator('.omp-card.is-comment')).toContainText('“said: hello one”');
 
-  // A word split by code or bold within a line is still one word; the next line is not part of it.
+  // A word split by code or bold within a line is still one word, and the next line is not part
+  // of it; dragged backwards, it snaps the same and keeps its direction; inside one word, nothing moves.
   const snapped = await page.evaluate(async () => {
     const url = '/src/ui/word-snap.js'; // the module the app runs
     const { snapToWords } = /** @type {typeof import('../src/ui/word-snap.js')} */ (await import(url));
@@ -885,16 +886,19 @@ test('a rough drag over reply text snaps out to whole words, punctuation include
     document.body.append(host);
     const [, code, rest] = /** @type {Node[]} */ ([...host.querySelector('p')?.childNodes ?? []].map((n) => n.firstChild ?? n));
     const sel = /** @type {Selection} */ (document.getSelection());
-    sel.setBaseAndExtent(code, 1, rest, 3);
+    sel.setBaseAndExtent(code, 1, rest, '.bar(), th'.length);
     snapToWords(sel);
-    const inner = sel.toString();
+    const forward = sel.toString();
+    sel.setBaseAndExtent(rest, '.bar(), th'.length, code, 1);
+    snapToWords(sel);
+    const backward = [sel.toString(), sel.anchorNode === rest && sel.anchorOffset === '.bar(), then'.length];
     sel.setBaseAndExtent(rest, '.bar(), t'.length, rest, '.bar(), th'.length);
     snapToWords(sel);
-    const last = sel.toString();
+    const inside = sel.toString();
     host.remove();
-    return [inner, last];
+    return [forward, backward, inside];
   });
-  expect(snapped).toEqual(['foo.bar(),', 'then']);
+  expect(snapped).toEqual(['foo.bar(), then', ['foo.bar(), then', true], 'h']);
 });
 
 test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
