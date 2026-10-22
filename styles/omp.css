@@ -1233,10 +1233,6 @@
   background: var(--color-surface-raised);
 }
 
-.omp-card.is-text {
-  border-left: 2px solid var(--color-text-faint);
-}
-
 .omp-card.is-uploading {
   opacity: 0.6;
 }
