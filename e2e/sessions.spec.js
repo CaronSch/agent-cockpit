@@ -589,3 +589,45 @@ test('from the keyboard, Shift+F10 opens a running row’s menu; Mark as unread 
   await expect(pane).not.toHaveClass(/is-unread/);
   await expect(running).not.toHaveClass(/is-unread/);
 });
+
+test('rows mark the sessions shown in omp windows, the last-used one in the accent; pointing links rows and windows both ways', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  const first = await startedPane(page, ALPHA);
+  const second = await startedPane(page, BRAVO);
+  const [a, b] = [await shownSession(page, first), await shownSession(page, second)];
+  const goTo = (/** @type {string} */ session) => runningRow(window, session).getByRole('button', { name: 'Go to its window' });
+  await expect(goTo(a)).toBeVisible();
+  await expect(goTo(b)).toBeVisible();
+
+  // The accent follows the omp window used last: where a click in Sessions shows a session.
+  await first.locator('.omp-transcript').click();
+  await expect(runningRow(window, a)).toHaveClass(/is-current/);
+  await expect(runningRow(window, b)).not.toHaveClass(/is-current/);
+  await second.locator('.omp-transcript').click();
+  await expect(runningRow(window, b)).toHaveClass(/is-current/);
+  await expect(runningRow(window, a)).not.toHaveClass(/is-current/);
+
+  // Pointing at a row outlines its window, and only while pointed at.
+  await runningRow(window, a).locator('.sessions-title').hover();
+  await expect(first).toHaveClass(/is-outlined/);
+  await expect(second).not.toHaveClass(/is-outlined/);
+  await page.mouse.move(5, 5); // the top bar
+  await expect(first).not.toHaveClass(/is-outlined/);
+
+  // Pointing at an omp window lights its session's row.
+  await first.locator('.omp-transcript').hover();
+  await expect(runningRow(window, a)).toHaveClass(/is-pointed/);
+  await expect(runningRow(window, b)).not.toHaveClass(/is-pointed/);
+
+  // The marker goes to the window already showing the session, rather than showing it in the
+  // window used last as a click on the row does.
+  await goTo(a).click();
+  await expect(first.locator('textarea')).toBeFocused();
+  await expect.poll(() => shownSession(page, second)).toBe(b);
+  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(2);
+  await expect(runningRow(window, a)).toHaveClass(/is-current/);
+
+  // A window that stops showing it takes the marker away.
+  await second.locator('.widget-close').click();
+  await expect(goTo(b)).toBeHidden();
+});

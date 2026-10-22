@@ -21,6 +21,12 @@
  * title, running, past or archived alike, and the window's top bar counts those it lists.
  * Showing one from here reads it. Each row's menu (a right-click, the ContextMenu key,
  * Shift+F10, or its ⋯ button) marks it read or unread, beside the row's other actions.
+ *
+ * Running rows show where their sessions are on this screen (sessions/links.js): a window
+ * marker for one shown in an omp window, in the accent for the one in the omp window used
+ * last (where a click shows sessions). The marker jumps to that window. Pointing at a row
+ * (hover, or keyboard focus) outlines its windows, and pointing at an omp window lights its
+ * session's row.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -28,6 +34,7 @@ import { getDaemon } from '../daemon/client.js';
 import { SORT_KEYS, directoryCounts, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
 import { STATE_LABELS, follow, followedName, isRunning, noteEvent, runningSessions, runningState, showPast, showRunning } from '../sessions/running.js';
 import { confirmBeside } from '../ui/confirm.js';
+import { sessionLinks } from '../sessions/links.js';
 import { openContextMenu, opensContextMenu } from '../ui/context-menu.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -117,6 +124,10 @@ function createSessionsWindow(body, ctx, daemon) {
   const rows = new Map();
   /** Running rows, by session id. @type {Map<string, { signature: string, node: HTMLElement }>} */
   const runningRows = new Map();
+  /** Where running sessions are shown on this screen (see drawLinks). */
+  let links = sessionLinks(ctx.screen.get());
+  /** The running rows pointed at: under the pointer, and holding focus. @type {{ hovered: string | null, focused: string | null }} */
+  const pointing = { hovered: null, focused: null };
   /** What this window follows of each running session, from its events. @type {Map<string, { followed: Followed, off: () => void }>} */
   const followed = new Map();
   let frame = 0;
@@ -343,7 +354,11 @@ function createSessionsWindow(body, ctx, daemon) {
     const stopBtn = button('sessions-action sessions-stop', 'Stop');
     stopBtn.title = 'End this session';
     actions.append(stopBtn, moreButton());
-    row.append(rowDot(unread), main, actions);
+    const goTo = button('sessions-goto');
+    goTo.hidden = true; // until drawLinks finds a window showing it
+    goTo.title = 'Go to its window';
+    goTo.setAttribute('aria-label', 'Go to its window');
+    row.append(rowDot(unread), main, goTo, actions);
     return row;
   }
 
@@ -474,6 +489,7 @@ function createSessionsWindow(body, ctx, daemon) {
       (m) => JSON.stringify([runningName(m), m.cwd, stateOf(m), isUnread(m), home]),
       renderRunningRow,
     );
+    drawLinks();
 
     const now = Date.now();
     const past = sortSessions(shownSessions(), sortKey(), dir);
@@ -496,7 +512,7 @@ function createSessionsWindow(body, ctx, daemon) {
 
   // A row drags out from anywhere on it, its Resume button included; its other actions only act.
   root.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive, .sessions-stop, .sessions-more')) return;
+    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive, .sessions-stop, .sessions-more, .sessions-goto')) return;
     const row = rowAt(event.target);
     const params = row && paramsFor(row);
     if (!row || !params) return;
@@ -517,7 +533,8 @@ function createSessionsWindow(body, ctx, daemon) {
     const control = /** @type {Element} */ (event.target).closest('button');
     const meta = row.dataset.session ? daemon.meta(row.dataset.session) : null;
     const s = byFile.get(row.dataset.file ?? '');
-    if (!control || control.classList.contains('sessions-resume')) show(row);
+    if (control?.classList.contains('sessions-goto') && meta) ctx.focusWindow(links.windows.get(meta.id) ?? []);
+    else if (!control || control.classList.contains('sessions-resume')) show(row);
     else if (control.classList.contains('sessions-more')) openRowMenu(row, /** @type {HTMLElement} */ (control));
     else if (control.classList.contains('sessions-stop') && meta) stop(meta, /** @type {HTMLButtonElement} */ (control));
     else if (s && (control.classList.contains('sessions-archive') || control.classList.contains('sessions-restore'))) void move(s, /** @type {HTMLButtonElement} */ (control));
@@ -585,12 +602,54 @@ function createSessionsWindow(body, ctx, daemon) {
   // The daemon says when a journal changes: omp wrote one, or a session was archived or restored.
   const offHistory = daemon.onHistory(() => void load());
 
+  // ── links to this screen's omp windows ──
+  /** Marks each running row by where its session is shown, and outlines the pointed row's windows. */
+  function drawLinks() {
+    for (const [id, { node }] of runningRows) {
+      const goTo = node.querySelector('.sessions-goto');
+      if (goTo instanceof HTMLElement) goTo.hidden = !links.windows.has(id);
+      node.classList.toggle('is-current', links.current === id);
+      node.classList.toggle('is-pointed', links.pointed === id);
+      if (links.current === id) node.setAttribute('aria-current', 'true');
+      else node.removeAttribute('aria-current');
+    }
+    const session = pointing.hovered ?? pointing.focused;
+    ctx.outline(session ? (links.windows.get(session) ?? []) : []);
+  }
+  const offScreen = ctx.screen.subscribe((screen) => {
+    links = sessionLinks(screen);
+    drawLinks();
+  });
+  /** @param {EventTarget | null} target */
+  const runningAt = (target) => rowAt(target)?.dataset.session ?? null;
+  root.addEventListener('pointerover', (event) => {
+    const session = runningAt(event.target);
+    if (session === pointing.hovered) return;
+    pointing.hovered = session;
+    drawLinks();
+  });
+  root.addEventListener('pointerleave', () => {
+    pointing.hovered = null;
+    drawLinks();
+  });
+  root.addEventListener('focusin', (event) => {
+    pointing.focused = runningAt(event.target);
+    drawLinks();
+  });
+  root.addEventListener('focusout', (event) => {
+    if (root.contains(/** @type {Node | null} */ (event.relatedTarget))) return; // focusin follows
+    pointing.focused = null;
+    drawLinks();
+  });
+
   draw();
   void load();
 
   return {
     destroy() {
       offHistory();
+      offScreen();
+      ctx.outline([]);
       clearTimeout(searchTimer);
       requestSeq++; // drop any answer still on its way
       offSessions();
