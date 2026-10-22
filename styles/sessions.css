@@ -97,7 +97,7 @@
   border-color: var(--color-line-focus);
 }
 
-:is(.sessions-sort, .sessions-icon-btn, .sessions-toggle, .sessions-action, .sessions-goto):focus-visible,
+:is(.sessions-sort, .sessions-icon-btn, .sessions-toggle, .sessions-action):focus-visible,
 .sessions-item:focus-visible {
   outline: 1px solid var(--color-unread);
   outline-offset: -1px;
@@ -150,28 +150,21 @@
 }
 
 /* A session shown in an omp window: a small window frame, filled in the accent for the one in
-   the omp window used last (where a click shows sessions). A button: it goes to that window. */
-.sessions-goto {
+   the omp window used last (where a click shows sessions). */
+.sessions-shown {
   flex: none;
   width: 12px;
   height: 10px;
-  padding: 0;
   border: 1px solid var(--color-text-faint);
   border-top-width: 3px;
   border-radius: 2px;
-  background: transparent;
-  cursor: pointer;
 }
 
-.sessions-goto[hidden] {
+.sessions-shown[hidden] {
   display: none;
 }
 
-.sessions-goto:hover {
-  border-color: var(--color-text-dim);
-}
-
-.sessions-item.is-current .sessions-goto {
+.sessions-item.is-current .sessions-shown {
   border-color: var(--color-accent);
   background: color-mix(in oklch, var(--color-accent) 35%, transparent);
 }

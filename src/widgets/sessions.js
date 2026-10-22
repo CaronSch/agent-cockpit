@@ -24,9 +24,9 @@
  *
  * Running rows show where their sessions are on this screen (sessions/links.js): a window
  * marker for one shown in an omp window, in the accent for the one in the omp window used
- * last (where a click shows sessions). The marker jumps to that window. Pointing at a row
- * (hover, or keyboard focus) outlines its windows, and pointing at an omp window lights its
- * session's row.
+ * last (where a click shows sessions). Pointing at a row (hover, or keyboard focus: a click
+ * also focuses a row, but that is not pointing at it once the pointer moves on) outlines its
+ * windows, and pointing at an omp window lights its session's row.
  */
 import { button, el } from '../ui/dom.js';
 import { errorMessage, tildeHome } from '../ui/format.js';
@@ -354,11 +354,10 @@ function createSessionsWindow(body, ctx, daemon) {
     const stopBtn = button('sessions-action sessions-stop', 'Stop');
     stopBtn.title = 'End this session';
     actions.append(stopBtn, moreButton());
-    const goTo = button('sessions-goto');
-    goTo.hidden = true; // until drawLinks finds a window showing it
-    goTo.title = 'Go to its window';
-    goTo.setAttribute('aria-label', 'Go to its window');
-    row.append(rowDot(unread), main, goTo, actions);
+    const shown = el('span', 'sessions-shown');
+    shown.hidden = true; // until drawLinks finds a window showing it
+    shown.title = 'Shown in an omp window';
+    row.append(rowDot(unread), main, shown, actions);
     return row;
   }
 
@@ -512,7 +511,7 @@ function createSessionsWindow(body, ctx, daemon) {
 
   // A row drags out from anywhere on it, its Resume button included; its other actions only act.
   root.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive, .sessions-stop, .sessions-more, .sessions-goto')) return;
+    if (event.button !== 0 || /** @type {Element} */ (event.target).closest('.sessions-archive, .sessions-stop, .sessions-more')) return;
     const row = rowAt(event.target);
     const params = row && paramsFor(row);
     if (!row || !params) return;
@@ -533,8 +532,7 @@ function createSessionsWindow(body, ctx, daemon) {
     const control = /** @type {Element} */ (event.target).closest('button');
     const meta = row.dataset.session ? daemon.meta(row.dataset.session) : null;
     const s = byFile.get(row.dataset.file ?? '');
-    if (control?.classList.contains('sessions-goto') && meta) ctx.focusWindow(links.windows.get(meta.id) ?? []);
-    else if (!control || control.classList.contains('sessions-resume')) show(row);
+    if (!control || control.classList.contains('sessions-resume')) show(row);
     else if (control.classList.contains('sessions-more')) openRowMenu(row, /** @type {HTMLElement} */ (control));
     else if (control.classList.contains('sessions-stop') && meta) stop(meta, /** @type {HTMLButtonElement} */ (control));
     else if (s && (control.classList.contains('sessions-archive') || control.classList.contains('sessions-restore'))) void move(s, /** @type {HTMLButtonElement} */ (control));
@@ -606,8 +604,8 @@ function createSessionsWindow(body, ctx, daemon) {
   /** Marks each running row by where its session is shown, and outlines the pointed row's windows. */
   function drawLinks() {
     for (const [id, { node }] of runningRows) {
-      const goTo = node.querySelector('.sessions-goto');
-      if (goTo instanceof HTMLElement) goTo.hidden = !links.windows.has(id);
+      const shown = node.querySelector('.sessions-shown');
+      if (shown instanceof HTMLElement) shown.hidden = !links.windows.has(id);
       node.classList.toggle('is-current', links.current === id);
       node.classList.toggle('is-pointed', links.pointed === id);
       if (links.current === id) node.setAttribute('aria-current', 'true');
@@ -632,8 +630,11 @@ function createSessionsWindow(body, ctx, daemon) {
     pointing.hovered = null;
     drawLinks();
   });
+  // Only keyboard focus points: a click focuses its row too, and that focus would otherwise
+  // keep the row's windows outlined after the pointer has moved on.
   root.addEventListener('focusin', (event) => {
-    pointing.focused = runningAt(event.target);
+    const target = /** @type {Element} */ (event.target);
+    pointing.focused = target.matches(':focus-visible') ? runningAt(target) : null;
     drawLinks();
   });
   root.addEventListener('focusout', (event) => {

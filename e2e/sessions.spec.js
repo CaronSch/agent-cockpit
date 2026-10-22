@@ -357,7 +357,7 @@ test('a running session is listed once, as running, even with its window closed,
   await expect(row(window, 'deploy staging').getByRole('button', { name: 'Archive' })).toBeEnabled();
 });
 
-test('Running lists every running session with how it is doing; a click shows it in the omp window used last', async ({ page }) => {
+test('running sessions are listed with how each is doing; a click shows one in the omp window used last', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await row(window, 'Fix the login flow').getByRole('button', { name: 'Resume' }).click();
   const first = page.locator('.widget[data-widget="omp"]').first();
@@ -595,9 +595,9 @@ test('rows mark the sessions shown in omp windows, the last-used one in the acce
   const first = await startedPane(page, ALPHA);
   const second = await startedPane(page, BRAVO);
   const [a, b] = [await shownSession(page, first), await shownSession(page, second)];
-  const goTo = (/** @type {string} */ session) => runningRow(window, session).getByRole('button', { name: 'Go to its window' });
-  await expect(goTo(a)).toBeVisible();
-  await expect(goTo(b)).toBeVisible();
+  const marker = (/** @type {string} */ session) => runningRow(window, session).locator('.sessions-shown');
+  await expect(marker(a)).toBeVisible();
+  await expect(marker(b)).toBeVisible();
 
   // The accent follows the omp window used last: where a click in Sessions shows a session.
   await first.locator('.omp-transcript').click();
@@ -614,20 +614,37 @@ test('rows mark the sessions shown in omp windows, the last-used one in the acce
   await page.mouse.move(5, 5); // the top bar
   await expect(first).not.toHaveClass(/is-outlined/);
 
+  // Straight from one row to the next: the outline moves with the pointer.
+  await runningRow(window, a).locator('.sessions-title').hover();
+  await runningRow(window, b).locator('.sessions-title').hover();
+  await expect(second).toHaveClass(/is-outlined/);
+  await expect(first).not.toHaveClass(/is-outlined/);
+
+  // A click focuses its row too; that focus does not keep the outline once the pointer leaves.
+  await runningRow(window, b).locator('.sessions-title').click();
+  await expect(runningRow(window, b)).toBeFocused();
+  await page.mouse.move(5, 5);
+  await expect(second).not.toHaveClass(/is-outlined/);
+
+  // A row redrawn under the pointer (its session starts working) keeps the outline while
+  // pointed at, and lets go of it as the pointer leaves.
+  await runningRow(window, a).locator('.sessions-title').hover();
+  await first.locator('textarea').evaluate((node) => {
+    const area = /** @type {HTMLTextAreaElement} */ (node);
+    area.value = 'slow';
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  });
+  await expect(runningRow(window, a).locator('.sessions-state')).toHaveText('working');
+  await expect(first).toHaveClass(/is-outlined/);
+  await page.mouse.move(5, 5);
+  await expect(first).not.toHaveClass(/is-outlined/);
+
   // Pointing at an omp window lights its session's row.
   await first.locator('.omp-transcript').hover();
   await expect(runningRow(window, a)).toHaveClass(/is-pointed/);
   await expect(runningRow(window, b)).not.toHaveClass(/is-pointed/);
 
-  // The marker goes to the window already showing the session, rather than showing it in the
-  // window used last as a click on the row does.
-  await goTo(a).click();
-  await expect(first.locator('textarea')).toBeFocused();
-  await expect.poll(() => shownSession(page, second)).toBe(b);
-  await expect(page.locator('.widget[data-widget="omp"]')).toHaveCount(2);
-  await expect(runningRow(window, a)).toHaveClass(/is-current/);
-
   // A window that stops showing it takes the marker away.
   await second.locator('.widget-close').click();
-  await expect(goTo(b)).toBeHidden();
+  await expect(marker(b)).toBeHidden();
 });

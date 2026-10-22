@@ -26,8 +26,7 @@ import scratchpad from './scratchpad.js';
  * its top bar, beside its type's title; null removes the name.
  * `ctx.screen` tells which windows this screen has (with their settings), which one of each
  * type `showWidget` would use, and which one the pointer is over (else the focused one);
- * `ctx.outline(ids)` outlines those windows, until it is called again (with `[]` to stop);
- * `ctx.focusWindow(ids)` focuses the one of those windows used last, as a click on it would.
+ * `ctx.outline(ids)` outlines those windows, until it is called again (with `[]` to stop).
  */
 /** @import { Leaf, LeafParams } from '../layout/grid-model.js' */
 /** @import { DragEndResult } from '../interaction/drag-controller.js' */
@@ -49,7 +48,6 @@ import scratchpad from './scratchpad.js';
  *   setLabel(text: string | null): void,
  *   readonly screen: Pick<Atom<ScreenWindows>, 'get' | 'subscribe'>,
  *   outline(ids: readonly string[]): void,
- *   focusWindow(ids: readonly string[]): void,
  * }} WidgetContext
  */
 /**

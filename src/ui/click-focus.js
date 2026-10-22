@@ -2,10 +2,6 @@
  * Click-to-focus, as in a terminal: a plain click on a window's own surface puts the caret at
  * the end of its main text box, while clicks on controls, in boxes of their own, and those
  * that end a text selection do what they did before.
- *
- * That text box is marked as its window's main field (`data-main-field`), so a window can
- * also be focused from elsewhere the same way (`focusMainField`): the Sessions window jumps
- * to the omp window showing a session.
  */
 
 /**
@@ -37,7 +33,6 @@ const INTERACTIVE = [
  * @param {string} ignore selector for regions whose clicks are their own (dialogs, popups)
  */
 export function focusOnClick(surface, field, ignore) {
-  field.dataset.mainField = '';
   surface.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
     if (field.disabled) return;
@@ -47,21 +42,8 @@ export function focusOnClick(surface, field, ignore) {
     const inside = path.slice(0, path.indexOf(surface));
     if (inside.some((node) => node instanceof Element && node.matches(`${INTERACTIVE}, ${ignore}`))) return;
     if (!(document.getSelection()?.isCollapsed ?? true)) return;
-    focusField(field);
+    field.focus({ preventScroll: true });
+    const end = field.value.length;
+    field.setSelectionRange(end, end);
   });
-}
-
-/** Focuses `field` without scrolling, with the caret at the end of its text. @param {HTMLTextAreaElement} field */
-function focusField(field) {
-  field.focus({ preventScroll: true });
-  const end = field.value.length;
-  field.setSelectionRange(end, end);
-}
-
-/** Focuses the main field of the window `frame`, as a click on it does; false when it has none. @param {Element} frame */
-export function focusMainField(frame) {
-  const field = frame.querySelector('[data-main-field]');
-  if (!(field instanceof HTMLTextAreaElement) || field.disabled) return false;
-  focusField(field);
-  return true;
 }
