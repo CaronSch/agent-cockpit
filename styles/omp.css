@@ -329,30 +329,6 @@
   color: var(--color-accent);
 }
 
-.omp-setting {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: baseline;
-  gap: 2px var(--space-2);
-  padding: 4px 6px;
-  border-radius: var(--radius-s);
-  cursor: pointer;
-}
-
-.omp-setting:hover {
-  background: var(--color-surface);
-}
-
-.omp-setting input {
-  margin: 0;
-  accent-color: var(--color-accent);
-}
-
-.omp-setting .omp-muted {
-  grid-column: 2;
-  font-size: var(--text-xs);
-}
-
 .omp-working {
   color: var(--color-accent);
   font: var(--text-xs) / 1.4 var(--font-mono);
@@ -415,6 +391,42 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-3);
+}
+
+/* The selection, drawn over the transcript (omp/drag-highlight.js): one box per line, gliding
+   as the selection grows by whole words. The browser's own highlight is hidden under it. */
+.omp-transcript.has-highlight ::selection {
+  background: transparent;
+}
+
+.omp-highlight {
+  position: absolute;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.omp-highlight-content {
+  position: absolute;
+  inset: 0 auto auto 0;
+}
+
+.omp-highlight-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--color-unread) 32%, transparent);
+  transition:
+    transform 90ms ease-out,
+    width 90ms ease-out,
+    height 90ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .omp-highlight-line {
+    transition: none;
+  }
 }
 
 /* Items keep their natural height; the transcript scrolls instead. Without this, items

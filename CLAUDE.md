@@ -107,12 +107,13 @@ What runs today:
   tool calls with output), pick model and thinking level, log in to
   providers, use slash commands, answer approval and `ask` dialogs, steer or stop
   a running turn, and resume the conversation after a daemon restart. A pane
-  shows one session at a time: **New** (toolbar) starts another one there, in the
+  shows one session at a time: **New** (in the window's title bar, with Stop and
+  More, through `ctx.headActions`) starts another one there, in the
   same directory unless the setup screen's Directory is changed, while the one
   shown before keeps running; **End** stops the shown session (asking first while
   a turn runs). Closing the pane leaves its session running. The toolbar keeps to
-  one line: the directory gives way first, and Fork, Config, Login and End sit in
-  its More menu (⋯). Login also shows in the toolbar while the session's model
+  one line (the directory gives way first); Fork, Login and End sit in the More
+  menu (⋯). Login also shows in the toolbar while the session's model
   needs a login (no model, or its provider is one omp logs in to and is logged
   out; the daemon asks omp's `get_login_providers` at setup and after a login). Several panes can
   show different sessions side by side, or the same one; the window's top
@@ -169,9 +170,14 @@ What runs today:
   moments, a second after them if the session is still unread and not shown in a
   focused tab: never for events replayed on (re)connecting (the `hello` carries the seq
   they run to), one per session (tagged with its id, so tabs replace each other's), closed
-  once the session is read; a click shows it in the omp window used last. Each pane's Config menu holds its own settings (saved with the window);
-  the first shows only prompts and final responses, hiding thinking, tool calls
-  and the messages in between, with one "Working…" line while a turn runs.
+  once the session is read; a click shows it in the omp window used last. The top
+  bar's Config menu (open while pointed at, or pinned by a click) holds the app's
+  switches, kept per browser (`src/ui/settings.js`): *Only prompts and responses*
+  shows only prompts and final responses in every omp window, hiding thinking, tool
+  calls and the messages in between, with one "Working…" line while a turn runs;
+  *Animated selection* (on) draws a drag's selection in the transcript as Google
+  Docs does, whole words gliding into place (`src/omp/drag-highlight.js`), with the
+  browser's own highlight hidden under it.
 - The Sessions window: first the daemon's **running** sessions (whatever screen
   shows them, or none), newest first, each with how it is doing (starting,
   working, idle, *done*: it finished and nobody has read it, or *needs you*: it asks
@@ -372,6 +378,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/omp/activity.js` — Which omp events make a session "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
 - `src/omp/composer.js` — The omp pane's message box: a draft that starts one line high and grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
+- `src/omp/drag-highlight.js` — The omp transcript's selection highlight, drawn as in Google Docs: while the pointer drags, it already covers whole words (ui/word-snap.js) and its edges glide from word to word.
 - `src/omp/file-mention.js` — Paths typed in the omp pane, as `@` file mentions in its draft or plainly in its Directory field: the path being typed at the caret, the folder entries that match it, and the text that completes it, kept free of the DOM so they can be tested.
 - `src/omp/file-suggest.js` — Path suggestions in the omp pane's text boxes (`@` file mentions in its draft, its Directory field): while the caret ends a path, the suggestion list shows the matching entries of the folder it names, and Tab, Enter or a click completes the path (see `file-mention.js`).
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
@@ -406,6 +413,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/ui/palette.js` — "Add widget" palette.
 - `src/ui/prefs.js` — Per-browser preferences in localStorage.
 - `src/ui/screen-switcher.js` — The screen switcher in the top bar: which screen of its workspace this window shows, and a menu of every screen, with what it holds and where it is open, to open one here or delete it.
+- `src/ui/settings.js` — App-wide settings, picked in the top bar's Config menu and kept per browser.
 - `src/ui/update-notice.js` — The "updated, reload" notice in the top bar: shown while the daemon serves other UI files than this page loaded (see daemon/ui-files.js), so a tab left open never runs stale code unknowingly.
 - `src/ui/word-snap.js` — Grows a selection that starts or ends partway through a word to take the whole word, as word processors do, so a rough drag still quotes clean text.
 - `src/ui/zoom.js` — Text size for the whole app, picked in the top bar (− 100% +; the percentage resets it) and kept per browser.
@@ -453,6 +461,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/clock.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-rewind.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-links.test.js`, `tests/sessions-notify.test.js`, `tests/sessions-order.test.js`, `tests/sessions-running.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/unread.test.js`, `tests/word-snap.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `tests/zoom.test.js`, `e2e/grid.spec.js`, `e2e/notify.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/unread.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/clock.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drag-highlight.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-rewind.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-links.test.js`, `tests/sessions-notify.test.js`, `tests/sessions-order.test.js`, `tests/sessions-running.test.js`, `tests/settings.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/unread.test.js`, `tests/word-snap.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `tests/zoom.test.js`, `e2e/grid.spec.js`, `e2e/notify.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/unread.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->
