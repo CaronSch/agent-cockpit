@@ -164,7 +164,12 @@ What runs today:
   restarts, and after it stops, until it is read there or shown from Sessions. A
   session marked unread from Sessions lights its windows too, and waits for a fresh
   hover, scroll, click or keystroke there (a pointer already resting on the window
-  does not read it). Each pane's Config menu holds its own settings (saved with the window);
+  does not read it). **Notify** in the top bar (off until clicked, which asks the
+  browser's permission; kept per browser) adds a desktop notification for the same
+  moments, a second after them if the session is still unread and not shown in a
+  focused tab: never for events replayed on (re)connecting (the `hello` carries the seq
+  they run to), one per session (tagged with its id, so tabs replace each other's), closed
+  once the session is read; a click shows it in the omp window used last. Each pane's Config menu holds its own settings (saved with the window);
   the first shows only prompts and final responses, hiding thinking, tool calls
   and the messages in between, with one "Working…" line while a turn runs.
 - The Sessions window: first the daemon's **running** sessions (whatever screen
@@ -382,6 +387,7 @@ particular, move a capability into "Current state" when it ships.
 - `src/render/grid-renderer.js` — Imperative, diffed DOM writer for the grid.
 - `src/scratchpad/blocks.js` — A scratchpad's text as blocks to edit: runs of text, and the images and files it references, kept free of the DOM so the round trip can be tested.
 - `src/scratchpad/store.js` — The page's copy of one scratchpad: every window in the page showing that pad edits this one object, so they agree as you type; it saves to the daemon after a pause and follows what other pages save.
+- `src/sessions/notify.js` — Desktop notifications when an agent is done or needs its user, so a session can be left running while the user is elsewhere: the moments that mark a conversation unread (omp/activity.js), as they happen.
 - `src/sessions/order.js` — Sorting and labels for the Sessions window, kept free of the DOM so they can be tested.
 - `src/sessions/running.js` — The daemon's running sessions as the Sessions window lists them, kept free of the DOM so they can be tested: which sessions run, in what order, how each is doing, and what an omp window is given to show one.
 - `src/state/atom.js` — Tiny observable cell: get/set/subscribe.
@@ -439,6 +445,6 @@ particular, move a capability into "Current state" when it ships.
 
 ### Test suites
 
-`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-rewind.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-order.test.js`, `tests/sessions-running.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/unread.test.js`, `tests/word-snap.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/unread.spec.js`, `e2e/update-notice.spec.js`
+`tests/atom.test.js`, `tests/compute-layout.test.js`, `tests/daemon-client.test.js`, `tests/daemon.test.js`, `tests/drop-zone.test.js`, `tests/file-mention.test.js`, `tests/frame-decoder.test.js`, `tests/grid-model.test.js`, `tests/history.test.js`, `tests/indent.test.js`, `tests/markdown.test.js`, `tests/neighbors.test.js`, `tests/omp-activity.test.js`, `tests/omp-message.test.js`, `tests/omp-rewind.test.js`, `tests/omp-transcript.test.js`, `tests/omp-visibility.test.js`, `tests/prompt-history.test.js`, `tests/scratchpad-blocks.test.js`, `tests/scratchpad-store.test.js`, `tests/scratchpad.test.js`, `tests/sessions-notify.test.js`, `tests/sessions-order.test.js`, `tests/sessions-running.test.js`, `tests/snap.test.js`, `tests/table-text.test.js`, `tests/todos.test.js`, `tests/ui-files.test.js`, `tests/unread.test.js`, `tests/word-snap.test.js`, `tests/workspace-model.test.js`, `tests/workspace.test.js`, `e2e/grid.spec.js`, `e2e/notify.spec.js`, `e2e/omp.spec.js`, `e2e/scratchpad.spec.js`, `e2e/screens.spec.js`, `e2e/sessions.spec.js`, `e2e/unread.spec.js`, `e2e/update-notice.spec.js`
 
 <!-- END GENERATED -->

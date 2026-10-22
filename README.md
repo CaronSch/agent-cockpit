@@ -16,7 +16,9 @@ as many as you like, side by side.
 A pane whose agent finished or asks something while you looked away gets a blue
 border, and its session stays unread (in every window, across reloads and daemon
 restarts, after it stops) until you hover, scroll, click or type in a window
-showing it, or show it from Sessions. The marks are kept in `~/.cockpit/unread.json`. When the workbench's files change under an open tab, the top bar offers
+showing it, or show it from Sessions. The marks are kept in `~/.cockpit/unread.json`. Turn
+on **Notify** in the top bar for a desktop notification as well, while you are not looking at
+that session; clicking it shows the session. When the workbench's files change under an open tab, the top bar offers
 **Reload**.
 
 **Screens.** Each browser window is a screen of your workspace, like an extra

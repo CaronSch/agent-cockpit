@@ -303,6 +303,41 @@ button {
   color: var(--color-text-dim);
 }
 
+/* ── Notify ──────────────────────────────────────────── */
+/* Off, it reads quietly; on, an accent dot leads it. Blocked or unsupported, it is faint. */
+.notify-toggle {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-dim);
+  font: 600 var(--text-sm) / 1.4 var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.notify-toggle:hover:enabled {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-raised);
+}
+
+.notify-toggle[aria-pressed='true'] {
+  color: var(--color-text);
+}
+
+.notify-toggle[aria-pressed='true']::before {
+  content: '●';
+  color: var(--color-accent);
+}
+
+.notify-toggle:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
+}
+
 /* ── Screen switcher ─────────────────────────────────── */
 .screen-switch {
   display: flex;
