@@ -1,6 +1,7 @@
 /**
  * Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons
- * appear at the end of the selection. Comment opens a box for a comment, handed to the
+ * appear at the end of the selection. A selection dragged with the pointer snaps out to whole
+ * words when it is let go, so a rough drag quotes clean text. Comment opens a box for a comment, handed to the
  * composer with the selected text as its quote. Ask opens a box for a side question about it,
  * whose short answer streams into the popup and never enters the chat (omp's `btw`); follow-up
  * questions continue the same topic there, one at a time.
@@ -8,6 +9,7 @@
 import { button, el } from '../ui/dom.js';
 import { autosize } from '../ui/autosize.js';
 import { renderMarkdown } from './markdown-dom.js';
+import { snapToWords } from '../ui/word-snap.js';
 /** @import { SideAnswer } from './transcript.js' */
 
 const GAP_PX = 6;
@@ -304,6 +306,8 @@ export function attachSelectionPopup({ host, transcript, onComment, ask }) {
   };
   const onPointerUp = () => {
     pressed = false;
+    const sel = document.getSelection();
+    if (sel && sel.rangeCount && transcript.contains(sel.getRangeAt(0).commonAncestorContainer)) snapToWords(sel);
     offerButtons();
   };
   const onPointerCancel = () => {
