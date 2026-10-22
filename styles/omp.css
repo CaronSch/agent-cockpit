@@ -429,26 +429,33 @@
   gap: var(--space-2);
 }
 
-/* What the user sent: a faint band across the pane, with a prompt mark before the text. */
+/* What the user sent: a band across the pane edged and marked in the accent, so a scroll
+   through a long reply still catches it. */
 .omp-user {
   display: grid;
   grid-template-columns: 2ch minmax(0, 1fr);
   gap: 0;
   margin-inline: calc(-1 * var(--space-3));
   padding: var(--space-1) var(--space-3);
+  border-inline-start: 2px solid var(--color-accent);
   background: var(--color-surface-raised);
 }
 
 .omp-user::before {
   content: '›';
   grid-row: 1 / span 2;
-  color: var(--color-text-faint);
+  color: var(--color-accent);
   font-weight: 600;
 }
 
-/* A prompt one agent sent another: no band, and it says who sent it. */
+/* A prompt one agent sent another: no band or edge, and it says who sent it. */
 .omp-user.is-agent {
+  border-inline-start-color: transparent;
   background: transparent;
+}
+
+.omp-user.is-agent::before {
+  color: var(--color-text-faint);
 }
 
 .omp-role {
