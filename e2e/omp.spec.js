@@ -561,13 +561,13 @@ test('a ! draft turns the message box into a shell line that Enter runs in the s
   const heldNote = pane.getByText('These wait for your next prompt');
   const bashSent = () => page.waitForRequest((r) => r.url().endsWith('/rpc') && r.postDataJSON()?.type === 'bash');
 
-  // A prompt: the box as usual. A long paste waits as a card for it.
+  // A prompt: the box as usual. A pasted file waits as a card for it.
   await draft.evaluate((node) => {
     const data = new DataTransfer();
-    data.setData('text/plain', Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n'));
+    data.items.add(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
     node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   });
-  const card = pane.locator('.omp-card.is-text');
+  const card = pane.locator('.omp-card.is-file');
   await draft.pressSequentially('ls');
   await expect(sendBtn).toHaveText('Send');
   await expect(mark).toBeHidden();
@@ -828,7 +828,7 @@ test('Ask takes follow-ups in the same topic, one at a time, and keeps the whole
   await expect(pane.locator('.omp-card')).toHaveCount(0); // and nothing waits for the next prompt
 });
 
-test('long pasted text and pasted or dropped files go with the next prompt as attachments', async ({ page }) => {
+test('pasted text is typing, however long; pasted or dropped files go with the next prompt as attachments', async ({ page }) => {
   await openWorkbench(page);
   const pane = await startedPane(page);
   const draft = pane.locator('textarea');
@@ -840,20 +840,10 @@ test('long pasted text and pasted or dropped files go with the next prompt as at
       return node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
     }, text);
 
-  // A short paste is ordinary typing; a long one becomes a card, as omp's editor does.
+  // Text, however long, is left to the browser to paste as typing.
   expect(await paste('one\ntwo')).toBe(true);
-  const log = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n');
-  expect(await paste(log)).toBe(false);
-  const textCard = pane.locator('.omp-card.is-text');
-  await expect(textCard).toContainText('Paste #1 · +12 lines');
-
-  // Clicking it opens the text to edit.
-  await textCard.locator('.omp-card-main').click();
-  const box = pane.getByRole('textbox', { name: 'Edit paste #1' });
-  await expect(box).toHaveValue(log);
-  await box.fill(`${log}\nline 13, added`);
-  await pane.getByRole('button', { name: 'Save' }).click();
-  await expect(textCard).toContainText('+13 lines');
+  expect(await paste(Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n'))).toBe(true);
+  await expect(pane.locator('.omp-card')).toHaveCount(0);
 
   // A screenshot pasted from the clipboard shows as a thumbnail once stored.
   await draft.evaluate((node) => {
@@ -891,7 +881,7 @@ test('long pasted text and pasted or dropped files go with the next prompt as at
   release();
   const message = (await sent).postDataJSON().message;
   const paths = [...message.matchAll(/@"([^"]+)"/g)].map((m) => m[1]);
-  expect(message).toBe(`what are these?\n\n<attachment>\n${log}\nline 13, added\n</attachment>\n\n@"${paths[0]}"\n\n@"${paths[1]}"`);
+  expect(message).toBe(`what are these?\n\n@"${paths[0]}"\n\n@"${paths[1]}"`);
   expect(paths[0]).toMatch(new RegExp(`^${join(E2E_STATE_DIR, 'attachments')}/.+-image\\.png$`));
   expect(paths[1]).toMatch(/-notes\.txt$/);
   expect(readFileSync(paths[1], 'utf8')).toBe('hello from a file');

@@ -145,8 +145,8 @@ What runs today:
   reply text can be commented on (the comment goes quoted with the next prompt)
   or asked about (omp's `btw` answers in the popup, outside the chat, where
   follow-up questions continue the same topic, one at a time; every question asks
-  for an answer of at most three sentences); long pastes become
-  editable cards and pasted or dropped files are stored in
+  for an answer of at most three sentences); pasted text goes into the
+  message box as typed, and pasted or dropped files are stored in
   `~/.cockpit/attachments/` and sent as omp `@"<path>"` mentions. Typing `@`
   suggests the entries of the session's directory, or of the folder the path after
   it names (`@src/`, `@../`, `@~/`, `@/abs`), filtered by what follows the last `/`;
@@ -356,14 +356,14 @@ particular, move a capability into "Current state" when it ships.
 - `src/layout/snap.js` — Magnetic sash behaviour: detents pull the sash onto aligned positions, then minimum sizes clamp the result.
 - `src/main.js` — Bootstrap: starts the app and shows a visible error if it cannot.
 - `src/omp/activity.js` — Which omp events make a session "unread": the agent's final response, when it hands the turn back to the user, or a question it stops to ask them.
-- `src/omp/composer.js` — The omp pane's message box: a draft that starts one line high and grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, pasted text, files), and the Send button.
+- `src/omp/composer.js` — The omp pane's message box: a draft that starts one line high and grows with its text up to half the pane, cards for what goes with the next message (comments on quoted transcript text, files), and the Send button.
 - `src/omp/dialogs-view.js` — Inline dialogs for omp's extension UI requests (select, confirm, input, editor, ask); each one answers through a single `respond(payload)` call.
 - `src/omp/file-mention.js` — Paths typed in the omp pane, as `@` file mentions in its draft or plainly in its Directory field: the path being typed at the caret, the folder entries that match it, and the text that completes it, kept free of the DOM so they can be tested.
 - `src/omp/file-suggest.js` — Path suggestions in the omp pane's text boxes (`@` file mentions in its draft, its Directory field): while the caret ends a path, the suggestion list shows the matching entries of the folder it names, and Tab, Enter or a click completes the path (see `file-mention.js`).
 - `src/omp/items-view.js` — DOM for one transcript item of the omp pane (messages, tool cards, shell runs, notes, unrecognised frames), built from text nodes only.
 - `src/omp/markdown-dom.js` — Renders the safe markdown tree from `markdown.js` as DOM nodes (text nodes only, never HTML).
 - `src/omp/markdown.js` — Safe markdown subset for agent text: parses into a small block/inline tree, never HTML.
-- `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then attachments), `!` shell commands, and side questions about a quote.
+- `src/omp/message.js` — Builds what the omp pane sends from what the user wrote: the prompt (comments on quoted parts of earlier replies, the draft, then files), `!` shell commands, and side questions about a quote.
 - `src/omp/prompt-history.js` — Up and Down in the omp pane's message box step through what was sent in its conversation, as omp's own editor and a shell do: the user's prompts and `!` commands, newest first.
 - `src/omp/selection-popup.js` — Actions on highlighted transcript text: select part of a reply and Comment and Ask buttons appear at the end of the selection.
 - `src/omp/suggestions.js` — The suggestion list above the omp pane's message box (slash commands, `@` file entries), driven from the draft's keys so focus never leaves it.
