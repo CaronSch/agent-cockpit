@@ -79,7 +79,7 @@ function set(key, on) {
 /** The top bar's Config button and its menu. */
 export function createConfigMenu() {
   const root = el('div', 'config');
-  const toggle = button('config-toggle', 'Config');
+  const toggle = button('topbar-btn config-toggle', 'Config');
   toggle.setAttribute('aria-haspopup', 'true');
   const menu = el('div', 'config-menu');
   menu.popover = 'auto';

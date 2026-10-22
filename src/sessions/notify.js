@@ -79,7 +79,7 @@ export function createNotifier({ daemon, shown, show }) {
   /** Each running session followed, with its notification while one is up. @type {Map<string, { followed: Followed, off: () => void, note: Notification | null, timer: ReturnType<typeof setTimeout> | null }>} */
   const sessions = new Map();
 
-  const root = button('notify-toggle', 'Notify', () => void toggle());
+  const root = button('topbar-btn notify-toggle', 'Notify', () => void toggle());
   /** The button says whether notifications are on, and why they cannot be. */
   function draw() {
     const permission = supported ? Notification.permission : 'denied';
