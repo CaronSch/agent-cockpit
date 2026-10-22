@@ -147,7 +147,7 @@ test('the conversation reads like a terminal: no "you" label, one font for the w
   const pane = await startedPane(page);
   await send(pane, 'hello');
   const user = pane.locator('.omp-user').last();
-  await expect(user).toHaveText('hello');
+  await expect(user.locator('.omp-md')).toHaveText('hello');
   await expect(user.locator('.omp-role')).toHaveCount(0);
   const reply = pane.locator('.omp-assistant').last().locator('.omp-md > p').first();
   await expect(reply).toContainText('You said');
@@ -1138,7 +1138,7 @@ test('Fork continues a copy of the conversation in a new pane, as a session of i
 
   await more.click();
   const forked = await paneAddedBy(page, () => fork.click());
-  await expect(forked.locator('.omp-user')).toHaveText([/shared start$/]);
+  await expect(forked.locator('.omp-user .omp-md')).toHaveText([/shared start$/]);
   await expect(forked.locator('.omp-assistant')).toHaveText([/You said: shared start/]);
   await expect(forked.getByText('Fake Model')).toBeVisible();
 
@@ -1146,8 +1146,8 @@ test('Fork continues a copy of the conversation in a new pane, as a session of i
   await expect(forked.locator('.omp-assistant').last()).toContainText('You said: fork only');
   await send(source, 'source only');
   await expect(source.locator('.omp-assistant').last()).toContainText('You said: source only');
-  await expect(source.locator('.omp-user')).toHaveText([/shared start$/, /source only$/]);
-  await expect(forked.locator('.omp-user')).toHaveText([/shared start$/, /fork only$/]);
+  await expect(source.locator('.omp-user .omp-md')).toHaveText([/shared start$/, /source only$/]);
+  await expect(forked.locator('.omp-user .omp-md')).toHaveText([/shared start$/, /fork only$/]);
 
   // The window saves its own journal, not the source's, and drops the fork request: after a
   // daemon restart its Resume continues the fork instead of forking again.
@@ -1201,7 +1201,7 @@ test('dragging Send sends the message in a fork placed where it is dropped, and 
     await expect(page.locator('.drop-indicator')).toHaveClass(/is-visible/);
     await page.mouse.up();
   });
-  await expect(forked.locator('.omp-user')).toHaveText([/shared start$/, /fork only$/]);
+  await expect(forked.locator('.omp-user .omp-md')).toHaveText([/shared start$/, /fork only$/]);
   await expect(forked.locator('.omp-assistant').last()).toContainText('You said: fork only');
   await expect(draft).toHaveValue('');
   const [mine, theirs] = [await forked.boundingBox(), await source.boundingBox()];
@@ -1211,7 +1211,7 @@ test('dragging Send sends the message in a fork placed where it is dropped, and 
   await page.reload();
   const again = page.locator(`.widget[data-id="${await forked.getAttribute('data-id')}"]`);
   await expect(again.locator('.omp-assistant').last()).toContainText('You said: fork only');
-  await expect(again.locator('.omp-user')).toHaveText([/shared start$/, /fork only$/]);
+  await expect(again.locator('.omp-user .omp-md')).toHaveText([/shared start$/, /fork only$/]);
 
   // A drag called off with Esc and let go over Send sends nothing anywhere; the message stays.
   const box = page.locator(`.widget[data-id="${await source.getAttribute('data-id')}"] textarea`);
@@ -1227,7 +1227,7 @@ test('dragging Send sends the message in a fork placed where it is dropped, and 
   await box.press('Enter');
   const home = page.locator(`.widget[data-id="${await source.getAttribute('data-id')}"]`);
   await expect(home.locator('.omp-assistant').last()).toContainText('You said: stay here');
-  await expect(home.locator('.omp-user')).toHaveText([/shared start$/, /stay here$/]);
+  await expect(home.locator('.omp-user .omp-md')).toHaveText([/shared start$/, /stay here$/]);
 });
 
 test('a suggestion list open when Send is dragged into a fork closes as the box empties', async ({ page }) => {
@@ -1297,6 +1297,116 @@ test('during the first turn the daemon titles the session, and one line of comma
   await page.keyboard.press('Escape');
   await expect(page.locator(`.sessions-running .sessions-item[data-session="${session}"] .sessions-title`)).toHaveText('About fix the login bug');
   await stopSession(page, session);
+});
+
+/** Sends `texts` one at a time, each once the reply before it is in. @param {import('@playwright/test').Locator} pane @param {string[]} texts */
+async function conversation(pane, texts) {
+  for (const [i, text] of texts.entries()) {
+    await send(pane, text);
+    await expect(pane.locator('.omp-assistant')).toHaveCount(i + 1);
+  }
+  await expect(pane.getByText('idle')).toBeVisible();
+}
+
+/** The user's prompts in `pane`, as shown. @param {import('@playwright/test').Locator} pane */
+const prompts = (pane) => pane.locator('.omp-user .omp-md');
+
+/** Clicks Rewind on the `n`th prompt of `pane`. @param {import('@playwright/test').Locator} pane @param {number} n */
+async function rewindTo(pane, n) {
+  const prompt = pane.locator('.omp-user').nth(n);
+  await prompt.hover();
+  await prompt.getByRole('button', { name: 'Rewind' }).click();
+}
+
+test('Rewind puts a prompt back in the box and marks what sending sets aside; Undo or Esc puts it all back, sending nothing', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  await conversation(pane, ['first question', 'second question', 'third question']);
+  const draft = pane.locator('textarea');
+  await draft.fill('half-written');
+  /** @type {string[]} */
+  const sent = [];
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc')) sent.push(r.postDataJSON()?.type);
+  });
+
+  await rewindTo(pane, 1);
+  await expect(draft).toHaveValue('second question');
+  await expect(draft).toBeFocused();
+  const bar = pane.locator('.omp-rewind-bar');
+  await expect(bar).toContainText('sending sets aside 2 prompts');
+  await expect(pane.locator('.omp-user').nth(1)).toHaveClass(/is-set-aside/);
+  await expect(pane.locator('.omp-assistant').nth(2)).toHaveClass(/is-set-aside/);
+  await expect(pane.locator('.omp-user').nth(0)).not.toHaveClass(/is-set-aside/);
+
+  // Another prompt instead: the box it goes back to is still the one from before.
+  await rewindTo(pane, 0);
+  await expect(draft).toHaveValue('first question');
+  await expect(bar).toContainText('sending sets aside 3 prompts');
+  await draft.press('Escape');
+  await expect(bar).toHaveCount(0);
+  await expect(pane.locator('.is-set-aside')).toHaveCount(0);
+  await expect(draft).toHaveValue('half-written');
+
+  await rewindTo(pane, 2);
+  await expect(bar).toContainText('sending sets aside 1 prompt and');
+  await bar.getByRole('button', { name: 'Undo' }).click();
+  await expect(bar).toHaveCount(0);
+  await expect(draft).toHaveValue('half-written');
+  await expect(prompts(pane)).toHaveText(['first question', 'second question', 'third question']);
+  expect(sent).toEqual([]);
+});
+
+test('sending a reworded prompt rewinds omp to just before it, in every window showing the session', async ({ page }) => {
+  const workspace = await openWorkbench(page);
+  const pane = await startedPane(page);
+  await conversation(pane, ['first question', 'second question', 'third question']);
+  await expect.poll(async () => (await savedParams(page, workspace, pane))?.session).toBeTruthy();
+  const session = (await savedParams(page, workspace, pane))?.session;
+  // A second window showing the same session: Sessions shows it in the omp window used last.
+  const other = await addOmpPane(page);
+  await other.click();
+  await page.locator('#palette-toggle').click();
+  await page.locator('#palette [data-type="sessions"]').click();
+  await page.keyboard.press('Escape');
+  await page.locator(`.sessions-running .sessions-item[data-session="${session}"]`).click();
+  await expect(prompts(other)).toHaveText(['first question', 'second question', 'third question']);
+
+  await rewindTo(pane, 1);
+  const draft = pane.locator('textarea');
+  await draft.fill('second question, reworded');
+  const branched = rpcSent(page, 'branch');
+  await draft.press('Enter');
+  await branched;
+  for (const window of [pane, other]) {
+    await expect(prompts(window)).toHaveText(['first question', 'second question, reworded']);
+    await expect(window.locator('.omp-assistant').last()).toContainText('You said: second question, reworded');
+    await expect(window.locator('.omp-assistant')).toHaveCount(2);
+  }
+  await expect(pane.locator('.omp-rewind-bar')).toHaveCount(0);
+  await expect(draft).toHaveValue('');
+  await stopSession(page, session);
+});
+
+test('a rewind is refused, sending nothing, when omp’s conversation no longer matches the window’s', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  // "drift": omp lists this prompt as if it had been reworded elsewhere.
+  await conversation(pane, ['first question', 'drift question']);
+  await rewindTo(pane, 1);
+  const draft = pane.locator('textarea');
+  await draft.fill('reworded');
+  /** @type {string[]} */
+  const sent = [];
+  page.on('request', (r) => {
+    if (r.url().endsWith('/rpc')) sent.push(r.postDataJSON()?.type);
+  });
+  await draft.press('Enter');
+  await expect(pane.locator('.omp-note', { hasText: 'no longer matches' })).toBeVisible();
+  expect(sent).toEqual(['get_branch_messages']);
+  await expect(draft, 'the reworded prompt is given back').toHaveValue('reworded');
+  await expect(prompts(pane)).toHaveText(['first question', 'drift question']);
+  await expect(pane.locator('.omp-rewind-bar'), 'still pending, to Undo or try again').toBeVisible();
 });
 
 test('Up and Down in the message box step through what was sent, as in a shell', async ({ page }) => {

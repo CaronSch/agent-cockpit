@@ -32,7 +32,8 @@ const LOGIN_CHANGING_COMMANDS = new Set(['login', 'logout']);
 /**
  * Added to the setup of a session started from a journal (resumed or forked): omp streams
  * none of the conversation so far, so its answer puts that history in the log, ahead of
- * anything the session does once it is ready.
+ * anything the session does once it is ready. Sent again after a rewind (`branch`), whose
+ * conversation omp does not stream either: windows replace theirs with that answer.
  */
 export const HISTORY_COMMAND = Object.freeze({ type: 'get_messages' });
 
@@ -141,6 +142,9 @@ export function launchOmp({ id, cwd, resume, fork, ompPath, emit, now = Date.now
     if (meta.status === 'ready' && changesState(frame)) send({ type: 'get_state' }).response.catch(() => {});
     if (meta.status === 'ready' && frame.type === 'response' && frame.success === true && LOGIN_CHANGING_COMMANDS.has(frame.command)) {
       send({ type: 'get_login_providers' }).response.catch(() => {});
+    }
+    if (meta.status === 'ready' && frame.type === 'response' && frame.success === true && frame.command === 'branch') {
+      send(HISTORY_COMMAND).response.catch(() => {});
     }
     if (frame.type === 'response' && frame.command === 'get_state' && frame.success) {
       const file = frame.data?.sessionFile;

@@ -412,6 +412,32 @@ describe('bash and resume', () => {
     assert.deepEqual(kinds(state), ['user', 'assistant', 'note']);
     assert.equal(state.tools.get('c1')?.status, 'ok');
   });
+
+  test('after a rewind, the history omp answers with replaces the transcript, cost kept', () => {
+    const live = (/** @type {string} */ id, /** @type {any} */ message) => frame({ type: 'message_end', message, messageId: id });
+    const state = run([
+      session('/s/old.jsonl'),
+      messagesReply('ac_3'),
+      live('msg-1', { role: 'user', content: [{ type: 'text', text: 'new question' }] }),
+      live('msg-2', assistant([{ type: 'text', text: 'new answer' }])),
+      frame({ type: 'notice', level: 'info', message: 'hello' }),
+    ]);
+    const cost = state.cost;
+    assert.equal(kinds(state).length, 5);
+    // The daemon asks again after omp's `branch`; that answer is the conversation as it now stands.
+    applyEvent(state, frame({ type: 'response', id: 'ac_9', command: 'branch', success: true, data: { text: 'new question', cancelled: false } }));
+    applyEvent(state, messagesReply('ac_10'));
+    assert.deepEqual(kinds(state), ['user', 'assistant']);
+    assert.equal(state.items[0].kind === 'user' && state.items[0].text, 'old question');
+    assert.equal(state.cost, cost, 'the rewound turns were paid for all the same');
+    assert.equal(state.rewinds, 1);
+    // A second rewind's items get keys of their own, and a later answer seeds as before.
+    applyEvent(state, frame({ type: 'response', id: 'ac_11', command: 'branch', success: true, data: { text: 'old question', cancelled: false } }));
+    applyEvent(state, frame({ type: 'response', id: 'ac_12', command: 'get_messages', success: true, data: { messages: [] } }));
+    assert.deepEqual(kinds(state), []);
+    applyEvent(state, live('msg-3', { role: 'user', content: [{ type: 'text', text: 'again' }] }));
+    assert.deepEqual(kinds(state), ['user']);
+  });
 });
 
 describe('conversation name', () => {

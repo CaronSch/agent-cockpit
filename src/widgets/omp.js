@@ -30,6 +30,7 @@ import { awaitedAfter } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
 import { turnProgress } from '../omp/todos.js';
 import { createPromptHistory, sentPrompts } from '../omp/prompt-history.js';
+import { branchEntry, rewindPoint } from '../omp/rewind.js';
 import { confirmBeside } from '../ui/confirm.js';
 import { focusOnClick } from '../ui/click-focus.js';
 /** @import { WidgetContext } from './registry.js' */
@@ -534,6 +535,85 @@ function createPane(body, ctx, daemon) {
       }
     }
 
+    // ── rewind ──
+    // Rewind on one of the user's prompts puts it back in the box to reword, and marks what
+    // sending would set aside; nothing reaches omp until then, so Undo (or Esc) only puts the
+    // box back. Sending rewinds omp to just before the prompt (`branch`, which keeps the old
+    // path in the journal) and sends the box as the prompt in its place.
+    /** The prompt this window is rewinding to, and the box as it was before. @type {{ key: string, draft: string } | null} */
+    let rewind = null;
+    const rewindBar = el('div', 'omp-rewind-bar');
+    rewindBar.setAttribute('role', 'status');
+    const rewindText = el('span', 'omp-rewind-text');
+    rewindBar.append(rewindText, button('btn omp-rewind-undo', 'Undo', () => undoRewind()));
+    /** Sends waiting for the transcript to be replaced after a rewind (`state.rewinds` passing `after`). @type {Array<{ after: number, resolve: () => void }>} */
+    let reseedWaiters = [];
+
+    transcript.addEventListener('click', (e) => {
+      const target = /** @type {Element} */ (e.target).closest?.('.omp-rewind-btn');
+      const key = /** @type {HTMLElement | null} */ (target?.closest('.omp-user'))?.dataset.key;
+      if (key) startRewind(key);
+    });
+
+    /** @param {string} key */
+    function startRewind(key) {
+      if (!ready() || state.streaming) return;
+      const point = rewindPoint(state.items, key);
+      if (!point) return;
+      // Picking another prompt keeps the box as it was before the first.
+      rewind = { key, draft: rewind?.draft ?? draft.value };
+      composer.setText(point.text);
+      hideSuggestions();
+      draft.focus();
+      schedule();
+    }
+
+    function undoRewind() {
+      if (!rewind) return;
+      composer.setText(rewind.draft);
+      rewind = null;
+      draft.focus();
+      schedule();
+    }
+
+    /** Marks the prompt being rewound to and dims what sending would set aside. */
+    function drawRewind() {
+      for (const n of transcript.querySelectorAll('.is-set-aside')) n.classList.remove('is-set-aside');
+      rewindBar.remove();
+      const point = rewind && rewindPoint(state.items, rewind.key);
+      // The prompt is gone (another window rewound): there is nothing left to rewind to here.
+      if (rewind && !point) rewind = null;
+      const at = rewind && drawn.get(rewind.key)?.node;
+      if (!point || !at) return;
+      rewindText.textContent = `Rewinding here: sending sets aside ${point.setAside} prompt${point.setAside === 1 ? '' : 's'} and what followed`;
+      for (let n = /** @type {Element | null} */ (at); n; n = n.nextElementSibling) n.classList.add('is-set-aside');
+      transcript.insertBefore(rewindBar, at);
+    }
+
+    /**
+     * Rewinds omp to just before the prompt `key`, once omp's conversation is the one this
+     * window shows; resolves once the transcript has been replaced, so the prompt sent next
+     * lands after it. False, with a note why, when it did not rewind.
+     * @param {string} key @returns {Promise<boolean>}
+     */
+    async function applyRewind(key) {
+      const point = rewindPoint(state.items, key);
+      const listed = point && (await rpc({ type: 'get_branch_messages' }));
+      if (!point || !listed?.success) return false;
+      const entryId = branchEntry(listed.data?.messages ?? [], point);
+      if (!entryId) {
+        addNote(state, 'error', 'rewind', 'Not rewound, and nothing sent: omp’s conversation no longer matches this window’s.');
+        schedule();
+        return false;
+      }
+      const after = state.rewinds;
+      const res = await rpc({ type: 'branch', entryId });
+      if (!res?.success) return false;
+      rewind = null;
+      if (state.rewinds === after) await new Promise((resolve) => reseedWaiters.push({ after, resolve: () => resolve(undefined) }));
+      return true;
+    }
+
     async function send() {
       if (!ready()) return;
       // `/command` and `!shell` go as typed; comments and attachments wait for the next prompt.
@@ -546,8 +626,15 @@ function createPane(body, ctx, daemon) {
       const outgoing = composer.compose({ withCards: !command });
       const text = outgoing.message;
       if (!text) return;
+      // A command runs as it would anyway; the rewind waits for a prompt.
+      const rewindTo = command ? null : rewind?.key;
+      if (rewindTo && state.streaming) {
+        addNote(state, 'error', 'rewind', 'Not rewound, and nothing sent: the agent is working. Stop it first, or Undo.');
+        return schedule();
+      }
       const taken = outgoing.take();
       hideSuggestions();
+      if (rewindTo && !(await applyRewind(rewindTo))) return taken.restore();
       const shell = shellCommand(text);
       /** @type {Record<string, unknown>} */
       const request =
@@ -795,6 +882,7 @@ function createPane(body, ctx, daemon) {
         void send();
       } else if (e.key === 'Escape') {
         if (suggestions.open) hideSuggestions();
+        else if (rewind) undoRewind();
         else if (state.streaming) void stop();
       }
     });
@@ -832,6 +920,7 @@ function createPane(body, ctx, daemon) {
     workingEl.setAttribute('role', 'status');
 
     function drawTranscript() {
+      rewindBar.remove(); // items are placed by index; drawRewind puts it back
       const { onlyResponses } = params();
       if (onlyResponses !== drawnOnlyResponses) {
         drawnOnlyResponses = onlyResponses;
@@ -874,6 +963,8 @@ function createPane(body, ctx, daemon) {
       } else {
         workingEl.remove();
       }
+      transcript.classList.toggle('is-streaming', state.streaming);
+      drawRewind();
       pinToBottom();
     }
 
@@ -1032,6 +1123,11 @@ function createPane(body, ctx, daemon) {
     }
 
     function update() {
+      // A rewind's prompt goes once the transcript holds the rewound conversation, or once
+      // there is no session left to send it to.
+      const waiting = reseedWaiters;
+      reseedWaiters = waiting.filter((w) => ready() && state.rewinds === w.after);
+      for (const w of waiting) if (!reseedWaiters.includes(w)) w.resolve();
       // A ready session holds its earlier history already (the daemon fetched it first).
       if (ready()) sendCarried();
       // The journal and the conversation's name are saved with the window for when omp is

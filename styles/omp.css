@@ -432,6 +432,7 @@
 /* What the user sent: a band across the pane edged and marked in the accent, so a scroll
    through a long reply still catches it. */
 .omp-user {
+  position: relative;
   display: grid;
   grid-template-columns: 2ch minmax(0, 1fr);
   gap: 0;
@@ -456,6 +457,58 @@
 
 .omp-user.is-agent::before {
   color: var(--color-text-faint);
+}
+
+/* Rewind: quiet in the band's corner until the prompt is hovered or focused; never while the
+   agent works, nor on what a pending rewind sets aside. */
+.omp-rewind-btn {
+  position: absolute;
+  top: 3px;
+  right: var(--space-2);
+  padding: 0 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-s);
+  background: var(--color-surface);
+  color: var(--color-text-dim);
+  font: var(--text-2xs) / 1.6 var(--font-mono);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+}
+
+.omp-user:hover > .omp-rewind-btn,
+.omp-rewind-btn:focus-visible {
+  opacity: 1;
+}
+
+.omp-rewind-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.omp-transcript.is-streaming .omp-rewind-btn,
+.is-set-aside .omp-rewind-btn {
+  display: none;
+}
+
+/* A pending rewind: a line where the conversation would be cut, and what follows dimmed. */
+.omp-rewind-bar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-block: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px dashed var(--color-accent);
+  color: var(--color-text-dim);
+  font-size: var(--text-xs);
+}
+
+.omp-rewind-text {
+  flex: 1;
+}
+
+.is-set-aside {
+  opacity: 0.4;
 }
 
 .omp-role {
