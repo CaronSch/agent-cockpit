@@ -78,7 +78,8 @@ const BLOCK = 'p, li, td, th, pre, h1, h2, h3, h4, h5, h6, blockquote, div';
 
 /**
  * The text of the line `node` is in, and where each of its text nodes starts in it: the text
- * nodes of its block, bold, code and links included, a nested block's text a break between them.
+ * nodes of its block, bold, code and links included, a nested block's text or a <br> a break
+ * between them.
  * @param {Text} node @returns {{ text: string, nodes: Text[], starts: number[] }}
  */
 function lineOf(node) {
@@ -89,8 +90,15 @@ function lineOf(node) {
   const nodes = [];
   /** @type {number[]} */
   const starts = [];
-  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+  // Elements too, for line breaks: a paragraph's newlines are <br>s, which end a word as a
+  // space does (else `<attachment>` and the first word of the next line read as one).
+  const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
   for (let next = walker.nextNode(); next; next = walker.nextNode()) {
+    if (next.nodeName === 'BR') {
+      text += '\n';
+      continue;
+    }
+    if (!(next instanceof Text)) continue;
     if (next.parentElement?.closest(BLOCK) !== block) {
       if (!text.endsWith('\n')) text += '\n';
       continue;

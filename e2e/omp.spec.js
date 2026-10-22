@@ -895,10 +895,22 @@ test('a rough drag over reply text snaps out to whole words once it spans two, p
     sel.setBaseAndExtent(rest, '.bar(), t'.length, rest, '.bar(), th'.length);
     snapToWords(sel);
     const inside = sel.toString();
+    // A paragraph's line breaks (<br>) end words: the lines between tags select without them.
+    host.innerHTML = '<p>&lt;attachment&gt;<br>One feature to scope.<br>&lt;/attachment&gt;</p>';
+    const [open, , middle, , close] = /** @type {Node[]} */ ([...host.querySelector('p')?.childNodes ?? []]);
+    sel.setBaseAndExtent(middle, 0, middle, 'One feature to scope.'.length);
+    snapToWords(sel);
+    const lines = [sel.toString()];
+    sel.setBaseAndExtent(open, 0, open, '<attachment>'.length);
+    snapToWords(sel);
+    lines.push(sel.toString());
+    sel.setBaseAndExtent(middle, 'One fea'.length, close, 0);
+    snapToWords(sel);
+    lines.push(sel.toString().replace(/\n/g, '⏎'));
     host.remove();
-    return [forward, backward, inside];
+    return [forward, backward, inside, lines];
   });
-  expect(snapped).toEqual(['foo.bar(), then', ['foo.bar(), then', true], 'h']);
+  expect(snapped).toEqual(['foo.bar(), then', ['foo.bar(), then', true], 'h', ['One feature to scope.', '<attachment>', 'feature to scope.']]);
 });
 
 test('Ask on selected reply text answers in the popup and leaves the chat as it was', async ({ page }) => {
