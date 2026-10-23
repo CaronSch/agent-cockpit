@@ -192,6 +192,22 @@ function runTool(name, args, intent, result) {
 
 const toolCall = () => runTool('bash', { command: 'echo hi' }, 'Running echo', { content: [{ type: 'text', text: 'hi\n' }], details: {} });
 
+/**
+ * A shell call omp backgrounds as a job, as omp 18.12 does with a long one: its result says so
+ * (`details.async`), and the job's output comes as an `async-result` message once it ends,
+ * after the turn.
+ */
+function backgroundCall() {
+  const result = { content: [{ type: 'text', text: 'Backgrounded as job bg_1' }], details: { async: { state: 'running', jobId: 'bg_1', type: 'bash' }, timeoutSeconds: 900 } };
+  runTool('bash', { command: './deploy.sh' }, 'Deploying', result);
+  setTimeout(() => {
+    const delivery = { role: 'custom', customType: 'async-result', content: 'bg_1 completed', display: true, details: { jobs: [{ jobId: 'bg_1', status: 'completed' }] }, timestamp: Date.now() };
+    const deliveryId = record(delivery);
+    out({ type: 'message_start', message: delivery, messageId: deliveryId });
+    out({ type: 'message_end', message: delivery, messageId: deliveryId });
+  }, 2000);
+}
+
 function todoCall() {
   const tasks = [
     { content: 'Read the code', status: 'completed' },
@@ -227,6 +243,7 @@ async function runPrompt(id, text) {
   if (/garble/.test(text)) process.stdout.write('this line is not json\n');
   if (/tool/.test(text)) toolCall();
   if (/todo/.test(text)) todoCall();
+  if (/background/.test(text)) backgroundCall();
   if (/slow/.test(text)) {
     // A turn's middle: an intermediate reply and a tool run, then a pause before the final reply.
     streamAssistant('Let me check first.', null, { stopReason: 'toolUse' }); // it goes on to call a tool, as omp marks it

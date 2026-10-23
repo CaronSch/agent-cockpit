@@ -367,6 +367,17 @@ test('a conversation is listed once, awake or not, even with its window closed; 
   expect(await awake(page, fileOf('deploy')), 'asleep before its journal moved').toHaveLength(0);
 });
 
+test('a conversation running a background job says so while it runs', async ({ page }) => {
+  const window = await addSessionsWindow(page);
+  await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA); // only this test's sessions
+  const pane = await startedPane(page, ALPHA);
+  const fresh = keyRow(window, await shownConversation(page, pane));
+  await pane.locator('textarea').fill('background'); // a backgrounded shell, its result 2 s later
+  await pane.locator('textarea').press('Enter');
+  await expect(fresh.locator('.sessions-state')).toHaveText('1 running');
+  await expect(fresh.locator('.sessions-state')).toHaveCount(0);
+});
+
 test('awake conversations are listed with how each is doing; a click shows one in the agent window used last', async ({ page }) => {
   const window = await addSessionsWindow(page);
   await window.getByRole('combobox', { name: 'Directory' }).selectOption(ALPHA); // only this test's sessions

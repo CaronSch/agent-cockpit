@@ -31,8 +31,15 @@ import { todoPhases } from './todos.js';
  * @typedef {{
  *   id: string, name: string, args: unknown, intent: string | null,
  *   status: 'pending' | 'running' | 'ok' | 'error',
- *   output: string, result: string | null,
+ *   output: string, result: string | null, startedAt: number | null,
  * }} ToolRun
+ */
+
+/**
+ * A background job omp runs for the agent while it goes on: a shell or a subagent its tool
+ * call handed off (`details.async` on the call's result), until omp delivers the job's result
+ * (an `async-result` message) or a `wait` reports it ended. `startedAt` is in daemon time.
+ * @typedef {{ id: string, type: string, label: string, toolCallId: string, startedAt: number }} Job
  */
 
 /** @typedef {'info' | 'warning' | 'error' | 'muted'} NoteLevel */
@@ -91,6 +98,7 @@ import { todoPhases } from './todos.js';
  * @typedef {{
  *   items: Item[],
  *   tools: Map<string, ToolRun>,
+ *   jobs: Map<string, Job>,
  *   meta: SessionMeta | null,
  *   session: SessionInfo,
  *   dialogs: Dialog[],
@@ -144,6 +152,7 @@ export function createTranscript() {
   return {
     items: [],
     tools: new Map(),
+    jobs: new Map(),
     meta: null,
     session: { model: null, thinkingLevel: null, contextPercent: null, name: null },
     dialogs: [],
@@ -179,15 +188,16 @@ export function applyEvent(state, event) {
     case 'session':
       state.meta = event.meta;
       if (event.meta.status === 'exited' || event.meta.status === 'failed') {
-        // The process is gone: nothing is streaming and no dialog can be answered.
+        // The process is gone: nothing is streaming, no dialog can be answered, no job runs.
         state.streaming = false;
+        state.jobs.clear();
         state.dialogs = [];
         state.openUrl = null;
         state.queue = { steering: [], followUp: [] };
       }
       return state;
     case 'frame':
-      applyFrame(state, event.frame);
+      applyFrame(state, event.frame, event.at);
       return state;
     case 'sent':
       applySent(state, event.command);
@@ -263,8 +273,8 @@ export function conversationName(state) {
   return flat.length > NAME_CHARS ? `${flat.slice(0, NAME_CHARS - 1)}…` : flat;
 }
 
-/** @param {Transcript} state @param {Record<string, any>} frame */
-function applyFrame(state, frame) {
+/** @param {Transcript} state @param {Record<string, any>} frame @param {number} at */
+function applyFrame(state, frame, at) {
   const type = typeof frame?.type === 'string' ? frame.type : '';
   if (KNOWN_UNRENDERED.has(type)) return;
   switch (type) {
@@ -281,7 +291,7 @@ function applyFrame(state, frame) {
     }
     case 'message_start':
     case 'message_end':
-      return applyMessage(state, frame.message, messageKey(frame), type === 'message_end');
+      return applyMessage(state, frame.message, messageKey(frame), type === 'message_end', at);
     case 'message_update':
       return applyUpdate(state, frame);
     case 'tool_execution_start': {
@@ -290,6 +300,7 @@ function applyFrame(state, frame) {
       if (frame.args !== undefined) run.args = frame.args;
       if (typeof frame.intent === 'string') run.intent = frame.intent;
       if (run.status === 'pending') run.status = 'running';
+      run.startedAt ??= at;
       return touchTool(state, run.id);
     }
     case 'tool_execution_update': {
@@ -606,8 +617,10 @@ const messageKey = (frame) => (typeof frame.messageId === 'string' ? `msg:${fram
 
 /**
  * @param {Transcript} state @param {any} message @param {string | null} key @param {boolean} final
+ * @param {number | null} [at] when it arrived, live; none for history (`get_messages`), whose
+ *   jobs ran in an omp process gone since
  */
-function applyMessage(state, message, key, final) {
+function applyMessage(state, message, key, final, at = null) {
   const role = message?.role;
   // Without a key, start and end cannot be paired: show the message once, at its end.
   if (key === null && !final) return;
@@ -647,6 +660,7 @@ function applyMessage(state, message, key, final) {
       // A `todo` result carries the agent's whole list (a `view` only reads it).
       const phases = message.toolName === 'todo' && !message.isError && message.details?.op !== 'view' ? todoPhases(message.details?.phases) : null;
       if (final && phases) state.todo = { phases, updatedInTurn: true };
+      if (final) noteJobs(state, run, message.details, at);
       return touchTool(state, run.id);
     }
     case 'bashExecution':
@@ -666,6 +680,7 @@ function applyMessage(state, message, key, final) {
     }
     case 'custom':
     case 'hookMessage':
+      if (final && message.customType === 'async-result') endJobs(state, message.details?.jobs, false);
       return upsertNote(state, key, String(message.customType ?? role), '', contentText(message.content), message.display === false);
     case 'developer':
       return upsertNote(state, key, 'developer', '', contentText(message.content), false);
@@ -804,7 +819,7 @@ function ensureTool(state, id, name) {
   if (typeof id !== 'string' || !id) return null;
   let run = state.tools.get(id);
   if (!run) {
-    run = { id, name: typeof name === 'string' ? name : '', args: null, intent: null, status: 'pending', output: '', result: null };
+    run = { id, name: typeof name === 'string' ? name : '', args: null, intent: null, status: 'pending', output: '', result: null, startedAt: null };
     state.tools.set(id, run);
   } else if (!run.name && typeof name === 'string') {
     run.name = name;
@@ -817,13 +832,46 @@ function ensureTool(state, id, name) {
   return run;
 }
 
+/**
+ * The jobs a tool result tells of: one its call started (it went on in the background), and
+ * those it reports ended (a `wait`'s `jobs`).
+ * @param {Transcript} state @param {ToolRun} run @param {any} details @param {number | null} at
+ */
+function noteJobs(state, run, details, at) {
+  const job = details?.async;
+  if (at !== null && job?.state === 'running' && typeof job.jobId === 'string') {
+    const label = run.intent ?? argsSummaryText(run.args) ?? run.name;
+    state.jobs.set(job.jobId, { id: job.jobId, type: String(job.type ?? run.name), label, toolCallId: run.id, startedAt: run.startedAt ?? at });
+  }
+  endJobs(state, details?.jobs, true);
+}
+
+/**
+ * Forgets the jobs `jobs` (omp's job records) reports as ended: every one listed, or with
+ * `byStatus` only those whose status is no longer `running`.
+ * @param {Transcript} state @param {unknown} jobs @param {boolean} byStatus
+ */
+function endJobs(state, jobs, byStatus) {
+  if (!Array.isArray(jobs)) return;
+  for (const job of jobs) {
+    const id = job?.jobId ?? job?.id;
+    if (typeof id === 'string' && !(byStatus && job.status === 'running')) state.jobs.delete(id);
+  }
+}
+
+/** A shell call's command, else nothing. @param {unknown} args @returns {string | null} */
+const argsSummaryText = (args) => {
+  const command = /** @type {any} */ (args)?.command;
+  return typeof command === 'string' && command ? command : null;
+};
+
 /** @param {Transcript} state @param {AssistantItem} item */
 function registerToolCalls(state, item) {
   for (const block of item.blocks) {
     if (block.kind !== 'toolCall' || !block.id) continue;
     let run = state.tools.get(block.id);
     if (!run) {
-      run = { id: block.id, name: block.name, args: block.args, intent: block.intent, status: 'pending', output: '', result: null };
+      run = { id: block.id, name: block.name, args: block.args, intent: block.intent, status: 'pending', output: '', result: null, startedAt: null };
       state.tools.set(block.id, run);
     } else {
       if (block.name) run.name = block.name;

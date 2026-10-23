@@ -34,6 +34,7 @@ import { MENTIONS, PLAIN_PATH } from '../omp/file-mention.js';
 import { awaitedAfter } from '../omp/activity.js';
 import { promptsAndResponses } from '../omp/visibility.js';
 import { turnProgress } from '../omp/todos.js';
+import { elapsed, runningWork } from '../omp/running-work.js';
 import { createPromptHistory, sentPrompts } from '../omp/prompt-history.js';
 import { branchEntry, pointKey, rewindPoint } from '../omp/rewind.js';
 import { isRunning } from '../sessions/running.js';
@@ -427,6 +428,8 @@ function createPane(body, ctx, daemon) {
     resizes.observe(transcript);
     const dialogs = el('div', 'omp-dialogs');
     const queue = el('div', 'omp-queue');
+    const running = el('div', 'omp-running');
+    running.hidden = true;
     const suggestions = createSuggestions();
     const composer = createComposer({
       pane: node,
@@ -463,7 +466,7 @@ function createPane(body, ctx, daemon) {
         cancel: (id) => void (session && daemon.rpc(session, { type: 'btw_cancel', recordId: id }).catch(() => {})),
       },
     });
-    node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, queue, suggestions.root, composer.root);
+    node.append(toolbar, strip, loginStrip, banner, transcript, dialogs, running, queue, suggestions.root, composer.root);
     const highlight = attachDragHighlight({ host: node, transcript, enabled: () => settings.get().animatedSelection });
     const offHighlight = settings.subscribe(() => highlight.refresh());
     // A click on the pane that is not on a control, in a dialog omp asked for or in the
@@ -939,6 +942,9 @@ function createPane(body, ctx, daemon) {
     /** @type {Map<string, HTMLElement>} */
     const dialogNodes = new Map();
     let queueKey = '';
+    let runningKey = '';
+    /** Ticks the Running line's times while it shows. @type {ReturnType<typeof setInterval> | null} */
+    let runningTimer = null;
     let stripKey = '';
     let bannerKey = '';
     let loginKey = '';
@@ -1042,6 +1048,38 @@ function createPane(body, ctx, daemon) {
       };
       queue.replaceChildren(...state.queue.steering.map((t) => chip(t, 'steering')), ...state.queue.followUp.map((t) => chip(t, 'followUp')));
       queue.hidden = queue.childElementCount === 0;
+    }
+
+    /** The shells and subagents running now, each with how long it has run (omp/running-work.js). */
+    function drawRunning() {
+      const work = runningWork(state);
+      const key = JSON.stringify(work);
+      if (key === runningKey) return;
+      runningKey = key;
+      running.replaceChildren(
+        ...(work.length ? [el('span', 'omp-label', 'Running')] : []),
+        ...work.map((w) => {
+          const c = el('span', `omp-chip is-running${w.background ? ' is-background' : ''}`);
+          c.title = `${w.label}\n${w.background ? 'In the background: the agent goes on meanwhile' : 'The agent waits for it'}`;
+          const time = el('span', 'omp-chip-time');
+          if (w.startedAt !== null) time.dataset.since = String(w.startedAt);
+          c.append(el('span', 'omp-chip-kind', w.kind), el('span', 'omp-chip-text', w.label), time);
+          return c;
+        }),
+      );
+      running.hidden = work.length === 0;
+      tickRunning();
+      if (work.length && !runningTimer) runningTimer = setInterval(tickRunning, 1000);
+      else if (!work.length && runningTimer) {
+        clearInterval(runningTimer);
+        runningTimer = null;
+      }
+    }
+    function tickRunning() {
+      for (const time of running.querySelectorAll('.omp-chip-time')) {
+        const since = Number(/** @type {HTMLElement} */ (time).dataset.since);
+        time.textContent = since ? elapsed(Date.now() - since) : '';
+      }
     }
 
     function drawStrips() {
@@ -1176,6 +1214,7 @@ function createPane(body, ctx, daemon) {
       drawBanner();
       drawTranscript();
       drawDialogs();
+      drawRunning();
       drawQueue();
       drawComposer();
       selectionPopup.refresh();
@@ -1215,6 +1254,7 @@ function createPane(body, ctx, daemon) {
       destroy() {
         closed = true;
         unsubscribe();
+        if (runningTimer) clearInterval(runningTimer);
         ctx.headActions.replaceChildren();
         resizes.disconnect();
         composer.destroy();

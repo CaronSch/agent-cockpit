@@ -18,7 +18,7 @@ describe('a session goes to sleep', () => {
     assert.equal(sleepsNow({ meta: meta('ready'), transcript, usedAt: 100 }, 1100, 1000), true);
   });
 
-  test('never while a turn runs, it asks its user something, or messages wait', () => {
+  test('never while a turn runs, it asks its user something, messages wait or a job runs', () => {
     const working = createTranscript();
     feed(working, { type: 'agent_start' });
     assert.equal(sleepsNow({ meta: meta('ready'), transcript: working, usedAt: 0 }, 1e9, 1000), false);
@@ -31,6 +31,10 @@ describe('a session goes to sleep', () => {
     feed(queued, { type: 'queue_update', steering: ['also this'], followUp: [] });
     assert.equal(queued.queue.steering.length, 1);
     assert.equal(sleepsNow({ meta: meta('ready'), transcript: queued, usedAt: 0 }, 1e9, 1000), false);
+
+    const job = createTranscript();
+    feed(job, { type: 'message_end', messageId: 'r', message: { role: 'toolResult', toolCallId: 'c', toolName: 'bash', content: [], details: { async: { state: 'running', jobId: 'bg_1', type: 'bash' } } } });
+    assert.equal(sleepsNow({ meta: meta('ready'), transcript: job, usedAt: 0 }, 1e9, 1000), false, 'a background job runs');
   });
 
   test('only when it is up: one starting or already gone is left alone', () => {

@@ -33,6 +33,7 @@ import { getDaemon } from '../daemon/client.js';
 import { SORT_KEYS, directoryCounts, displayTitle, isSortKey, naturalDir, relativeTime, sortSessions } from '../sessions/order.js';
 import { STATE_LABELS, follow, followedName, isRunning, listConversations, noteEvent, runningState, showConversation } from '../sessions/running.js';
 import { sessionLinks } from '../sessions/links.js';
+import { runningWork } from '../omp/running-work.js';
 import { openContextMenu, opensContextMenu } from '../ui/context-menu.js';
 /** @import { WidgetContext } from './registry.js' */
 /** @import { DaemonClient } from '../daemon/client.js' */
@@ -204,6 +205,12 @@ function createSessionsWindow(body, ctx, daemon) {
     return f ? runningState(f, c.meta, isUnread(c)) : 'starting';
   }
 
+  /** How many shells and subagents an awake conversation has running (omp/running-work.js). @param {Listed} c */
+  function workOf(c) {
+    const f = c.meta ? followed.get(c.meta.id)?.followed : null;
+    return f ? runningWork(f.transcript).length : 0;
+  }
+
   /** The row's conversation, as last drawn. @param {HTMLElement} row */
   const conversationAt = (row) => shown.get(row.dataset.key ?? '') ?? null;
 
@@ -331,6 +338,8 @@ function createSessionsWindow(body, ctx, daemon) {
     const facts = [shortDir(c.cwd), relativeTime(c.modifiedAt, now), ...(c.prompts ? [`${c.prompts} prompt${c.prompts === 1 ? '' : 's'}`] : [])];
     const main = rowText(nameOf(c) ?? 'New session', facts);
     if (state && SAID.has(state)) main.querySelector('.sessions-meta')?.append(' ', el('span', 'sessions-state', STATE_LABELS[state]));
+    const work = workOf(c);
+    if (work) main.querySelector('.sessions-meta')?.append(' ', el('span', 'sessions-state', `${work} running`));
     const actions = el('div', 'sessions-actions');
     if (archived) actions.append(button('sessions-action sessions-restore', 'Restore'));
     else if (c.file && sessions.some((s) => s.file === c.file)) actions.append(button('sessions-action sessions-archive', 'Archive'));
@@ -386,7 +395,7 @@ function createSessionsWindow(body, ctx, daemon) {
     const live = new Set();
     conversations.forEach((c, i) => {
       live.add(c.key);
-      const signature = JSON.stringify([nameOf(c), c.firstPrompt, c.cwd, c.prompts, relativeTime(c.modifiedAt, now), home, showArchived(), isUnread(c), stateOf(c), sessions.some((s) => s.file === c.file)]);
+      const signature = JSON.stringify([nameOf(c), c.firstPrompt, c.cwd, c.prompts, relativeTime(c.modifiedAt, now), home, showArchived(), isUnread(c), stateOf(c), workOf(c), sessions.some((s) => s.file === c.file)]);
       let entry = rows.get(c.key);
       if (!entry || entry.signature !== signature) {
         const node = renderRow(c, now);
