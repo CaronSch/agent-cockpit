@@ -1651,6 +1651,21 @@ test('while the agent works through its todo list, the toolbar shows how far it 
   await expect(progress, 'no turn, no progress').toBeHidden();
 });
 
+test('a shell the agent backgrounds shows as running until its result comes', async ({ page }) => {
+  await openWorkbench(page);
+  const pane = await startedPane(page);
+  const running = pane.locator('.omp-running');
+  await expect(running).toBeHidden();
+  await send(pane, 'background'); // a backgrounded `./deploy.sh`, its result 2 s later
+  await expect(pane.getByText('idle')).toBeVisible();
+  await expect(running, 'the job runs on after the turn').toBeVisible();
+  await expect(running.locator('.omp-chip')).toHaveCount(1);
+  await expect(running.locator('.omp-chip-kind')).toHaveText('shell');
+  await expect(running.locator('.omp-chip-text')).toHaveText('Deploying');
+  await expect(running.locator('.omp-chip-time')).toHaveText(/^\d+s$/);
+  await expect(running).toBeHidden();
+});
+
 /** The daemon's view of session `id`. @param {Page} page @param {string} id */
 const daemonSession = async (page, id) => (await (await page.request.get('/api/sessions')).json()).sessions.find((/** @type {any} */ s) => s.id === id);
 

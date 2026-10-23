@@ -4,9 +4,10 @@
  * wakes it (`omp --resume`), so asleep or awake is the daemon's business, not the user's.
  *
  * A session sleeps once it has been idle and unused for a while: no turn running, nothing
- * asked of its user, nothing queued, and no event or use (a window being read, see
- * `POST /api/sessions/:id/seen`) for `after` milliseconds. How it is doing is read from its
- * events as every window reads them (omp/transcript.js).
+ * asked of its user, nothing queued, no background job running (ending omp would end it),
+ * and no event or use (a window being read, see `POST /api/sessions/:id/seen`) for `after`
+ * milliseconds. How it is doing is read from its events as every window reads them
+ * (omp/transcript.js).
  */
 /** @import { SessionMeta } from './wire.js' */
 /** @import { Transcript } from '../src/omp/transcript.js' */
@@ -22,7 +23,7 @@ export const SLEEP_AFTER_MS = 30 * 60_000;
  */
 export function sleepsNow({ meta, transcript, usedAt }, now, after) {
   if (meta.status !== 'ready') return false;
-  const { streaming, dialogs, queue } = transcript;
-  if (streaming || dialogs.length > 0 || queue.steering.length + queue.followUp.length > 0) return false;
+  const { streaming, dialogs, queue, jobs } = transcript;
+  if (streaming || dialogs.length > 0 || jobs.size > 0 || queue.steering.length + queue.followUp.length > 0) return false;
   return now - usedAt >= after;
 }
